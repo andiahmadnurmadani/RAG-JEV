@@ -1,8 +1,9 @@
 """Answer generation and extraction (PRD 8.1, 12, 16, 17, 26, 35).
 
-The LLM is an OpenAI-compatible chat endpoint (``LLM_BASE_URL``), which covers the
-PRD's local Qwen3 4B server (vLLM/Ollama) as well as a hosted gateway — no code
-change between them.
+The LLM is any OpenAI-compatible chat endpoint (``LLM_BASE_URL``); the model name is read
+per call from settings (``llm.model`` — editable from the UI or env), so the same code covers
+a hosted gateway and the PRD's self-hosted target (a local vLLM/Ollama serving e.g. Qwen3 4B)
+with no change. ``Qwen/Qwen3-4B`` is only the code default, not a requirement.
 
 Anti-hallucination is enforced twice:
 

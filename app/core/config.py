@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     llm_provider: Literal["openai_compatible", "ollama", "mock"] = "mock"
     llm_base_url: str = "https://9router.yanto.top/v1"
     llm_api_key: str = ""
+    # "Qwen/Qwen3-4B" = default sisa target PRD (server lokal). Layanan tidak terikat model:
+    # nama model dibaca per panggilan, jadi setelan/env/UI bisa memakai model apa pun
+    # yang disediakan endpoint OpenAI-compatible.
     llm_model: str = "Qwen/Qwen3-4B"
     llm_timeout: float = 120.0
     llm_max_tokens: int = 1024

@@ -16,7 +16,8 @@ Client / KMS ──Bearer key / X-Tenant-Context──> RAG API
   extract/summary                       → reranker → threshold           knowledge_base_id, ...
                                                   │
                                                   ▼
-                                       Context (fenced, cited) → LLM (Qwen3 4B / OpenAI-compatible)
+                                Context (fenced, cited) → LLM (endpoint OpenAI-compatible;
+                                                          model dari setelan, bukan tetap)
                                                   │
                                                   ▼
                                           Answer + sources | No-answer

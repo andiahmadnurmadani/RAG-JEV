@@ -29,10 +29,16 @@ Reranker → threshold                                  (rag/reranker.py)
       ▼
 Context builder (fenced, cited, budgeted)              (rag/context.py)
       ▼
-LLM (Qwen3 4B / OpenAI-compatible)                     (rag/generator.py)
+LLM (endpoint OpenAI-compatible; model dari setelan)   (rag/generator.py)
       ▼
 Answer + sources, atau no-answer
 ```
+
+Model jawaban **tidak diikat ke satu model**: `rag/generator.py` memanggil endpoint chat-completions apa pun
+yang cocok OpenAI (`LLM_BASE_URL`), dan nama modelnya dibaca per panggilan dari setelan (`llm.model`, diubah
+dari layar Pengaturan atau env). `Qwen/Qwen3-4B` hanyalah nilai default di kode (sisa target PRD untuk server
+lokal vLLM/Ollama) - bukan model yang wajib dipakai. Rincian model yang sudah diuji: README, bagian
+"Model LLM".
 
 ## Modul dan tanggung jawab
 

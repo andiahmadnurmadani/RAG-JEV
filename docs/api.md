@@ -132,13 +132,17 @@ Menghapus titik Qdrant **dan** entri lexikal tenant tersebut. Dokumen tenant lai
               "retrieval_ms": 18.2, "rerank_ms": 240.7, "generation_ms": 1420.5},
     "route": {"capability": "knowledge_query", "source": "jev|heuristic|request_hint",
               "confidence": 0.82, "reason": "...", "stripped_tenant_fields": []},
-    "model": "Qwen/Qwen3-4B",
+    "model": "cmc/Qwen/Qwen3.6-Plus",
     "no_answer_reason": null,
     "computed": null,
     "table_note": null
   }
 }
 ```
+
+`model` adalah model yang **benar-benar** dipakai untuk jawaban itu (nilainya dibaca per panggilan dari
+setelan `llm.model`; contoh di atas berasal dari uji nyata). Layanan ini tidak mengikat diri ke satu model —
+`Qwen/Qwen3-4B` hanya default di kode kalau Anda menjalankan server lokal sendiri (vLLM/Ollama).
 
 ### Pertanyaan atas data spreadsheet (xlsx / csv / ods / tsv)
 
