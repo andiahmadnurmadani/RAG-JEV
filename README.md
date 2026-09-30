@@ -285,6 +285,11 @@ Aturan yang berlaku di layar ini:
 - Perubahan berlaku **tanpa restart**: berkas override dibaca per panggilan, klien LLM/Jev
   dibangun ulang saat disimpan. Yang diuji di layar (Uji koneksi / Uji Jev / Muat daftar model)
   memakai nilai yang sedang tampil, jadi URL + key + model bisa dicoba dulu sebelum disimpan.
+- Aset UI diberi cap versi (`app.js?v=...`, `style.css?v=...`) dan dikirim dengan
+  `Cache-Control: no-cache`, jadi setelah redeploy peramban selalu memakai HTML dan JS dari
+  versi yang sama. Peramban yang masih menyimpan halaman lama cukup **hard refresh sekali**
+  (Ctrl+Shift+R); sesudah itu tidak perlu lagi. Setiap kali `app.js`/`style.css` berubah,
+  naikkan cap versinya di `app/ui/index.html` (ada test yang menjaga).
 - URL probe divalidasi lebih dulu (`http`/`https`, tanpa kredensial di URL, tanpa alamat
   link-local/metadata, tanpa redirect) karena berasal dari operator.
 

@@ -13,7 +13,35 @@ def test_ui_is_served_without_credentials(client):
     assert "RAG Chat" in body
     # Assets are referenced relatively so the console also works behind a proxy that
     # mounts it somewhere other than /ui/.
-    assert 'src="app.js"' in body and 'href="style.css"' in body
+    assert re.search(r'src="app\.js\?v=[^"]+"', body), "app.js harus punya cap versi"
+    assert re.search(r'href="style\.css\?v=[^"]+"', body), "style.css harus punya cap versi"
+
+
+def test_static_assets_are_never_cached_hard(client):
+    """Berkas statis tanpa hash nama: peramban harus selalu boleh menanyakan versi baru.
+
+    Tanpa ini, setelah redeploy HTML baru dijalankan bersama app.js lama yang tersimpan
+    di cache, dan elemen yang sudah tidak ada membuat halaman melempar TypeError.
+    """
+    for path in ("/ui/", "/ui/app.js", "/ui/style.css"):
+        header = client.get(path).headers.get("cache-control", "")
+        assert "no-cache" in header, f"{path}: Cache-Control={header!r}"
+        assert "max-age" not in header, f"{path}: Cache-Control={header!r}"
+
+
+def test_every_element_the_script_touches_exists_in_the_page(client):
+    """Penjaga null: setiap id yang dicari app.js harus ada di HTML yang dikirim.
+
+    Bug nyata yang pernah terjadi: app.js masih menyentuh #view-settings/#btn-back
+    sementara HTML-nya sudah memakai dialog — halaman mati dengan TypeError.
+    """
+    page = client.get("/ui/").text
+    script = client.get("/ui/app.js").text
+    ids = set(re.findall(r'\$\("([^"]+)"\)', script))
+    ids |= set(re.findall(r'getElementById\("([^"]+)"\)', script))
+    assert ids, "tidak ada id yang terbaca dari app.js"
+    missing = sorted(node for node in ids if f'id="{node}"' not in page)
+    assert not missing, f"id ini dipakai app.js tapi tidak ada di index.html: {missing}"
 
 
 def test_ui_assets_are_reachable(client):

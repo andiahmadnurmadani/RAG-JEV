@@ -140,6 +140,14 @@ def create_app() -> FastAPI:
                 "metrics": snapshot().get("counters", {}),
             }
         )
+        # Aset statis (UI + situs dokumentasi) tidak punya hash isi di namanya, jadi
+        # max-age panjang membuat peramban menjalankan berkas lama setelah redeploy —
+        # HTML baru bertemu JS lama, tombol yang sudah tidak ada jadi null dan halaman
+        # melempar TypeError. "no-cache" tetap memakai ETag/Last-Modified: bila berkas
+        # tidak berubah jawabannya 304, jadi tidak ada tambahan lalu lintas yang berarti.
+        path = request.url.path
+        if path == "/ui" or path.startswith(("/ui/", "/guide/")):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
         return response
 
     @app.exception_handler(AppError)
