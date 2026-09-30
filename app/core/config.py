@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_prefix: str = "/api/v1"
     cors_origins_env: str = Field(default="", alias="CORS_ORIGINS")  # comma-separated; empty = same-origin only
+    # Situs dokumentasi (hasil `mkdocs build`) disajikan di /guide bila direktorinya ada.
+    # Lihat docs/deployment.md dan docs/reuse.md; kosongkan untuk mematikan mount ini.
+    docs_site_dir: str = str(BASE_DIR / "site")
 
     # ---- vector store (PRD 8.4, 9) ---------------------------------------
     qdrant_url: str = ""                     # empty => embedded/local mode

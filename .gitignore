@@ -27,3 +27,8 @@ ui_backup_0900/
 *.log
 *.bak
 tmp/
+
+# Hasil build situs dokumentasi (dibangun ulang oleh scripts/build_docs.sh).
+# Bila ingin menyajikan docs tanpa build di server, hapus baris ini —
+# tetapi ingat MkDocs menghasilkan ratusan berkas HTML.
+site/

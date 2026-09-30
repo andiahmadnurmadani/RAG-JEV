@@ -89,9 +89,15 @@ def create_app() -> FastAPI:
     if ui_dir.is_dir():
         app.mount("/ui", StaticFiles(directory=str(ui_dir), html=True), name="ui")
 
-        @app.get("/", include_in_schema=False)
-        def root() -> RedirectResponse:
-            return RedirectResponse(url="/ui/")
+    # Situs dokumentasi (MkDocs) — hanya dipasang bila hasil build-nya ada.
+    # Bangun dengan: bash scripts/build_docs.sh   → site/
+    docs_dir = Path(settings.docs_site_dir)
+    if settings.docs_site_dir and docs_dir.is_dir():
+        app.mount("/guide", StaticFiles(directory=str(docs_dir), html=True), name="guide")
+
+    @app.get("/", include_in_schema=False)
+    def root() -> RedirectResponse:
+        return RedirectResponse(url="/ui/")
 
     prefix = settings.api_prefix
     app.include_router(system.router, prefix=prefix)

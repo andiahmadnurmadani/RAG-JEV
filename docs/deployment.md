@@ -308,10 +308,48 @@ Poin penting di contoh nginx:
 - `client_max_body_size` **harus ≥ `MAX_UPLOAD_MB`**, kalau tidak unggah besar ditolak nginx (413) mendahului aplikasi.
 - `proxy_read_timeout` harus **> `LLM_TIMEOUT`** (default 120 s) supaya kueri panjang tidak diputus.
 - `proxy_buffering off` untuk `/api/` agar respons panjang/bertahap tidak ditahan buffer.
-- `/ui/` boleh dilayani lewat proxy yang sama (berkas statis, tanpa build step).
+- Blok `location /` meneruskan sisanya: konsol `/ui/`, dokumentasi `/guide/`, Swagger `/docs`, `/redoc`,
+  `/openapi.json` (aplikasi sudah menangani redirect `/` → `/ui/`, jadi tidak diduplikasi di nginx).
 
 Konfigurasi contoh ini juga belum dijalankan di server asli (tidak ada nginx di mesin penyusun
 dokumen); selalu `sudo nginx -t` sebelum `reload` dan sesuaikan `server_name`.
+
+---
+
+## 9d. Situs dokumentasi (disarankan)
+
+Dokumentasi teknis + referensi API disajikan **aplikasi yang sama** — tidak ada web server tambahan.
+
+```bash
+cd /opt/rag-service
+.venv/bin/python scripts/export_openapi.py        # spesifikasi dari kode (tanpa menjalankan server)
+.venv/bin/python scripts/gen_api_reference.py     # halaman referensi dari spesifikasi
+bash scripts/build_docs.sh                        # ekspor + generate + mkdocs build  -> site/
+```
+
+Lalu pastikan `.env` menunjuk hasil build:
+
+```dotenv
+DOCS_SITE_DIR=/opt/rag-service/site
+```
+
+Restart layanan, dan tiga permukaan dokumentasi langsung tersedia di host yang sama:
+
+| Alamat | Isi |
+|---|---|
+| `http://<host>:8000/guide/` | Situs dokumentasi (MkDocs Material, ada pencarian) |
+| `http://<host>:8000/docs` · `/redoc` | Swagger UI & ReDoc dari aplikasi (selalu aktif, tanpa build) |
+| `http://<host>:8000/openapi.json` | Spesifikasi OpenAPI (sumber klien/mock/uji kontrak) |
+
+Bila perkakas MkDocs tidak dipasang di venv layanan, `scripts/build_docs.sh` otomatis memakai
+`uvx --from mkdocs --with mkdocs-material` (lingkungan terpisah) sehingga dependensi runtime tetap ramping.
+Pasang permanen bila ingin: `uv pip install -r requirements-docs.txt`.
+
+Alternatif tanpa menyajikan dari aplikasi: salin folder `site/` ke nginx
+(`root /opt/rag-service/site;` pada `location /guide/`) atau hosting statis (GitHub Pages/Cloudflare Pages).
+
+Catatan: direktori `site/` di-*ignore* git (hasil build tidak dikomit). Setelah `git pull` di server,
+jalankan ulang `bash scripts/build_docs.sh` agar dokumentasi ikut diperbarui.
 
 ---
 
@@ -347,6 +385,7 @@ cd /opt/rag-service
 sudo systemctl stop rag-service
 git pull --ff-only
 uv pip install --python .venv/bin/python -r requirements.txt
+bash scripts/build_docs.sh                       # segarkan dokumentasi + referensi API (§9d)
 sudo systemctl start rag-service && curl -s localhost:8000/api/v1/ready
 ```
 
@@ -394,6 +433,7 @@ perubahannya disimpan ke `SETTINGS_OVERRIDE_PATH` dan berlaku setelah **restart*
 - [ ] `CORS_ORIGINS` dibiarkan kosong kecuali UI dibuka dari origin lain.
 - [ ] TLS aktif; `client_max_body_size` ≥ `MAX_UPLOAD_MB`; `proxy_read_timeout` > `LLM_TIMEOUT`.
 - [ ] `GET /api/v1/ready` → semua dependensi `ok` (atau `disabled` dengan alasan yang dipahami).
+- [ ] Dokumentasi hidup: `/guide/` (hasil `scripts/build_docs.sh`), `/docs` (Swagger), `/openapi.json`.
 - [ ] `scripts/deploy_smoke.py` lulus; backup terjadwal; `journalctl -u rag-service` bisa dibaca.
 - [ ] Diketahui batasannya: rate limit in-process (satu replika), Qdrant embedded satu proses,
       OCR gambar belum aktif.

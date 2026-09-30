@@ -479,3 +479,36 @@ bash scripts/make_legacy_samples.py            # (dari venv uji) buat berkas .do
 bash scripts/run_live.sh                       # layanan di :8099
 .venv/Scripts/python.exe scripts/verify_legacy_formats_live.py
 ```
+---
+
+## 9. Dokumentasi, Swagger, dan situs panduan
+
+Tiga permukaan dokumentasi disajikan oleh aplikasi yang sama, dan ketiganya diuji hidup
+(instans terpisah di port 8100, `DOCS_SITE_DIR=site`, penyimpanan terpisah, `EMBEDDING_PROVIDER=hash`):
+
+| Permukaan | Alamat | Hasil |
+|---|---|---|
+| Situs dokumentasi MkDocs Material | `/guide/` | 200 — judul `RAG Service — Knowledge API multi-tenant` |
+| Halaman integrasi | `/guide/integration/` | 200 — judul `Integrasi klien` |
+| Referensi API (hasil generate) | `/guide/api-reference/` | 200 — 16 operasi dari `openapi.json` |
+| Halaman deploy | `/guide/deployment/` | 200 |
+| Spesifikasi di dalam situs | `/guide/openapi.json` | 200 — memuat `paths` |
+| Indeks pencarian situs | `/guide/search/search_index.json` | 200 — pencarian klien berfungsi |
+| Swagger UI | `/docs` | 200 — judul `... - Swagger UI` |
+| ReDoc | `/redoc` | 200 |
+| Spesifikasi dari aplikasi | `/openapi.json` | 200 — 13 path, 11 skema, OpenAPI 3.1.0 |
+| Konsol chat | `/ui/` | 200 — judul `RAG Chat` |
+| Rute API tetap utuh | `/api/v1/health`, `/ready`, `/metrics` | 200 |
+| Redirect akar | `/` | 307 → `/ui/` |
+| Tidak bocor | `/.env`, `/.git/config`, `/guide/../.env` | 404 |
+
+Perintah mengulang:
+
+```bash
+bash scripts/build_docs.sh          # ekspor OpenAPI -> generate referensi -> mkdocs build --strict
+bash data/tmp/check_docs_serve2.sh  # periksa penyajian (port 8100, data terpisah)
+```
+
+Catatan kejujuran: `mkdocs build --strict` lulus tanpa peringatan; salinan `site/` **tidak** dikomit
+(`.gitignore`) sehingga harus dibangun di server. Yang belum diuji di sini: penyajian oleh nginx
+(tidak ada nginx di mesin ini) dan `git push` situs ke hosting statis.

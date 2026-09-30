@@ -1,0 +1,95 @@
+# Konfigurasi situs dokumentasi (MkDocs Material).
+#   bangun  : bash scripts/build_docs.sh          (atau: mkdocs build)
+#   pratinjau: mkdocs serve  → http://127.0.0.1:8001
+#   hasil   : site/  (dilayani aplikasi di /guide bila DOCS_SITE_DIR menunjuk ke sana)
+#
+# Berkas ini sengaja umum (tidak terikat pada proyek ini): untuk aplikasi lain,
+# salin mkdocs.yml + requirements-docs.txt + scripts/export_openapi.py +
+# scripts/gen_api_reference.py lalu ganti nav/site_name. Lihat docs/reuse.md.
+
+site_name: RAG Service — Knowledge API multi-tenant
+site_description: Dokumentasi layanan RAG (pengindeksan, retrieval hybrid, jawaban bersitasi, integrasi klien)
+site_url: https://example.com/
+repo_url: https://github.com/andiahmadnurmadani/RAG-JEV
+repo_name: RAG-JEV
+edit_uri: edit/main/docs/
+copyright: Dokumentasi RAG Service — dibuat dari sumber tunggal di docs/
+
+docs_dir: docs
+site_dir: site
+use_directory_urls: true
+
+theme:
+  name: material
+  language: id
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Mode gelap
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Mode terang
+
+plugins:
+  - search:
+      # Material/lunr hanya punya dukungan bahasa Inggris; isi dokumentasi tetap Bahasa Indonesia.
+      lang: [en]
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Beranda: index.md
+  - Mulai cepat: getting-started.md
+  - Integrasi klien: integration.md
+  - API:
+      - Kontrak & alur: api.md
+      - Referensi (dari OpenAPI): api-reference.md
+      - Swagger UI: swagger.md
+  - Desain:
+      - Arsitektur: architecture.md
+      - Pipeline RAG: rag-pipeline.md
+      - Isolasi tenant: tenant-isolation.md
+  - Operasi:
+      - Deploy & menjalankan: deployment.md
+      - Verifikasi: verification.md
+      - Evaluasi: evaluation.md
+  - Pakai ulang untuk aplikasi lain: reuse.md

@@ -39,6 +39,20 @@ Client / KMS ──Bearer key / X-Tenant-Context──> RAG API
 | Konsol chat | `GET /ui/` (Material 3, tanpa build step/CDN): upload knowledge terpisah, daftar dokumen, chat bersitasi, setelan Jev + retrieval |
 | **Analitik tabel** (xlsx/csv/ods) | Baris disimpan terstruktur (SQLite) lalu pertanyaan agregat ("paling laku", "total") **dihitung kode**, bukan ditebak LLM. Bukti live: xlsx 40 baris → "Ayam Geprek 184" dan "Rp 14.830.000" (sama dengan hitungan `openpyxl`); kolom tak ada → ditolak jujur. Lihat `docs/verification.md` bagian 7 |
 
+## Dokumentasi
+
+Satu sumber di `docs/`, disajikan dalam tiga bentuk:
+
+| Bentuk | Alamat | Cara mengaktifkan |
+|---|---|---|
+| **Situs dokumentasi** (MkDocs Material) | `/guide/` | `bash scripts/build_docs.sh` → hasil di `site/` |
+| Swagger UI / ReDoc (bawaan FastAPI) | `/docs` · `/redoc` | selalu aktif |
+| Konsol chat | `/ui/` | selalu aktif |
+
+Referensi API **dihitung dari kode** (`docs/openapi.json` → `docs/api-reference.md`), jadi tidak bisa
+menyimpang dari implementasi. Perangkat dokumentasi ini sengaja generik supaya bisa dipakai ulang oleh
+aplikasi lain: `mkdocs.yml`, `requirements-docs.txt`, `scripts/{build_docs.sh,export_openapi.py,gen_api_reference.py}` — caranya di `docs/reuse.md`.
+
 ## Menjalankan
 
 > **Panduan operator lengkap** (pasang di server, systemd, nginx + TLS, backup, upgrade, rotasi kunci,
@@ -363,6 +377,7 @@ app/
 tests/      unit/ integration/ evaluation/
 docs/       api, architecture, rag-pipeline, tenant-isolation, evaluation, verification, deployment
 deploy/     rag-service.service (systemd) + nginx-rag.conf (reverse proxy + TLS)
+mkdocs.yml  + requirements-docs.txt  situs dokumentasi (build: bash scripts/build_docs.sh -> site/ disajikan di /guide)
 ```
 
 ## Batasan yang diketahui (jujur)
