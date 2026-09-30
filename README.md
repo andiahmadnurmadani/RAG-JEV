@@ -53,6 +53,13 @@ Referensi API **dihitung dari kode** (`docs/openapi.json` → `docs/api-referenc
 menyimpang dari implementasi. Perangkat dokumentasi ini sengaja generik supaya bisa dipakai ulang oleh
 aplikasi lain: `mkdocs.yml`, `requirements-docs.txt`, `scripts/{build_docs.sh,export_openapi.py,gen_api_reference.py}` — caranya di `docs/reuse.md`.
 
+Bangun situs + periksa penyajiannya (port terpisah, data terpisah):
+
+```bash
+bash scripts/build_docs.sh        # -> site/
+bash scripts/check_docs_serve.sh  # uji /guide, /docs, /redoc, /openapi.json, /ui
+```
+
 ## Menjalankan
 
 > **Panduan operator lengkap** (pasang di server, systemd, nginx + TLS, backup, upgrade, rotasi kunci,

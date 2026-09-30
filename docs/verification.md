@@ -506,7 +506,7 @@ Perintah mengulang:
 
 ```bash
 bash scripts/build_docs.sh          # ekspor OpenAPI -> generate referensi -> mkdocs build --strict
-bash data/tmp/check_docs_serve2.sh  # periksa penyajian (port 8100, data terpisah)
+bash scripts/check_docs_serve.sh    # periksa penyajian (port 8100, data terpisah, keluar != 0 bila gagal)
 ```
 
 Catatan kejujuran: `mkdocs build --strict` lulus tanpa peringatan; salinan `site/` **tidak** dikomit
