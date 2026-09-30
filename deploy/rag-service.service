@@ -1,0 +1,50 @@
+# Unit systemd untuk RAG Service (lihat docs/deployment.md §9).
+#
+# Pasang:
+#   sudo cp deploy/rag-service.service /etc/systemd/system/rag-service.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now rag-service
+#
+# Catatan EnvironmentFile: systemd membaca berkas ini sebagai daftar KEY=VALUE.
+# Jangan memakai `export` di dalamnya dan jangan memakai substitusi shell seperti $(...).
+# Untuk nilai panjang (mis. API_KEYS_JSON) tulis satu baris tanpa baris baru di tengah.
+
+[Unit]
+Description=RAG Service (FastAPI + Qdrant + hybrid retrieval + Jev)
+Documentation=file:/opt/rag-service/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rag
+Group=rag
+WorkingDirectory=/opt/rag-service
+EnvironmentFile=/opt/rag-service/.env
+
+# host 0.0.0.0 dan port diambil dari APP_PORT (.env)
+ExecStart=/opt/rag-service/.venv/bin/python -m app.main
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# --- observability ---------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rag-service
+
+# --- pengerasan ------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+ReadWritePaths=/opt/rag-service/data /opt/rag-service/logs
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

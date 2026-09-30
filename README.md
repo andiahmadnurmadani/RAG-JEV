@@ -41,6 +41,9 @@ Client / KMS ──Bearer key / X-Tenant-Context──> RAG API
 
 ## Menjalankan
 
+> **Panduan operator lengkap** (pasang di server, systemd, nginx + TLS, backup, upgrade, rotasi kunci,
+> troubleshooting, checklist go-live): **`docs/deployment.md`**. Ringkasnya ada di bawah ini.
+
 ### 1. Tanpa model (paling cepat — untuk uji API)
 
 ```bash
@@ -358,7 +361,8 @@ app/
   jev/      policies (capability), router, tools (MCP JSON-RPC)
   workers/  indexing (queue + pipeline + job store)
 tests/      unit/ integration/ evaluation/
-docs/       api, architecture, rag-pipeline, tenant-isolation, evaluation
+docs/       api, architecture, rag-pipeline, tenant-isolation, evaluation, verification, deployment
+deploy/     rag-service.service (systemd) + nginx-rag.conf (reverse proxy + TLS)
 ```
 
 ## Batasan yang diketahui (jujur)
