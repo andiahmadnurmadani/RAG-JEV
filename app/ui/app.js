@@ -1004,7 +1004,7 @@ async function loadApiKeys() {
   if (!credential()) {
     $("keys-rows").innerHTML = "";
     $("keys-empty").hidden = false;
-    $("keys-empty").textContent = "Masuk dengan kode akses lebih dulu.";
+    $("keys-empty").textContent = "Masuk dengan kode akses, atau tempel kunci API sekali di panel Koneksi.";
     return;
   }
   try {
@@ -1369,7 +1369,8 @@ async function boot() {
     } else if (gate && gate.enabled) {
       setConnection("warn", "butuh kode akses");
     } else {
-      setConnection("warn", "butuh API key");
+      setConnection("warn", "belum masuk");
+      note("conn-status", "warn", "Layanan ini belum memakai kode akses. Tempel <strong>kunci API</strong> sekali di panel Koneksi (di server: kunci bootstrap pada berkas <span class=\"mono\">data/bootstrap_admin_key.json</span>), lalu pasang kode akses di panel <strong>Akses &amp; Sesi</strong> supaya tidak perlu menempel kunci lagi.");
     }
   } catch (err) {
     setConnection("err", "layanan tidak terjangkau");
