@@ -60,6 +60,8 @@ ENV QDRANT_URL="" \
     TABLE_STORE_PATH=/data/tables.sqlite \
     SETTINGS_OVERRIDE_PATH=/data/settings.json \
     API_KEYS_PATH=/data/api_keys.json \
+    ACCESS_PATH=/data/access.json \
+    SESSIONS_PATH=/data/sessions.json \
     DOCS_SITE_DIR=/srv/site
 
 VOLUME ["/data"]
