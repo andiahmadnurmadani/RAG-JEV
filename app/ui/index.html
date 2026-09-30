@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Chat</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3v5h5"/><path d="M19 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9l6 6v11a1 1 0 0 1-1 1z"/>
+  </symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+  </symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+  </symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 2.6 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9.5 4.1a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21.4 11a2 2 0 1 1 0 4z"/>
+  </symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+  </symbol>
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 18l-6-6 6-6"/>
+  </symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10.3 4.3 2.6 17.3A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.7L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m5 13 4 4L19 7"/>
+  </symbol>
+</svg>
+
+<div class="app">
+  <header class="bar">
+    <span class="brand"><span class="mark"><svg><use href="#i-doc"/></svg></span>RAG Chat</span>
+    <span class="spacer"></span>
+    <span class="pill" id="conn-pill" title="Status layanan"><span class="dot" id="conn-dot"></span><span id="conn-text">belum tersambung</span></span>
+    <button class="btn ghost icon" id="btn-settings" title="Pengaturan" aria-label="Pengaturan"><svg><use href="#i-gear"/></svg></button>
+  </header>
+
+  <!-- ================================ chat view =============================== -->
+  <main class="main view" id="view-chat">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Dokumen</h2>
+        <span class="count" id="docs-count">0</span>
+      </div>
+      <div class="panel-body">
+        <div class="drop" id="dropzone">
+          <div class="title">Tarik berkas ke sini</div>
+          <div class="sub" id="drop-hint">PDF, DOCX, TXT, MD, HTML, JSON</div>
+          <div class="actions">
+            <button class="btn sm" id="btn-browse" type="button"><svg><use href="#i-upload"/></svg>Pilih berkas</button>
+            <button class="btn sm" id="btn-paste" type="button">Tempel teks</button>
+            <button class="btn sm" id="btn-url" type="button">Dari URL</button>
+          </div>
+          <input type="file" id="file-input" multiple hidden>
+        </div>
+        <div id="upload-status"></div>
+        <ul class="doclist" id="docs-list"></ul>
+        <p class="empty" id="docs-empty">Belum ada dokumen pada knowledge base ini. Unggah satu untuk mulai bertanya.</p>
+        <div class="row" id="docs-tools" hidden style="margin-top:12px">
+          <button class="btn ghost sm" id="btn-select-none" type="button">Lepas semua centang</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="chat">
+      <div class="thread" id="thread">
+        <div class="thread-inner" id="thread-inner">
+          <p class="empty" id="thread-empty">Tanyakan apa pun tentang dokumen Anda. Jawaban hanya memakai isi dokumen, dan menolak bila tidak ada dasarnya.</p>
+        </div>
+      </div>
+      <form class="composer" id="form-ask" autocomplete="off">
+        <div class="composer-inner">
+          <div class="composer-field">
+            <textarea id="prompt" rows="1" placeholder="Tulis pertanyaan...  (Enter kirim, Shift+Enter baris baru)" aria-label="Pertanyaan"></textarea>
+            <button class="btn primary icon" id="btn-send" type="submit" aria-label="Kirim"><svg><use href="#i-send"/></svg></button>
+          </div>
+          <div class="composer-tools">
+            <span class="seg" role="group" aria-label="Mode">
+              <button type="button" id="btn-mode-answer" aria-pressed="true">Jawab</button>
+              <button type="button" id="btn-mode-search" aria-pressed="false">Cari saja</button>
+            </span>
+            <span class="scope-chip" id="scope-chip">semua dokumen</span>
+            <span class="spacer" style="flex:1"></span>
+            <span id="req-id"></span>
+          </div>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <!-- ============================= settings view ============================== -->
+  <main class="settings view" id="view-settings" hidden>
+    <div class="wrap">
+      <div class="lead">
+        <h1>Pengaturan</h1>
+        <p>Kunci API layanan ini disimpan di browser Anda. Konfigurasi model dan Jev memengaruhi seluruh layanan, jadi hanya kunci dengan izin admin yang dapat mengubahnya.</p>
+      </div>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Koneksi</h2>
+          <p>Titik akhir layanan RAG dan knowledge base yang Anda pakai di halaman chat.</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="set-base">Base URL API</label>
+            <input type="text" id="set-base" spellcheck="false">
+            <span class="help">Otomatis dari alamat halaman ini.</span>
+          </div>
+          <div class="field">
+            <label for="set-kb">Knowledge base</label>
+            <input type="text" id="set-kb" spellcheck="false" placeholder="kb_utama">
+            <span class="help">Pemisah dokumen dalam satu tenant.</span>
+          </div>
+          <div class="field">
+            <label for="set-key">API key layanan</label>
+            <input type="password" id="set-key" spellcheck="false" placeholder="tempel API key di sini">
+            <span class="help" id="set-key-help">Disimpan di localStorage browser, tidak pernah dikirim ke mana pun selain layanan ini.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn" id="btn-test-conn" type="button">Uji koneksi</button>
+          <button class="btn primary" id="btn-save-conn" type="button">Simpan</button>
+          <span id="conn-status"></span>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Model AI</h2>
+          <p>Generator jawaban. Ambil daftar model langsung dari endpoint, lalu pilih satu.</p>
+        </div>
+        <div id="llm-note"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="llm-provider">Provider</label>
+            <select id="llm-provider">
+              <option value="openai_compatible">openai_compatible</option>
+              <option value="mock">mock (tanpa model)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="llm-model">Model</label>
+            <input type="text" id="llm-model" spellcheck="false" placeholder="cmc/Qwen/Qwen3.6-Plus">
+          </div>
+          <div class="field">
+            <label for="llm-base">Base URL</label>
+            <input type="text" id="llm-base" spellcheck="false" placeholder="https://gateway.example/v1">
+          </div>
+          <div class="field">
+            <label for="llm-key">API key</label>
+            <input type="password" id="llm-key" spellcheck="false" placeholder="kosongkan bila tidak berubah">
+            <span class="help" id="llm-key-help">Kosong = kunci tersimpan dipakai apa adanya. Isi untuk menggantinya.</span>
+          </div>
+        </div>
+        <div class="model-picker" id="llm-picker" hidden>
+          <div class="head">
+            <span id="llm-picker-info">0 model</span>
+            <span class="spacer"></span>
+            <input type="text" class="srch" id="llm-model-filter" placeholder="Saring model..." aria-label="Saring model">
+            <button class="btn ghost sm" id="btn-llm-picker-close" type="button">Tutup</button>
+          </div>
+          <ul class="model-list" id="llm-models"></ul>
+        </div>
+        <div class="group-foot">
+          <button class="btn" id="btn-llm-models" type="button">Muat daftar model</button>
+          <button class="btn primary" id="btn-save-llm" type="button">Simpan model</button>
+          <span id="llm-status"></span>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Jev</h2>
+          <p>Lapisan keputusan: memilih capability, bukan menulis jawaban.</p>
+        </div>
+        <div id="jev-note"></div>
+        <div class="row" style="align-items:center">
+          <label class="switch" for="jev-enabled">
+            <input type="checkbox" id="jev-enabled">
+            <span class="track"></span>
+            <span>Aktifkan Jev</span>
+          </label>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="jev-provider">Transport</label>
+            <select id="jev-provider">
+              <option value="systemone">systemone (POST state + questions)</option>
+              <option value="mcp">mcp (tools/call)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="jev-model">Model</label>
+            <input type="text" id="jev-model" spellcheck="false" placeholder="oc/jev-1.13-free">
+          </div>
+          <div class="field" id="jev-url-field">
+            <label for="jev-url">Endpoint System One</label>
+            <input type="text" id="jev-url" spellcheck="false" placeholder="http://localhost:20128/v1/systemone">
+          </div>
+          <div class="field">
+            <label for="jev-key">API key</label>
+            <input type="password" id="jev-key" spellcheck="false" placeholder="kosongkan bila tidak berubah">
+            <span class="help" id="jev-key-help">Kosong = kunci tersimpan dipakai apa adanya.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn" id="btn-jev-probe" type="button">Uji Jev</button>
+          <button class="btn primary" id="btn-save-jev" type="button">Simpan Jev</button>
+          <span id="jev-status"></span>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Format berkas</h2>
+          <p>Jenis berkas yang boleh jadi knowledge, berlaku untuk semua tenant dan untuk halaman utama.</p>
+        </div>
+        <div id="fmt-note"></div>
+        <div id="fmt-groups"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="fmt-max">Batas ukuran berkas (MB)</label>
+            <input type="number" id="fmt-max" min="1" max="512" step="1" value="25">
+            <span class="help" id="fmt-max-help">Ditolak sebelum diunggah.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn" id="btn-fmt-all" type="button">Pilih semua yang tersedia</button>
+          <button class="btn primary" id="btn-save-fmt" type="button">Simpan format</button>
+          <span id="fmt-status"></span>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Retrieval</h2>
+          <p>Pilihan per permintaan dari browser ini; tidak mengubah setelan layanan.</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="r-topk">top_k</label>
+            <input type="number" id="r-topk" min="1" max="50" step="1">
+          </div>
+          <div class="field">
+            <label for="r-threshold">threshold</label>
+            <input type="number" id="r-threshold" min="0" max="1" step="0.05">
+          </div>
+          <div class="field">
+            <label for="r-route">Keputusan Jev</label>
+            <select id="r-route">
+              <option value="">otomatis (dari Jev)</option>
+              <option value="knowledge_query">knowledge_query</option>
+              <option value="knowledge_search">knowledge_search</option>
+              <option value="knowledge_summary">knowledge_summary</option>
+              <option value="knowledge_extract">knowledge_extract</option>
+            </select>
+            <span class="help">Memaksa capability untuk permintaan berikutnya.</span>
+          </div>
+        </div>
+        <div class="row">
+          <label class="switch" for="r-strict"><input type="checkbox" id="r-strict"><span class="track"></span><span>strict grounding</span></label>
+          <label class="switch" for="r-hybrid"><input type="checkbox" id="r-hybrid"><span class="track"></span><span>hybrid (BM25 + vektor)</span></label>
+          <label class="switch" for="r-reranker"><input type="checkbox" id="r-reranker"><span class="track"></span><span>reranker</span></label>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-retr" type="button">Simpan pilihan</button>
+          <span id="retr-status"></span>
+        </div>
+      </section>
+
+      <div class="group-foot">
+        <button class="btn" id="btn-back" type="button"><svg><use href="#i-back"/></svg>Kembali ke chat</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<dialog id="dlg-paste">
+  <form method="dialog" class="field" style="gap:12px;min-width:min(560px,86vw)">
+    <label for="paste-name">Nama dokumen</label>
+    <input type="text" id="paste-name" placeholder="SOP Cuti 2026">
+    <label for="paste-text">Isi teks</label>
+    <textarea id="paste-text" rows="9" placeholder="Tempel isi dokumen di sini"></textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" value="cancel" type="submit">Batal</button>
+      <button class="btn primary" id="paste-confirm" value="ok" type="submit">Indeks</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-url">
+  <form method="dialog" class="field" style="gap:12px;min-width:min(520px,86vw)">
+    <label for="url-value">URL berkas</label>
+    <input type="text" id="url-value" spellcheck="false" placeholder="https://contoh.id/dokumen.pdf">
+    <label for="url-name">Nama dokumen (opsional)</label>
+    <input type="text" id="url-name" placeholder="diambil dari nama berkas bila kosong">
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" value="cancel" type="submit">Batal</button>
+      <button class="btn primary" id="url-confirm" value="ok" type="submit">Indeks</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

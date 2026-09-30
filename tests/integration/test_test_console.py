@@ -1,0 +1,180 @@
+"""The bundled test console: served same-origin, no secrets inside, no CORS by default."""
+
+from __future__ import annotations
+
+import re
+
+
+def test_ui_is_served_without_credentials(client):
+    """The console itself is static; the API key is typed by the operator in the browser."""
+    response = client.get("/ui/")
+    assert response.status_code == 200
+    body = response.text
+    assert "RAG Chat" in body
+    # Assets are referenced relatively so the console also works behind a proxy that
+    # mounts it somewhere other than /ui/.
+    assert 'src="app.js"' in body and 'href="style.css"' in body
+
+
+def test_ui_assets_are_reachable(client):
+    assert client.get("/ui/app.js").status_code == 200
+    assert client.get("/ui/style.css").status_code == 200
+
+
+def test_root_redirects_to_the_console(client):
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code in (307, 308)
+    assert response.headers["location"] == "/ui/"
+
+
+def test_console_html_carries_no_credential(client):
+    """Nothing in the shipped HTML may look like a key or a tenant identifier."""
+    body = client.get("/ui/").text
+    for forbidden in ("live-key", "org_a", "org_b", "Bearer "):
+        assert forbidden not in body, forbidden
+
+
+def test_cors_is_closed_by_default(client):
+    response = client.get("/api/v1/health", headers={"Origin": "http://evil.example"})
+    assert "access-control-allow-origin" not in {key.lower() for key in response.headers}
+
+
+def test_console_uses_the_documented_json_contract_not_multipart(client):
+    """Uploads go as content_base64 JSON: /knowledge/index has no multipart variant, so a
+    FormData upload fails with 422 (which it did, until this test existed)."""
+    script = client.get("/ui/app.js").text
+    assert "content_base64" in script
+    assert "FormData" not in script
+
+
+def test_console_refuses_an_oversized_file_without_sending_it(client):
+    """The browser checks the published limit itself; the server check stays the backstop."""
+    script = client.get("/ui/app.js").text
+    assert "max_upload_mb" in script
+    assert "file.size > limit" in script
+    assert "melebihi batas" in script
+
+
+def test_upload_is_separate_from_the_prompt_composer(client):
+    """Knowledge upload has its own controls; the chat input only sends prompts."""
+    body = client.get("/ui/").text
+    for node in ("dropzone", "file-input", "btn-paste", "btn-url"):
+        assert 'id="' + node + '"' in body, node
+    for node in ("prompt", "btn-send", "thread-inner", "scope-chip"):
+        assert 'id="' + node + '"' in body, node
+    # the composer must not contain any file input
+    composer = body[body.index('class="composer"') :]
+    assert "file-input" not in composer
+
+
+def test_settings_expose_the_jev_route_and_retrieval_controls(client):
+    body = client.get("/ui/").text
+    assert 'id="r-route"' in body
+    assert "otomatis (dari Jev)" in body
+    assert 'id="r-strict"' in body and 'id="r-hybrid"' in body and 'id="r-reranker"' in body
+    script = client.get("/ui/app.js").text
+    assert "options.route" in script
+
+
+def test_the_main_page_stays_clean_and_configuration_lives_in_settings(client):
+    """The chat page holds upload, the document list and the prompt - nothing else.
+
+    Model/Jev configuration must not be reachable from the chat surface, otherwise the
+    operator sees two places that promise the same thing.
+    """
+    body = client.get("/ui/").text
+    chat = body[body.index('id="view-chat"') : body.index('id="view-settings"')]
+    for leaked in ("llm-model", "llm-base", "llm-key", "jev-url", "jev-model", "set-key"):
+        assert 'id="' + leaked + '"' not in chat, leaked
+
+    settings = body[body.index('id="view-settings"') :]
+    for node in ("set-key", "set-kb", "llm-base", "llm-model", "llm-provider", "jev-url", "jev-model", "jev-provider"):
+        assert 'id="' + node + '"' in settings, node
+    assert 'id="dropzone"' not in settings and 'id="prompt"' not in settings
+
+
+def test_settings_can_fetch_the_model_list_and_test_jev(client):
+    """A URL + key + model can be tried before it is saved: that is the whole ask."""
+    body = client.get("/ui/").text
+    assert 'id="btn-llm-models"' in body and "Muat daftar model" in body
+    assert 'id="llm-models"' in body and 'id="llm-model-filter"' in body
+    assert 'id="btn-jev-probe"' in body and "Uji Jev" in body
+
+    script = client.get("/ui/app.js").text
+    assert 'api("POST", "/settings/llm/models"' in script
+    assert 'api("POST", "/settings/jev/probe"' in script
+    assert 'api("PUT", "/settings"' in script
+    assert 'api("GET", "/settings"' in script
+
+
+def test_every_input_in_the_settings_screen_has_a_label(client):
+    """A settings screen nobody can navigate by keyboard is not finished."""
+    body = client.get("/ui/").text
+    settings = body[body.index('id="view-settings"') :]
+    labelled = set(re.findall(r'<label[^>]*for="([^"]+)"', settings))
+    tags = re.findall(r"<(?:input|select)\b[^>]*>", settings)
+    unlabelled = []
+    for tag in tags:
+        has_own_label = "aria-label" in tag or 'type="checkbox"' in tag  # switches carry their own text
+        node = re.search(r'id="([^"]+)"', tag)
+        if node and not has_own_label and node.group(1) not in labelled:
+            unlabelled.append(node.group(1))
+    assert not unlabelled, unlabelled
+
+
+def test_console_lists_documents_and_scopes_questions(client):
+    """The two controls the simple flow needs: a document list and a scoped question."""
+    script = client.get("/ui/app.js").text
+    assert '"/knowledge?limit=' in script          # list endpoint is called with a limit
+    assert "document_ids" in script                # scope is sent when documents are picked
+    assert "data-pick" in script                   # selection is per document row
+
+
+def test_console_never_sends_a_client_chosen_tenant(client):
+    """organization_id is the one field the UI must never put on the wire."""
+    script = client.get("/ui/app.js").text
+    assert "organization_id" not in script
+
+
+def test_console_calls_the_api_prefix_it_advertises(client):
+    """Every path in app.js is relative to /api/v1; dropping the prefix answered 404 for
+    every button (this actually happened: /health and /knowledge/index both 404'd)."""
+    script = client.get("/ui/app.js").text
+    assert 'location.origin + "/api/v1"' in script
+    paths = re.findall(r"api\(\"[A-Z]+\",\s*\"([^\"]+)\"", script)
+    assert paths, "no api() calls found - did the console stop calling the API?"
+    # A path that already carries the prefix would be requested as /api/v1/api/v1/...
+    assert all(not path.startswith("/api/") for path in paths), paths
+
+
+def test_the_main_page_and_the_format_control_never_overlap(client):
+    """Format berkas adalah kebijakan layanan: kontrolnya di Pengaturan, bukan di chat."""
+    body = client.get("/ui/").text
+    chat = body[body.index('id="view-chat"') : body.index('id="view-settings"')]
+    for leaked in ("fmt-groups", "fmt-max", "btn-save-fmt"):
+        assert 'id="' + leaked + '"' not in chat, leaked
+
+    settings = body[body.index('id="view-settings"') :]
+    for node in ("fmt-groups", "fmt-max", "btn-save-fmt", "btn-fmt-all", "fmt-note"):
+        assert 'id="' + node + '"' in settings, node
+    assert "Format berkas" in settings
+
+
+def test_the_format_control_is_wired_to_the_settings_api(client):
+    script = client.get("/ui/app.js").text
+    assert "renderFormats" in script and "saveFormats" in script
+    assert 'api("PUT", "/settings"' in script
+    # katalog datang dari server, tidak pernah ditulis ulang di klien
+    assert "sections.uploads" in script and "data.catalog" in script
+    # berkas berformat yang tidak diizinkan ditolak di browser, sebelum diunggah
+    assert "allowed_ext" in script and "tidak termasuk format yang diizinkan" in script
+    assert 'setAttribute("accept"' in script
+
+
+def test_the_format_list_shows_availability_and_never_offers_a_dead_switch(client):
+    script = client.get("/ui/app.js").text
+    # format tanpa dukungan di mesin ini: kotak dinonaktifkan dan alasannya ditampilkan
+    assert "disabled" in script and "row.note" in script
+    # batas ukuran ikut dikirim bersama daftar ekstensi
+    assert "max_upload_mb" in script
+
