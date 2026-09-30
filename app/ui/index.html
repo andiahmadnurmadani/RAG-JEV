@@ -33,6 +33,12 @@
   <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <path d="m5 13 4 4L19 7"/>
   </symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 6l12 12"/><path d="M18 6 6 18"/>
+  </symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2"/><path d="m17 6 2 2"/><path d="m14.5 8.5 2 2"/>
+  </symbol>
 </svg>
 
 <div class="app">
@@ -97,15 +103,26 @@
     </section>
   </main>
 
-  <!-- ============================= settings view ============================== -->
-  <main class="settings view" id="view-settings" hidden>
-    <div class="wrap">
+  <!-- ============================ settings dialog ============================= -->
+  <dialog id="dlg-settings" class="sheet" aria-labelledby="settings-title">
+    <div class="sheet-head">
       <div class="lead">
-        <h1>Pengaturan</h1>
-        <p>Kunci API layanan ini disimpan di browser Anda. Konfigurasi model dan Jev memengaruhi seluruh layanan, jadi hanya kunci dengan izin admin yang dapat mengubahnya.</p>
+        <h1 id="settings-title">Pengaturan</h1>
+        <p>Kunci API layanan ini disimpan di browser Anda. Model, Jev, dan format berkas berlaku untuk seluruh layanan, jadi hanya kunci berizin admin yang dapat membacanya.</p>
       </div>
-
-      <section class="group">
+      <button class="btn ghost icon" id="btn-settings-close" type="button" title="Tutup" aria-label="Tutup pengaturan"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="sheet-body">
+      <nav class="sheet-nav" id="settings-nav" aria-label="Bagian pengaturan">
+        <button type="button" data-panel="conn" aria-selected="true">Koneksi</button>
+        <button type="button" data-panel="keys" aria-selected="false"><svg><use href="#i-key"/></svg>Kunci API</button>
+        <button type="button" data-panel="llm" aria-selected="false">Model AI</button>
+        <button type="button" data-panel="jev" aria-selected="false">Jev</button>
+        <button type="button" data-panel="fmt" aria-selected="false">Format berkas</button>
+        <button type="button" data-panel="retr" aria-selected="false">Retrieval</button>
+      </nav>
+      <div class="sheet-panels" id="settings-panels">
+      <section class="group" data-panel="conn">
         <div class="group-head">
           <h2>Koneksi</h2>
           <p>Titik akhir layanan RAG dan knowledge base yang Anda pakai di halaman chat.</p>
@@ -134,7 +151,7 @@
         </div>
       </section>
 
-      <section class="group">
+      <section class="group" data-panel="llm" hidden>
         <div class="group-head">
           <h2>Model AI</h2>
           <p>Generator jawaban. Ambil daftar model langsung dari endpoint, lalu pilih satu.</p>
@@ -178,7 +195,7 @@
         </div>
       </section>
 
-      <section class="group">
+      <section class="group" data-panel="jev" hidden>
         <div class="group-head">
           <h2>Jev</h2>
           <p>Lapisan keputusan: memilih capability, bukan menulis jawaban.</p>
@@ -220,7 +237,7 @@
         </div>
       </section>
 
-      <section class="group">
+      <section class="group" data-panel="fmt" hidden>
         <div class="group-head">
           <h2>Format berkas</h2>
           <p>Jenis berkas yang boleh jadi knowledge, berlaku untuk semua tenant dan untuk halaman utama.</p>
@@ -241,7 +258,7 @@
         </div>
       </section>
 
-      <section class="group">
+      <section class="group" data-panel="retr" hidden>
         <div class="group-head">
           <h2>Retrieval</h2>
           <p>Pilihan per permintaan dari browser ini; tidak mengubah setelan layanan.</p>
@@ -278,11 +295,74 @@
         </div>
       </section>
 
-      <div class="group-foot">
-        <button class="btn" id="btn-back" type="button"><svg><use href="#i-back"/></svg>Kembali ke chat</button>
+      <section class="group" data-panel="keys" hidden>
+        <div class="group-head">
+          <h2>Kunci API</h2>
+          <p>Kunci untuk memanggil layanan ini. Nilainya hanya tampil sekali saat dibuat, setelah itu tersimpan sebagai hash.</p>
+        </div>
+        <div id="keys-note"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="key-label">Label</label>
+            <input type="text" id="key-label" spellcheck="false" placeholder="mis. Bot WhatsApp CS">
+            <span class="help">Untuk mengenali kunci ini di daftar.</span>
+          </div>
+          <div class="field">
+            <label for="key-expiry">Masa berlaku (hari)</label>
+            <input type="number" id="key-expiry" min="1" max="3650" step="1" placeholder="kosong = tanpa batas">
+            <span class="help">Setelah lewat, kunci berhenti berlaku sendiri.</span>
+          </div>
+        </div>
+        <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
+          <label class="switch" for="key-perm-read"><input type="checkbox" id="key-perm-read" checked disabled><span class="track"></span><span>read</span></label>
+          <label class="switch" for="key-perm-write"><input type="checkbox" id="key-perm-write" checked><span class="track"></span><span>write</span></label>
+          <label class="switch" for="key-perm-admin"><input type="checkbox" id="key-perm-admin"><span class="track"></span><span>admin</span></label>
+          <span class="help">read selalu ikut; admin hanya bila kunci ini memang dipakai mengurus layanan.</span>
+        </div>
+        <details class="adv">
+          <summary>Tenant kunci (opsional)</summary>
+          <div class="grid-3">
+            <div class="field">
+              <label for="key-org">organization_id</label>
+              <input type="text" id="key-org" spellcheck="false">
+            </div>
+            <div class="field">
+              <label for="key-user">user_id</label>
+              <input type="text" id="key-user" spellcheck="false">
+            </div>
+            <div class="field">
+              <label for="key-app">application_id</label>
+              <input type="text" id="key-app" spellcheck="false">
+            </div>
+          </div>
+          <span class="help" id="key-tenant-help">Kosong = ikut konteks kunci yang Anda pakai sekarang.</span>
+        </details>
+        <div class="key-result" id="key-result" hidden>
+          <label for="key-value">Kunci baru: tampil sekali</label>
+          <div class="row">
+            <input type="text" id="key-value" readonly spellcheck="false">
+            <button class="btn sm" id="btn-copy-key" type="button">Salin</button>
+          </div>
+          <span class="help" id="key-result-help">Simpan sekarang; setelah ditutup, nilainya tidak bisa ditampilkan lagi.</span>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-create-key" type="button">Buat kunci</button>
+          <button class="btn" id="btn-keys-refresh" type="button">Muat ulang daftar</button>
+          <span id="keys-status"></span>
+        </div>
+        <div class="key-list">
+          <table class="key-table">
+            <thead>
+              <tr><th>Label</th><th>Kunci</th><th>Tenant</th><th>Izin</th><th>Dibuat</th><th>Dipakai</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="keys-rows"></tbody>
+          </table>
+          <p class="empty" id="keys-empty">Belum ada kunci. Hanya kunci dari layar ini yang bisa dicabut; kunci API_KEYS_JSON diubah lewat env.</p>
+        </div>
+      </section>
       </div>
     </div>
-  </main>
+  </dialog>
 </div>
 
 <dialog id="dlg-paste">

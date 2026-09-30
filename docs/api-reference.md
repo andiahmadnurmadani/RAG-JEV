@@ -28,11 +28,14 @@ Untuk mencoba langsung dari browser: [Swagger UI](/docs) · [ReDoc](/redoc) · [
 | `POST` | `/api/v1/search` | Search |
 | `GET` | `/api/v1/settings` | Read Settings |
 | `PUT` | `/api/v1/settings` | Update Settings |
+| `GET` | `/api/v1/settings/api-keys` | List Api Keys |
+| `POST` | `/api/v1/settings/api-keys` | Create Api Key |
+| `DELETE` | `/api/v1/settings/api-keys/{key_id}` | Revoke Api Key |
 | `POST` | `/api/v1/settings/jev/probe` | Probe Jev |
 | `POST` | `/api/v1/settings/llm/models` | List Llm Models |
 | `GET` | `/api/v1/tables` | List Tables |
 
-Total: 16 operasi.
+Total: 19 operasi.
 
 ## Detail
 
@@ -365,6 +368,81 @@ Skema: `SettingsUpdateRequest`
 | 422 | Validation Error |
 
 
+## `/api/v1/settings/api-keys`
+
+### `GET /api/v1/settings/api-keys`
+
+**List Api Keys**
+
+Daftar kunci yang bisa memanggil layanan ini. Nilai kunci tidak pernah ikut.
+
+Tag: settings
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+### `POST /api/v1/settings/api-keys`
+
+**Create Api Key**
+
+Buat kunci baru. Nilai kunci dikembalikan **sekali** di sini dan tidak disimpan apa adanya.
+
+Tag: settings
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+Body `application/json`:
+
+Skema: `ApiKeyCreateRequest`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `label` | string | ya |  |
+| `permissions` | array<string> | null | — |  |
+| `organization_id` | string | null | — |  |
+| `user_id` | string | null | — |  |
+| `application_id` | string | null | — |  |
+| `expires_in_days` | integer | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/settings/api-keys/{key_id}`
+
+### `DELETE /api/v1/settings/api-keys/{key_id}`
+
+**Revoke Api Key**
+
+Cabut kunci dari registry. Kunci dari env ditolak di sini (dikelola lewat API_KEYS_JSON).
+
+Tag: settings
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `key_id` | path | string | ya |  |
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
 ## `/api/v1/settings/jev/probe`
 
 ### `POST /api/v1/settings/jev/probe`
@@ -450,6 +528,17 @@ Tag: query
 
 
 ## Skema
+
+### `ApiKeyCreateRequest`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `label` | string | ya |  |
+| `permissions` | array<string> | null | — |  |
+| `organization_id` | string | null | — |  |
+| `user_id` | string | null | — |  |
+| `application_id` | string | null | — |  |
+| `expires_in_days` | integer | null | — |  |
 
 ### `ExtractRequest`
 

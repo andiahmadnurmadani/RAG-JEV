@@ -59,6 +59,7 @@ ENV QDRANT_URL="" \
     JOB_STORE_PATH=/data/jobs.json \
     TABLE_STORE_PATH=/data/tables.sqlite \
     SETTINGS_OVERRIDE_PATH=/data/settings.json \
+    API_KEYS_PATH=/data/api_keys.json \
     DOCS_SITE_DIR=/srv/site
 
 VOLUME ["/data"]

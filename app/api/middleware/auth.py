@@ -60,7 +60,8 @@ def resolve_context(
         organization_id=str(context["organization_id"]),
         application_id=str(context["application_id"]),
         permissions=[str(p) for p in context.get("permissions") or []],
-        source="api_key",
+        source=str(context.get("source") or "api_key"),
+        key_id=context.get("key_id"),
     )
 
 

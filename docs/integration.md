@@ -38,6 +38,24 @@ X-Request-Id: <id-korelasi-opsional>     # dikembalikan apa adanya di header res
 Catatan penting: `GET /health`, `GET /ready`, dan `GET /metrics` **tidak** butuh kunci (untuk probe
 infrastruktur). Jangan taruh data sensitif di sana — memang tidak ada.
 
+### 2.1 Dari mana kunci datang
+
+| Sumber | Siapa yang membuat | Bisa dicabut sendiri |
+|---|---|---|
+| `API_KEYS_JSON` (env) | operator saat deploy | tidak — ubah env lalu deploy ulang |
+| Panel **Kunci API** di layar Pengaturan | kunci berizin `admin`, lewat `POST /settings/api-keys` | ya — `DELETE /settings/api-keys/{key_id}`, berlaku **segera** |
+
+Kunci buatan UI:
+
+- nilainya berupa `rag_...` dan **hanya dikembalikan sekali** di respons pembuatan; setelah itu
+  layanan hanya menyimpan `sha256`-nya, jadi kunci yang hilang harus dibuat ulang;
+- konteks tenant-nya **mewarisi konteks pembuat** (`organization_id`, `user_id`, `application_id`);
+  membuat kunci untuk tenant lain butuh kunci berizin `*`, kalau tidak dijawab `403`;
+- izin default-nya `read` + `write`; `admin` harus dipilih eksplisit (kunci seperti ini bisa
+  mengubah setelan layanan);
+- bisa diberi masa berlaku (`expires_in_days`), dan setelah lewat kunci langsung tidak berlaku;
+- yang dicabut tidak dihapus dari daftar — statusnya `revoked` supaya jejaknya tetap bisa diaudit.
+
 ## 3. Endpoint
 
 | Method | Path | Permission | Sifat | Keterangan |
@@ -54,6 +72,9 @@ infrastruktur). Jangan taruh data sensitif di sana — memang tidak ada.
 | GET/PUT | `/settings` | admin | sinkron | Setelan LLM/Jev/katalog format (kunci bersifat write-only) |
 | POST | `/settings/llm/models` | admin | sinkron | Daftar model dari endpoint LLM yang dikonfigurasi |
 | POST | `/settings/jev/probe` | admin | sinkron | Uji koneksi Jev |
+| GET | `/settings/api-keys` | admin | sinkron | Daftar kunci (nilai kunci tidak pernah ikut) |
+| POST | `/settings/api-keys` | admin | sinkron | Buat kunci baru; nilainya hanya tampil di respons ini |
+| DELETE | `/settings/api-keys/{key_id}` | admin | sinkron | Cabut kunci buatan UI (kunci env ditolak `422`) |
 | GET | `/health` · `/ready` · `/metrics` | — | sinkron | Liveness, kesiapan per dependensi, metrik |
 
 ## 4. Contoh kode

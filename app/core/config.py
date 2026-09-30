@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     table_store_path: str = "data/tables.sqlite"
     table_analytics_enabled: bool = True
     settings_override_path: str = str(BASE_DIR / "data" / "settings.json")
+    # Registry kunci API yang dibuat dari layar Pengaturan (lihat app/core/api_keys.py).
+    # Berisi hash kunci, bukan kuncinya; mode 0600.
+    api_keys_path: str = str(BASE_DIR / "data" / "api_keys.json")
 
     # ---- service ---------------------------------------------------------
     app_env: str = "development"
@@ -197,7 +200,9 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         for path in (self.storage_dir, self.sparse_dir, self.qdrant_local_path):
             Path(path).mkdir(parents=True, exist_ok=True)
-        Path(self.registry_path).parent.mkdir(parents=True, exist_ok=True)
+        for file_path in (self.registry_path, self.job_store_path, self.settings_override_path, self.api_keys_path):
+            if file_path:
+                Path(file_path).parent.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

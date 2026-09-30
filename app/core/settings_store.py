@@ -22,16 +22,10 @@ The file holds real credentials, so it is written atomically with mode 0600.
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
-import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from app.core.logging import get_logger
-
-logger = get_logger(__name__)
+from app.core.jsonfile import read_json, write_json_atomic
 
 # section -> {field: (settings attribute, type)}
 SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
@@ -58,9 +52,6 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
     },
 }
 
-_LOCK = threading.Lock()
-
-
 def mask_secret(value: str) -> Optional[str]:
     """``sk-cc8bfe83...ab50`` -> ``sk-c...ab50``; short values -> ``****``."""
     if not value:
@@ -71,39 +62,12 @@ def mask_secret(value: str) -> Optional[str]:
 
 
 def read_overrides(path: Path) -> Dict[str, Dict[str, Any]]:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return {}
-    except OSError as exc:  # unreadable is a real problem, empty is not
-        logger.warning("settings override file unreadable (%s): %s", path, exc)
-        return {}
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        logger.warning("settings override file is not valid JSON (%s): %s", path, exc)
-        return {}
+    data = read_json(path)
     return data if isinstance(data, dict) else {}
 
 
 def write_overrides(path: Path, data: Dict[str, Dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    with _LOCK:
-        handle = tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", dir=str(path.parent), prefix=path.name + ".", delete=False
-        )
-        try:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        finally:
-            handle.close()
-        os.replace(handle.name, path)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:  # pragma: no cover - windows/acl edge
-            pass
+    write_json_atomic(path, data)
 
 
 def apply_overrides(settings: Any, overrides: Dict[str, Dict[str, Any]]) -> list[str]:

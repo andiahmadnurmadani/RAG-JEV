@@ -80,14 +80,15 @@ def test_the_main_page_stays_clean_and_configuration_lives_in_settings(client):
     """The chat page holds upload, the document list and the prompt - nothing else.
 
     Model/Jev configuration must not be reachable from the chat surface, otherwise the
-    operator sees two places that promise the same thing.
+    operator sees two places that promise the same thing. Since the settings screen became a
+    dialog, the boundary is the dialog element itself.
     """
     body = client.get("/ui/").text
-    chat = body[body.index('id="view-chat"') : body.index('id="view-settings"')]
-    for leaked in ("llm-model", "llm-base", "llm-key", "jev-url", "jev-model", "set-key"):
+    chat = body[body.index('id="view-chat"') : body.index('id="dlg-settings"')]
+    for leaked in ("llm-model", "llm-base", "llm-key", "jev-url", "jev-model", "set-key", "key-label"):
         assert 'id="' + leaked + '"' not in chat, leaked
 
-    settings = body[body.index('id="view-settings"') :]
+    settings = body[body.index('id="dlg-settings"') :]
     for node in ("set-key", "set-kb", "llm-base", "llm-model", "llm-provider", "jev-url", "jev-model", "jev-provider"):
         assert 'id="' + node + '"' in settings, node
     assert 'id="dropzone"' not in settings and 'id="prompt"' not in settings
@@ -110,7 +111,7 @@ def test_settings_can_fetch_the_model_list_and_test_jev(client):
 def test_every_input_in_the_settings_screen_has_a_label(client):
     """A settings screen nobody can navigate by keyboard is not finished."""
     body = client.get("/ui/").text
-    settings = body[body.index('id="view-settings"') :]
+    settings = body[body.index('id="dlg-settings"') :]
     labelled = set(re.findall(r'<label[^>]*for="([^"]+)"', settings))
     tags = re.findall(r"<(?:input|select)\b[^>]*>", settings)
     unlabelled = []
@@ -131,9 +132,23 @@ def test_console_lists_documents_and_scopes_questions(client):
 
 
 def test_console_never_sends_a_client_chosen_tenant(client):
-    """organization_id is the one field the UI must never put on the wire."""
+    """organization_id is the one field the UI must never put on the wire for data calls.
+
+    One deliberate exception: the API-key panel, where an admin chooses the tenant of the
+    *new* key via POST /settings/api-keys (the server refuses that unless the calling key
+    carries "*"). So the field may appear inside ``createKey`` and nowhere else.
+    """
     script = client.get("/ui/app.js").text
-    assert "organization_id" not in script
+    head, _, tail = script.partition("async function createKey")
+    inside, _, rest = tail.partition("async function revokeKey")
+    assert inside, "createKey tidak ditemukan di app.js"
+    # di dalam panel kunci, tenant kunci baru memang ditentukan admin
+    assert '"organization_id"' in inside
+    # di luar itu, field ini hanya boleh dibaca dari respons (entry.organization_id),
+    # tidak pernah ditulis sebagai nama field di sebuah body.
+    for outside in (head, rest):
+        assert "organization_id:" not in outside
+        assert '"organization_id"' not in outside
 
 
 def test_console_calls_the_api_prefix_it_advertises(client):
@@ -150,14 +165,55 @@ def test_console_calls_the_api_prefix_it_advertises(client):
 def test_the_main_page_and_the_format_control_never_overlap(client):
     """Format berkas adalah kebijakan layanan: kontrolnya di Pengaturan, bukan di chat."""
     body = client.get("/ui/").text
-    chat = body[body.index('id="view-chat"') : body.index('id="view-settings"')]
+    chat = body[body.index('id="view-chat"') : body.index('id="dlg-settings"')]
     for leaked in ("fmt-groups", "fmt-max", "btn-save-fmt"):
         assert 'id="' + leaked + '"' not in chat, leaked
 
-    settings = body[body.index('id="view-settings"') :]
+    settings = body[body.index('id="dlg-settings"') :]
     for node in ("fmt-groups", "fmt-max", "btn-save-fmt", "btn-fmt-all", "fmt-note"):
         assert 'id="' + node + '"' in settings, node
     assert "Format berkas" in settings
+
+
+# --------------------------------------------------------------------------- #
+# Pengaturan sebagai dialog + panel Kunci API
+# --------------------------------------------------------------------------- #
+def test_settings_is_one_model_dialog_with_panels(client):
+    """Satu tempat untuk semua konfigurasi, dibuka di atas chat - bukan halaman kedua."""
+    body = client.get("/ui/").text
+    assert '<dialog id="dlg-settings"' in body
+    assert 'id="view-settings"' not in body, "halaman Pengaturan lama harus sudah tidak ada"
+    for panel in ("conn", "keys", "llm", "jev", "fmt", "retr"):
+        assert 'data-panel="' + panel + '"' in body, panel
+    # hanya satu panel yang tampil; sisanya disembunyikan
+    assert body.count('data-panel="conn" hidden') == 0
+
+    script = client.get("/ui/app.js").text
+    assert "showModal" in script and "selectPanel" in script
+    for panel in ("conn", "keys", "llm", "jev", "fmt", "retr"):
+        assert panel in script
+
+
+def test_the_settings_dialog_manages_api_keys(client):
+    """Panel Kunci API: buat, lihat, cabut - dan nilainya tidak bisa dibaca ulang."""
+    body = client.get("/ui/").text
+    settings = body[body.index('id="dlg-settings"') :]
+    for node in ("key-label", "key-expiry", "key-perm-read", "key-perm-write", "key-perm-admin",
+                 "btn-create-key", "keys-rows", "key-value", "btn-copy-key", "btn-keys-refresh",
+                 "keys-note", "keys-status"):
+        assert 'id="' + node + '"' in settings, node
+    # kunci penuh hanya ditampilkan sekali, sebagai nilai yang tidak bisa diketik ulang
+    assert 'id="key-value" readonly' in settings
+    # "read" selalu ikut dan dikunci; admin harus dipilih sadar
+    assert 'id="key-perm-read" checked disabled' in settings
+    assert 'id="key-perm-admin"' in settings and "checked" not in settings.partition('id="key-perm-admin"')[2][:60]
+
+    script = client.get("/ui/app.js").text
+    assert 'api("GET", "/settings/api-keys")' in script
+    assert 'api("POST", "/settings/api-keys"' in script
+    assert 'api("DELETE", "/settings/api-keys/"' in script
+    # pencabutan dikonfirmasi dulu di browser, lalu diterapkan server
+    assert "window.confirm" in script
 
 
 def test_the_format_control_is_wired_to_the_settings_api(client):

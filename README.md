@@ -256,11 +256,15 @@ konfigurasi tinggal di layar Pengaturan.
 
 Enter mengirim, Shift+Enter baris baru. Tidak ada field konfigurasi di layar ini.
 
-### Layar 2 — Pengaturan (`#/settings`)
+### Layar 2 — Pengaturan (dialog, `#/settings`)
 
-| Bagian | Isi | Sifat |
+Pengaturan kini **popup** (dialog di atas halaman chat, tombol roda gigi atau alamat `#/settings`),
+dengan navigasi kiri; hanya satu panel tampil sekaligus supaya tidak perlu menggulir panjang.
+
+| Panel | Isi | Sifat |
 |---|---|---|
 | **Koneksi** | base URL (dari alamat halaman), API key layanan, knowledge base, tombol Uji koneksi | disimpan di `localStorage` browser |
+| **Kunci API** | daftar semua kunci yang berlaku (termasuk yang dari `API_KEYS_JSON`, ditandai *dari env*), plus pembuatan kunci baru: label, izin (`read` selalu ikut, `write`, `admin`), masa berlaku opsional, dan tenant opsional (hanya untuk kunci berizin `*`). Kunci baru tampil **sekali** dengan tombol Salin; baris kunci punya tombol **Cabut** | `GET/POST/DELETE /api/v1/settings/api-keys`, **wajib izin `admin`** |
 | **Model AI** | provider, base URL, API key, model + tombol **Muat daftar model** (daftar diambil langsung dari `GET {base_url}/models`, 400+ entri pada gateway uji) dengan saringan dan pemilihan klik | `PUT /api/v1/settings`, **wajib izin `admin`** |
 | **Jev** | saklar aktif, transport (`systemone` \| `mcp`), endpoint, model, API key, tombol Uji Jev (mengirim satu pertanyaan `noul` sungguhan dan menampilkan latensinya) | idem |
 | **Format berkas** | daftar centang jenis berkas per grup (Dokumen, Presentasi, Spreadsheet, Teks, Gambar) yang boleh jadi knowledge, plus batas ukuran berkas (MB). Format yang belum didukung mesin ini tampil nonaktif beserta alasannya (mis. `program tesseract belum terpasang`). Tombol *Pilih semua yang tersedia* dan *Simpan format* | `PUT /api/v1/settings`, **wajib izin `admin`** |
@@ -271,6 +275,10 @@ Aturan yang berlaku di layar ini:
 - Konfigurasi LLM/Jev bersifat **global** (mengubah generasi/routing semua tenant) sehingga
   hanya kunci berizin `admin` yang bisa membaca/mengubah. Kunci lain tetap bisa chat, dan
   layar Pengaturan menjelaskannya, bukan sekadar gagal diam-diam.
+- Kunci baru dari panel **Kunci API** disimpan sebagai `sha256` (plus awalan untuk ditampilkan,
+  berkas mode `0600`), konteks tenant-nya mewarisi pembuatnya, dan pencabutannya berlaku
+  **segera** — tanpa deploy ulang. Yang dicabut tetap tampil sebagai `revoked` supaya bisa diaudit.
+- Kunci yang sedang dipakai tidak bisa mencabut dirinya sendiri; buat kunci pengganti dulu.
 - API key model/Jev **write-only**: yang pernah dikirim tidak pernah dikembalikan lagi oleh
   server, hanya `api_key_set` + petunjuk tersamar (`sk-d...15e8`). Kosongkan field = pakai yang
   tersimpan; isi = ganti.
@@ -330,6 +338,11 @@ diperiksa.
 
 Kunci didefinisikan oleh env `API_KEYS_JSON` saat server dijalankan; ganti isinya untuk
 menambah/mengganti kunci. Kunci yang tidak dikenal dijawab `401 AUTH_INVALID` sebelum pekerjaan apa pun.
+
+Selain itu, kunci bisa dibuat **tanpa deploy ulang** dari panel **Kunci API** di layar Pengaturan
+(kunci `rag_...`, disimpan sebagai `sha256` di `API_KEYS_PATH`, default `data/api_keys.json`, mode
+0600). Nilai kuncinya hanya muncul sekali saat dibuat; pencabutannya berlaku segera. Kunci env tetap
+dikelola lewat env - panel itu menandainya *dari env* dan menolak mencabutnya dari UI.
 
 Catatan jujur: konsol mengirim API key layanan dari browser, jadi pakai untuk jaringan/kredensial uji,
 bukan dibuka ke publik. `CORS_ORIGINS` sengaja kosong (hanya same-origin). Berkas override

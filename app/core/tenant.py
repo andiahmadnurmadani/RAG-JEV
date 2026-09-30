@@ -8,7 +8,7 @@ optional, which is exactly what we do not want.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.core.errors import AppError
 
@@ -20,6 +20,9 @@ class TrustedContext:
     application_id: str
     permissions: List[str] = field(default_factory=list)
     source: str = "api_key"
+    # Diisi hanya bila kredensialnya kunci dari registry (bukan API_KEYS_JSON / token KMS).
+    # Dipakai untuk menolak permintaan yang mencabut kunci yang sedang dipakainya sendiri.
+    key_id: Optional[str] = None
 
     def has_permission(self, permission: str) -> bool:
         if "*" in self.permissions:

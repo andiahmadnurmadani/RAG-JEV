@@ -36,6 +36,7 @@ diserahkan ke pemilik infra (Cloudflare / nginx / Traefik), jadi langkah itu tid
 | `APP_ENV` | `production` |
 | `APP_PORT` | `8000` |
 | `API_KEYS_JSON` | **wajib diisi**. JSON map: `{"<kunci>":{"user_id":"u1","organization_id":"org1","application_id":"app1","permissions":["knowledge:read","knowledge:write","search:read","tables:read","analytics:read"]}}`. Kosong = semua permintaan API ditolak 401 (bukan akses terbuka). |
+| `API_KEYS_PATH` | `/data/api_keys.json` (sudah diset di image). Berkas kunci yang dibuat dari panel **Kunci API** di layar Pengaturan; isinya hash, bukan kunci. Biarkan di `/data` supaya bertahan saat redeploy. |
 | `QDRANT_URL` | kosongkan untuk mode embedded (1 replika); isi `http://<host>:6333` bila memakai Qdrant server |
 | `QDRANT_COLLECTION` | `knowledge_chunks` |
 | `EMBEDDING_PROVIDER` | `hash` (uji cepat), `http` (Ollama/gateway), `fastembed`/`sentence_transformers` (profil image penuh) |

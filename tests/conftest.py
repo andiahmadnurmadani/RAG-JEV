@@ -12,6 +12,7 @@ import pytest
 TENANT_A_KEY = "test-key-org-a"
 TENANT_B_KEY = "test-key-org-b"
 READ_ONLY_KEY = "test-key-readonly"
+SUPER_KEY = "test-key-super"          # izin "*": boleh membuat kunci untuk tenant lain
 KMS_SECRET = "unit-test-shared-secret"
 
 
@@ -20,7 +21,8 @@ def _configure_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "{"
         f'"{TENANT_A_KEY}": {{"user_id": "user_a", "organization_id": "org_a", "application_id": "app_a", "permissions": ["read", "write", "admin"]}},'
         f'"{TENANT_B_KEY}": {{"user_id": "user_b", "organization_id": "org_b", "application_id": "app_b", "permissions": ["read", "write"]}},'
-        f'"{READ_ONLY_KEY}": {{"user_id": "user_r", "organization_id": "org_a", "application_id": "app_ro", "permissions": ["read"]}}'
+        f'"{READ_ONLY_KEY}": {{"user_id": "user_r", "organization_id": "org_a", "application_id": "app_ro", "permissions": ["read"]}},'
+        f'"{SUPER_KEY}": {{"user_id": "user_s", "organization_id": "org_root", "application_id": "app_super", "permissions": ["*"]}}'
         "}"
     )
     env = {
@@ -48,6 +50,7 @@ def _configure_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "RELEVANCE_THRESHOLD": "0.0",
         "MAX_UPLOAD_MB": "8",
         "SETTINGS_OVERRIDE_PATH": str(tmp_path / "settings.json"),
+        "API_KEYS_PATH": str(tmp_path / "api_keys.json"),
         "INDEXING_WORKERS": "1",
     }
     for key, value in env.items():
@@ -57,11 +60,13 @@ def _configure_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture()
 def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _configure_env(tmp_path, monkeypatch)
+    from app.core.api_keys import reset_registries
     from app.core.config import reset_settings_cache, get_settings
     from app.qdrant.client import reset_client
 
     reset_settings_cache()
     reset_client()
+    reset_registries()
     from app.api.deps import set_services
 
     set_services(None)
@@ -69,6 +74,7 @@ def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     settings.ensure_dirs()
     yield settings
     reset_client()
+    reset_registries()
     set_services(None)
     reset_settings_cache()
 

@@ -17,11 +17,22 @@ Setiap respons memuat header `X-Request-Id` (juga muncul di log JSON dan di erro
 ## Autentikasi
 
 ```http
-Authorization: Bearer <API_KEY>          # dipetakan ke API_KEYS_JSON
+Authorization: Bearer <API_KEY>          # kunci dari API_KEYS_JSON atau dari layar Pengaturan
 X-Tenant-Context: <KMS HS256 token>      # alternatif; atau Bearer token bila REQUIRE_TENANT_CONTEXT_TOKEN=true
 ```
 
 Trusted context yang dihasilkan: `user_id`, `organization_id`, `application_id`, `permissions`.
+
+Ada **dua sumber kunci**, dan keduanya berlaku bersamaan:
+
+| Sumber | Dibuat oleh | Disimpan sebagai | Bisa dicabut dari UI |
+|---|---|---|---|
+| `API_KEYS_JSON` (env) | operator, saat deploy | env container | tidak (ubah env lalu deploy ulang) |
+| Registry (`API_KEYS_PATH`, default `data/api_keys.json`) | layar Pengaturan → panel **Kunci API** | `sha256` kunci + awalan tampilan, mode `0600` | ya (`DELETE /settings/api-keys/{key_id}`) |
+
+Kunci dari registry dibuat lewat `POST /settings/api-keys` (butuh permission `admin`) dan
+nilainya **hanya dikembalikan sekali** di respons pembuatan. Konteks tenant kunci baru mewarisi
+konteks pembuatnya; membuat kunci untuk tenant lain butuh kunci dengan permission `*`.
 
 - Endpoint baca (`/query`, `/search`, `/extract`, `GET /knowledge/{id}`) butuh permission `read`.
 - Endpoint tulis (`POST/PUT/DELETE /knowledge/...`) butuh `write`.
@@ -290,11 +301,20 @@ routing untuk semua tenant), jadi kunci read/write biasa dijawab `403 AUTH_FORBI
 | `PUT /settings` | body `{llm?: {...}, jev?: {...}, uploads?: {extensions?: [".pdf", ...], max_upload_mb?: 25}}`; field yang tidak dikirim tidak diubah, `""` = hapus, `applied` mengembalikan daftar field yang benar-benar tertulis |
 | `POST /settings/llm/models` | body `{base_url?, api_key?}` → `{base_url, count, latency_ms, models: [{id, owned_by}]}` dibaca dari `GET {base_url}/models` |
 | `POST /settings/jev/probe` | body `{provider?, url?, model?, api_key?}` → menjalankan satu pertanyaan `noul` sungguhan, balas `{model, latency_ms, answer: {type, ...}}` |
+| `GET /settings/api-keys` | `{keys: [{key_id, label, hint, source: "env"\|"registry", organization_id, user_id, application_id, permissions, created_at, created_by, expires_at, last_used_at, revoked_at, state: "active"\|"revoked"\|"expired", revocable}], active, max_active_keys, allowed_permissions, default_permissions, context}` — nilai kunci tidak pernah ikut |
+| `POST /settings/api-keys` | body `{label, permissions?: ["read"\|"write"\|"admin"\|"*"], organization_id?, user_id?, application_id?, expires_in_days?}` → `{key, entry, note}`. `key` **hanya muncul di respons ini**; yang tersimpan adalah `sha256`-nya |
+| `DELETE /settings/api-keys/{key_id}` | mencabut kunci registry (`state: "revoked"`). Kunci `API_KEYS_JSON` ditolak `422` (diubah lewat env); kunci yang sedang dipakai tidak bisa mencabut dirinya sendiri (`403`) |
 
 Catatan kontrak:
 
 - **API key tidak pernah dikembalikan.** `api_key_set` (bool) dan `api_key_hint` (mis. `sk-d...15e8`)
   saja. Body `PUT` tanpa `api_key` = kunci tersimpan dipakai apa adanya; `""` = kunci dihapus.
+- **Kunci registry tidak bisa dibaca ulang.** `GET /settings/api-keys` hanya memuat
+  `hint` (awalan + 4 karakter terakhir) dan tidak pernah `digest`. Konteks tenant kunci baru
+  mewarisi konteks pembuatnya; mengisi `organization_id`/`user_id`/`application_id` dengan nilai
+  lain butuh kunci berizin `*`, kalau tidak → `403` **sebelum** kunci dibuat.
+- Di layar Pengaturan, semua ini ada di panel **Kunci API** (dialog Pengaturan, bukan halaman
+  terpisah): daftar kunci + status, tombol buat, dan tombol cabut per baris.
 - `POST /settings/llm/models` dan `/settings/jev/probe` memakai nilai dari body bila ada, kalau
   tidak dari setelan efektif - jadi URL + key + model bisa diuji **sebelum** disimpan.
 - URL probe divalidasi lebih dulu (`validate_probe_url`): hanya `http`/`https`, tanpa kredensial

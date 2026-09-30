@@ -79,13 +79,27 @@ def issue_context_token(settings: Settings, payload: Dict[str, Any]) -> str:
 
 
 def resolve_api_key(settings: Settings, presented: str) -> Dict[str, Any]:
-    """Map a presented API key onto its trusted context (constant-time compare)."""
+    """Map a presented API key onto its trusted context (constant-time compare).
+
+    Two sources, one answer: keys declared in ``API_KEYS_JSON`` (deploy-time) and keys
+    created from the settings screen, whose registry stores only a hash of the key.
+    """
     if not presented:
         raise AppError("AUTH_INVALID", "Missing API key")
     for key, ctx in settings.api_keys.items():
         if constant_time_equals(key, presented):
-            return dict(ctx)
-    raise AppError("AUTH_INVALID", "Invalid API key")
+            out = dict(ctx)
+            out.setdefault("permissions", [])
+            out["key_id"] = None
+            out["source"] = "env"
+            return out
+
+    from app.core.api_keys import registry_for
+
+    context = registry_for(settings).resolve(presented)
+    if context is None:
+        raise AppError("AUTH_INVALID", "Invalid API key")
+    return context
 
 
 def require_permission(context: Dict[str, Any], permission: str) -> None:

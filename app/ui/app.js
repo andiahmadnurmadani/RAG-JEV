@@ -1,12 +1,14 @@
 /* RAG console. No build step, no CDN: plain DOM, one state object per surface.
-   Two surfaces live here: the chat (upload, list, prompt) and the settings screen
-   (connection, LLM, Jev, file formats, retrieval). Everything the browser can decide
-   alone is in localStorage; everything that changes the service goes through /settings. */
+   Two surfaces live here: the chat (upload, list, prompt) and the settings dialog
+   (connection, API keys, LLM, Jev, file formats, retrieval). Everything the browser can
+   decide alone is in localStorage; everything that changes the service goes through
+   /settings. A new API key is the one value the service shows exactly once. */
 
 "use strict";
 
 const KEY = "rag.console.v3";
 const DEFAULT_KB = "kb_chat";
+const PANELS = ["conn", "keys", "llm", "jev", "fmt", "retr"];
 
 const state = {
   base: "",
@@ -18,6 +20,8 @@ const state = {
   limits: { max_mb: null, allowed: [], allowed_ext: [] },
   catalog: [],
   models: [],
+  panel: "conn",
+  keyContext: null,
 };
 
 /* --------------------------------------------------------------- utilities */
@@ -144,10 +148,27 @@ function readConnInputs() {
 
 function showView(name) {
   const settings = name === "settings";
-  $("view-chat").hidden = settings;
-  $("view-settings").hidden = !settings;
-  if (settings) loadSettings();
-  location.hash = settings ? "#/settings" : "#/";
+  const sheet = $("dlg-settings");
+  if (settings) {
+    if (!sheet.open) sheet.showModal();
+    selectPanel(state.panel);
+    loadSettings();
+    loadApiKeys();
+  } else if (sheet.open) {
+    sheet.close();
+  }
+  if (currentView() !== name) location.hash = settings ? "#/settings" : "#/";
+}
+
+function selectPanel(name) {
+  state.panel = PANELS.indexOf(name) === -1 ? "conn" : name;
+  document.querySelectorAll("#settings-nav [data-panel]").forEach((button) => {
+    const on = button.dataset.panel === state.panel;
+    button.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  document.querySelectorAll("#settings-panels > [data-panel]").forEach((section) => {
+    section.hidden = section.dataset.panel !== state.panel;
+  });
 }
 
 function currentView() {
@@ -756,12 +777,174 @@ function setMode(mode) {
   savePrefs();
 }
 
+/* Kunci API: daftar, pembuatan, pencabutan. Nilai kunci hanya muncul di jawaban
+   POST /settings/api-keys; setelah itu yang tersimpan hanyalah hash-nya. */
+
+function shortTime(value) {
+  if (!value) return "-";
+  const at = new Date(value);
+  if (isNaN(at.getTime())) return String(value).replace("T", " ").slice(0, 16);
+  const pad = (number) => String(number).padStart(2, "0");
+  return at.getFullYear() + "-" + pad(at.getMonth() + 1) + "-" + pad(at.getDate()) +
+    " " + pad(at.getHours()) + ":" + pad(at.getMinutes());
+}
+
+function keyRow(entry) {
+  const tenant = [entry.organization_id, entry.user_id, entry.application_id]
+    .filter(Boolean).map(escapeHtml).join(" / ") || "-";
+  const perms = (entry.permissions || []).map((perm) => '<span class="tag">' + escapeHtml(perm) + "</span>").join(" ") || "-";
+  const label = entry.source === "env" ? "API_KEYS_JSON" : escapeHtml(entry.label);
+  const state2 = entry.state === "active"
+    ? '<span class="tag ok">aktif</span>'
+    : entry.state === "revoked"
+      ? '<span class="tag off">dicabut</span>'
+      : '<span class="tag warn">kedaluwarsa</span>';
+  const action = entry.source !== "registry"
+    ? '<span class="help">dari env</span>'
+    : entry.revocable
+      ? '<button class="btn ghost sm" type="button" data-revoke="' + escapeHtml(entry.key_id) + '">Cabut</button>'
+      : "";
+  return "<tr" + (entry.state === "active" ? "" : ' class="off"') + ">" +
+    "<td>" + label + (entry.expires_at ? '<span class="help"> berlaku sampai ' + escapeHtml(shortTime(entry.expires_at)) + "</span>" : "") + "</td>" +
+    '<td class="mono">' + escapeHtml(entry.hint || "-") + "</td>" +
+    "<td>" + tenant + "</td>" +
+    "<td>" + perms + "</td>" +
+    "<td>" + escapeHtml(shortTime(entry.created_at)) + "</td>" +
+    "<td>" + escapeHtml(shortTime(entry.last_used_at)) + "</td>" +
+    "<td>" + state2 + "</td>" +
+    "<td>" + action + "</td></tr>";
+}
+
+function renderKeys(data) {
+  const keys = data.keys || [];
+  const context = data.context || {};
+  state.keyContext = context;
+
+  $("keys-rows").innerHTML = keys.map(keyRow).join("");
+  $("keys-empty").hidden = keys.length > 0;
+  $("keys-rows").querySelectorAll("[data-revoke]").forEach((button) => {
+    button.addEventListener("click", () => revokeKey(button.dataset.revoke));
+  });
+
+  const canCross = (context.permissions || []).indexOf("*") !== -1;
+  ["key-org", "key-user", "key-app"].forEach((id) => { $(id).disabled = !canCross; });
+  $("key-tenant-help").textContent = canCross
+    ? "Kosong = ikut konteks kunci Anda. Terisi = kunci baru memakai konteks itu."
+    : "Kosong = ikut konteks kunci Anda (" + (context.organization_id || "-") + "). Mengisi field ini butuh izin '*'.";
+
+  const who = (context.organization_id || "-") + " / " + (context.user_id || "-");
+  note("keys-note", "", "Aktif <strong>" + (data.active || 0) + "</strong> dari batas " + (data.max_active_keys || 0) +
+    ". Kunci yang Anda pakai: <span class=\"mono\">" + escapeHtml(who) + "</span>" +
+    (context.key_id ? " (" + escapeHtml(context.key_id) + ")" : " (dari API_KEYS_JSON)"));
+}
+
+async function loadApiKeys() {
+  if (!state.key) {
+    $("keys-rows").innerHTML = "";
+    $("keys-empty").hidden = false;
+    $("keys-empty").textContent = "Isi API key di bagian Koneksi lebih dulu.";
+    return;
+  }
+  try {
+    renderKeys(await api("GET", "/settings/api-keys"));
+  } catch (err) {
+    const forbidden = err.code === "AUTH_FORBIDDEN";
+    $("keys-rows").innerHTML = "";
+    $("keys-empty").hidden = forbidden;
+    note("keys-note", forbidden ? "warn" : "err", forbidden
+      ? "Kunci ini tidak berizin <strong>admin</strong>, jadi daftar kunci tidak bisa dibaca atau diubah."
+      : escapeHtml(err.message || "gagal memuat daftar kunci") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+}
+
+async function createKey() {
+  const label = $("key-label").value.trim();
+  if (!label) {
+    note("keys-status", "err", "Label kunci wajib diisi supaya kunci ini bisa dikenali nanti.");
+    return;
+  }
+  const permissions = ["read"];
+  if ($("key-perm-write").checked) permissions.push("write");
+  if ($("key-perm-admin").checked) permissions.push("admin");
+  const payload = { label: label, permissions: permissions };
+  if ($("key-expiry").value.trim()) payload.expires_in_days = Number($("key-expiry").value);
+  const tenantFields = { "key-org": "organization_id", "key-user": "user_id", "key-app": "application_id" };
+  Object.keys(tenantFields).forEach((id) => {
+    const value = $(id).value.trim();
+    if (value) payload[tenantFields[id]] = value;
+  });
+
+  $("btn-create-key").disabled = true;
+  try {
+    const data = await api("POST", "/settings/api-keys", payload);
+    $("key-value").value = data.key;
+    $("key-result").hidden = false;
+    $("key-result-help").textContent = data.note || "Simpan sekarang; nilainya hanya tampil sekali.";
+    $("key-label").value = "";
+    $("key-expiry").value = "";
+    note("keys-status", "ok", "Kunci untuk <span class=\"mono\">" + escapeHtml(data.entry.organization_id) +
+      "</span> dibuat. Salin nilainya sebelum menutup layar.");
+    loadApiKeys();
+  } catch (err) {
+    note("keys-status", "err", escapeHtml(err.message || "gagal membuat kunci") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  } finally {
+    $("btn-create-key").disabled = false;
+  }
+}
+
+async function revokeKey(keyId) {
+  if (!keyId) return;
+  if (!window.confirm("Cabut kunci ini? Klien yang memakainya akan langsung ditolak.")) return;
+  try {
+    const data = await api("DELETE", "/settings/api-keys/" + encodeURIComponent(keyId));
+    note("keys-status", "ok", "Kunci <span class=\"mono\">" + escapeHtml(data.entry.label) + "</span> dicabut.");
+    loadApiKeys();
+  } catch (err) {
+    note("keys-status", "err", escapeHtml(err.message || "gagal mencabut kunci") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+}
+
+async function copyKey() {
+  const field = $("key-value");
+  if (!field.value) return;
+  field.select();
+  let copied = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(field.value);
+      copied = true;
+    }
+  } catch (err) {
+    copied = false;
+  }
+  if (!copied) {
+    try {
+      copied = document.execCommand("copy");
+    } catch (err) {
+      copied = false;
+    }
+  }
+  note("keys-status", copied ? "ok" : "warn", copied
+    ? "Kunci disalin ke papan klip."
+    : "Tidak bisa menyalin otomatis di sini; teks sudah dipilih, salin manual (Ctrl+C).");
+}
+
 /* ------------------------------------------------------------------ events */
 
 function wire() {
   $("btn-settings").addEventListener("click", () => showView(currentView() === "settings" ? "chat" : "settings"));
-  $("btn-back").addEventListener("click", () => showView("chat"));
+  $("btn-settings-close").addEventListener("click", () => showView("chat"));
+  $("dlg-settings").addEventListener("close", () => {
+    if (currentView() === "settings") location.hash = "#/";
+  });
+  document.querySelectorAll("#settings-nav [data-panel]").forEach((button) => {
+    button.addEventListener("click", () => selectPanel(button.dataset.panel));
+  });
   window.addEventListener("hashchange", () => showView(currentView()));
+
+  $("btn-create-key").addEventListener("click", createKey);
+  $("btn-keys-refresh").addEventListener("click", loadApiKeys);
+  $("btn-copy-key").addEventListener("click", copyKey);
 
   $("btn-test-conn").addEventListener("click", async () => {
     const ok = await checkConnection();

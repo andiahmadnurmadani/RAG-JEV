@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict
 from app.api.deps import Services, services_from_request
 from app.api.middleware.auth import TrustedContext, trusted_context
 from app.core import settings_store
+from app.core.api_keys import ALLOWED_PERMISSIONS, DEFAULT_PERMISSIONS, MAX_ACTIVE_KEYS, registry_for
 from app.core.errors import AppError, ok
 from app.core.logging import get_logger
 from app.jev.systemone import SystemOneClient
@@ -57,6 +58,25 @@ class JevProbeRequest(BaseModel):
     url: Optional[str] = None
     model: Optional[str] = None
     api_key: Optional[str] = None
+
+
+class ApiKeyCreateRequest(BaseModel):
+    """Permintaan membuat kunci baru.
+
+    ``organization_id``/``user_id``/``application_id`` di sini **bukan** tenant dari klien:
+    ini operator admin yang menentukan konteks kunci *baru* - dan hanya boleh berbeda dari
+    konteksnya sendiri bila kunci yang dipakainya berizin ``*``. Kosong = warisi konteks
+    pemanggil (default yang aman).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    permissions: Optional[List[str]] = None
+    organization_id: Optional[str] = None
+    user_id: Optional[str] = None
+    application_id: Optional[str] = None
+    expires_in_days: Optional[int] = None
 
 
 def _settings_path(services: Services) -> Path:
@@ -281,3 +301,143 @@ def probe_jev(
             "latency_ms": client.last_latency_ms,
         }
     )
+
+
+# --------------------------------------------------------------------------- #
+# Kunci API: dibuat dan dicabut dari layar Pengaturan
+# --------------------------------------------------------------------------- #
+def _env_hint(key: str) -> str:
+    """Potongan kunci dari env untuk dikenali di daftar (lebih pendek dari mask biasa)."""
+    if len(key) <= 8:
+        return f"{'*' * len(key)} ({len(key)} karakter)"
+    return f"{key[:4]}...{key[-2:]} ({len(key)} karakter)"
+
+
+def _env_key_entries(settings) -> List[Dict[str, Any]]:
+    """Kunci dari ``API_KEYS_JSON``: terlihat di daftar, tapi bukan milik layar ini."""
+    entries: List[Dict[str, Any]] = []
+    for key, ctx in settings.api_keys.items():
+        entries.append(
+            {
+                "key_id": None,
+                "label": "API_KEYS_JSON",
+                "hint": _env_hint(key),
+                "source": "env",
+                "revocable": False,
+                "state": "active",
+                "organization_id": ctx.get("organization_id"),
+                "user_id": ctx.get("user_id"),
+                "application_id": ctx.get("application_id"),
+                "permissions": [str(p) for p in (ctx.get("permissions") or [])],
+                "created_at": None,
+                "created_by": None,
+                "expires_at": None,
+                "last_used_at": None,
+            }
+        )
+    return entries
+
+
+def _tenant_fields(payload: ApiKeyCreateRequest, context: TrustedContext) -> Dict[str, str]:
+    """Konteks kunci baru: warisi pemanggil, atau ditentukan pemanggil bila ia berizin ``*``."""
+    inherited = {
+        "organization_id": context.organization_id,
+        "user_id": context.user_id,
+        "application_id": context.application_id,
+    }
+    given = {
+        field: str(getattr(payload, field)).strip()
+        for field in ("organization_id", "user_id", "application_id")
+        if str(getattr(payload, field) or "").strip()
+    }
+    if not given:
+        return inherited
+    if "*" not in context.permissions:
+        raise AppError(
+            "AUTH_FORBIDDEN",
+            "Membuat kunci untuk tenant lain butuh izin '*' pada kunci yang dipakai sekarang",
+            details={"fields": sorted(given), "organization_id": context.organization_id},
+        )
+    return {**inherited, **given}
+
+
+@router.get("/settings/api-keys")
+def list_api_keys(
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Daftar kunci yang bisa memanggil layanan ini. Nilai kunci tidak pernah ikut."""
+    _require_admin(context)
+    settings = services_from_request(request).settings
+    keys = _env_key_entries(settings) + registry_for(settings).public()
+    keys.sort(key=lambda item: (str(item.get("source")) != "registry", str(item.get("label") or "").lower()))
+    return ok(
+        {
+            "keys": keys,
+            "active": len([item for item in keys if item.get("state") == "active"]),
+            "max_active_keys": MAX_ACTIVE_KEYS,
+            "allowed_permissions": list(ALLOWED_PERMISSIONS),
+            "default_permissions": list(DEFAULT_PERMISSIONS),
+            "context": {**context.as_dict(), "key_id": context.key_id, "source": context.source},
+        }
+    )
+
+
+@router.post("/settings/api-keys")
+def create_api_key(
+    payload: ApiKeyCreateRequest,
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Buat kunci baru. Nilai kunci dikembalikan **sekali** di sini dan tidak disimpan apa adanya."""
+    _require_admin(context)
+    settings = services_from_request(request).settings
+    tenant = _tenant_fields(payload, context)
+    key, entry = registry_for(settings).create(
+        label=payload.label,
+        permissions=payload.permissions,
+        organization_id=tenant["organization_id"],
+        user_id=tenant["user_id"],
+        application_id=tenant["application_id"],
+        created_by=f"{context.user_id}@{context.organization_id}",
+        expires_in_days=payload.expires_in_days,
+    )
+    logger.info(
+        "kunci api dibuat key_id=%s organization_id=%s oleh=%s",
+        entry.get("key_id"),
+        tenant["organization_id"],
+        context.user_id,
+    )
+    return ok(
+        {
+            "key": key,
+            "entry": entry,
+            "note": "Kunci ini hanya ditampilkan sekali; simpan sebelum menutup layar.",
+        }
+    )
+
+
+@router.delete("/settings/api-keys/{key_id}")
+def revoke_api_key(
+    key_id: str,
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Cabut kunci dari registry. Kunci dari env ditolak di sini (dikelola lewat API_KEYS_JSON)."""
+    _require_admin(context)
+    settings = services_from_request(request).settings
+    if not str(key_id or "").startswith("key_"):
+        raise AppError(
+            "VALIDATION_ERROR",
+            "Hanya kunci buatan layar ini yang bisa dicabut; kunci API_KEYS_JSON diubah lewat env",
+            details={"key_id": key_id},
+        )
+    if context.key_id and str(key_id) == str(context.key_id):
+        raise AppError(
+            "AUTH_FORBIDDEN",
+            "Kunci yang sedang dipakai tidak bisa mencabut dirinya sendiri; buat kunci pengganti, pakai kunci itu, lalu cabut yang lama",
+            details={"key_id": key_id},
+        )
+    entry = registry_for(settings).revoke(key_id)
+    logger.info("kunci api dicabut key_id=%s oleh=%s", key_id, context.user_id)
+    return ok({"entry": entry})
