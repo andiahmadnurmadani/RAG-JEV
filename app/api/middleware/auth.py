@@ -62,6 +62,8 @@ def resolve_context(
         permissions=[str(p) for p in context.get("permissions") or []],
         source=str(context.get("source") or "api_key"),
         key_id=context.get("key_id"),
+        session_id=context.get("session_id"),
+        session_expires_at=context.get("session_expires_at"),
     )
 
 

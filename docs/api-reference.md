@@ -15,6 +15,11 @@ Untuk mencoba langsung dari browser: [Swagger UI](/docs) · [ReDoc](/redoc) · [
 
 | Metode | Path | Ringkasan |
 |---|---|---|
+| `GET` | `/api/v1/auth/gate` | Read Gate |
+| `POST` | `/api/v1/auth/login` | Login |
+| `POST` | `/api/v1/auth/logout` | Logout Post |
+| `DELETE` | `/api/v1/auth/session` | Logout |
+| `GET` | `/api/v1/auth/session` | Read Session |
 | `POST` | `/api/v1/extract` | Extract |
 | `GET` | `/api/v1/health` | Health |
 | `GET` | `/api/v1/knowledge` | List Knowledge |
@@ -28,6 +33,11 @@ Untuk mencoba langsung dari browser: [Swagger UI](/docs) · [ReDoc](/redoc) · [
 | `POST` | `/api/v1/search` | Search |
 | `GET` | `/api/v1/settings` | Read Settings |
 | `PUT` | `/api/v1/settings` | Update Settings |
+| `DELETE` | `/api/v1/settings/access` | Clear Access Code |
+| `GET` | `/api/v1/settings/access` | Read Access |
+| `PUT` | `/api/v1/settings/access` | Set Access Code |
+| `DELETE` | `/api/v1/settings/access/sessions` | Revoke All Sessions |
+| `DELETE` | `/api/v1/settings/access/sessions/{session_id}` | Revoke One Session |
 | `GET` | `/api/v1/settings/api-keys` | List Api Keys |
 | `POST` | `/api/v1/settings/api-keys` | Create Api Key |
 | `DELETE` | `/api/v1/settings/api-keys/{key_id}` | Revoke Api Key |
@@ -35,9 +45,110 @@ Untuk mencoba langsung dari browser: [Swagger UI](/docs) · [ReDoc](/redoc) · [
 | `POST` | `/api/v1/settings/llm/models` | List Llm Models |
 | `GET` | `/api/v1/tables` | List Tables |
 
-Total: 19 operasi.
+Total: 29 operasi.
 
 ## Detail
+
+## `/api/v1/auth/gate`
+
+### `GET /api/v1/auth/gate`
+
+**Read Gate**
+
+Apakah konsol terkunci dan berapa lama sesi berlaku. Tidak membocorkan kode.
+
+Tag: auth
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+
+
+## `/api/v1/auth/login`
+
+### `POST /api/v1/auth/login`
+
+**Login**
+
+Tukar kode akses dengan sesi. Kode salah ditolak sebelum sesi apa pun dibuat.
+
+Tag: auth
+
+Body `application/json`:
+
+Skema: `LoginRequest`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `code` | string | ya |  |
+| `remember` | boolean | — | (default: `False`) |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/auth/logout`
+
+### `POST /api/v1/auth/logout`
+
+**Logout Post**
+
+Sama seperti ``DELETE /auth/session``; disediakan untuk klien yang hanya bisa POST.
+
+Tag: auth
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/auth/session`
+
+### `DELETE /api/v1/auth/session`
+
+**Logout**
+
+Keluar: sesi yang sedang dipakai dicabut. Kunci API tidak bisa 'keluar' di sini.
+
+Tag: auth
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+### `GET /api/v1/auth/session`
+
+**Read Session**
+
+Siapa yang sedang masuk: kunci API, sesi konsol, atau token KMS.
+
+Tag: auth
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
 
 ## `/api/v1/extract`
 
@@ -368,6 +479,117 @@ Skema: `SettingsUpdateRequest`
 | 422 | Validation Error |
 
 
+## `/api/v1/settings/access`
+
+### `DELETE /api/v1/settings/access`
+
+**Clear Access Code**
+
+Matikan kode akses: konsol kembali hanya bisa dibuka dengan API key.
+
+Tag: settings
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+### `GET /api/v1/settings/access`
+
+**Read Access**
+
+Apakah konsol terkunci, sesi mana yang aktif, dan berapa lama sesi bertahan.
+
+Tag: settings
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+### `PUT /api/v1/settings/access`
+
+**Set Access Code**
+
+Pasang atau ganti kode akses konsol. Mengganti kode langsung mematikan semua sesi lama.
+
+Tag: settings
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+Body `application/json`:
+
+Skema: `AccessCodeRequest`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `code` | string | ya |  |
+| `current_code` | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/settings/access/sessions`
+
+### `DELETE /api/v1/settings/access/sessions`
+
+**Revoke All Sessions**
+
+Keluarkan semua sesi konsol, termasuk yang sekarang (kecuali diminta menyisakan satu).
+
+Tag: settings
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/settings/access/sessions/{session_id}`
+
+### `DELETE /api/v1/settings/access/sessions/{session_id}`
+
+**Revoke One Session**
+
+Keluarkan satu sesi tertentu (mis. perangkat yang hilang).
+
+Tag: settings
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `session_id` | path | string | ya |  |
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
 ## `/api/v1/settings/api-keys`
 
 ### `GET /api/v1/settings/api-keys`
@@ -529,6 +751,13 @@ Tag: query
 
 ## Skema
 
+### `AccessCodeRequest`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `code` | string | ya |  |
+| `current_code` | string | null | — |  |
+
 ### `ApiKeyCreateRequest`
 
 | Field | Tipe | Wajib | Keterangan |
@@ -594,6 +823,13 @@ Tag: query
 | `language` | string | null | — |  |
 | `metadata` | object | — |  |
 | `replace` | boolean | — | (default: `True`) |
+
+### `LoginRequest`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `code` | string | ya |  |
+| `remember` | boolean | — | (default: `False`) |
 
 ### `ModelsProbeRequest`
 

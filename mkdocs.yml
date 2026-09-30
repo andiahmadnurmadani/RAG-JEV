@@ -90,6 +90,7 @@ nav:
       - Isolasi tenant: tenant-isolation.md
   - Operasi:
       - Deploy & menjalankan: deployment.md
+      - Konsol, kode akses & sesi: console-access.md
       - Verifikasi: verification.md
       - Evaluasi: evaluation.md
   - Pakai ulang untuk aplikasi lain: reuse.md

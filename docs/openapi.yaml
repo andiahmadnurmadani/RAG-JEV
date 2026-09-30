@@ -5,6 +5,166 @@ info:
     Jev orchestrates capability only.
   version: 1.0.0
 paths:
+  /api/v1/auth/gate:
+    get:
+      tags:
+      - auth
+      summary: Read Gate
+      description: Apakah konsol terkunci dan berapa lama sesi berlaku. Tidak membocorkan kode.
+      operationId: read_gate_api_v1_auth_gate_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Read Gate Api V1 Auth Gate Get
+  /api/v1/auth/login:
+    post:
+      tags:
+      - auth
+      summary: Login
+      description: Tukar kode akses dengan sesi. Kode salah ditolak sebelum sesi apa pun dibuat.
+      operationId: login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Login Api V1 Auth Login Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/session:
+    get:
+      tags:
+      - auth
+      summary: Read Session
+      description: 'Siapa yang sedang masuk: kunci API, sesi konsol, atau token KMS.'
+      operationId: read_session_api_v1_auth_session_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Tenant-Context
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Tenant-Context
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Read Session Api V1 Auth Session Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - auth
+      summary: Logout
+      description: 'Keluar: sesi yang sedang dipakai dicabut. Kunci API tidak bisa ''keluar'' di sini.'
+      operationId: logout_api_v1_auth_session_delete
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Tenant-Context
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Tenant-Context
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Logout Api V1 Auth Session Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - auth
+      summary: Logout Post
+      description: Sama seperti ``DELETE /auth/session``; disediakan untuk klien yang hanya bisa POST.
+      operationId: logout_post_api_v1_auth_logout_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Tenant-Context
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Tenant-Context
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Logout Post Api V1 Auth Logout Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/health:
     get:
       tags:
@@ -786,8 +946,236 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/settings/access:
+    get:
+      tags:
+      - settings
+      summary: Read Access
+      description: Apakah konsol terkunci, sesi mana yang aktif, dan berapa lama sesi bertahan.
+      operationId: read_access_api_v1_settings_access_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Tenant-Context
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Tenant-Context
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Read Access Api V1 Settings Access Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - settings
+      summary: Set Access Code
+      description: Pasang atau ganti kode akses konsol. Mengganti kode langsung mematikan semua sesi lama.
+      operationId: set_access_code_api_v1_settings_access_put
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Tenant-Context
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Tenant-Context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessCodeRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Set Access Code Api V1 Settings Access Put
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - settings
+      summary: Clear Access Code
+      description: 'Matikan kode akses: konsol kembali hanya bisa dibuka dengan API key.'
+      operationId: clear_access_code_api_v1_settings_access_delete
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Tenant-Context
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Tenant-Context
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Clear Access Code Api V1 Settings Access Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/settings/access/sessions:
+    delete:
+      tags:
+      - settings
+      summary: Revoke All Sessions
+      description: Keluarkan semua sesi konsol, termasuk yang sekarang (kecuali diminta menyisakan satu).
+      operationId: revoke_all_sessions_api_v1_settings_access_sessions_delete
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Tenant-Context
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Tenant-Context
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Revoke All Sessions Api V1 Settings Access Sessions Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/settings/access/sessions/{session_id}:
+    delete:
+      tags:
+      - settings
+      summary: Revoke One Session
+      description: Keluarkan satu sesi tertentu (mis. perangkat yang hilang).
+      operationId: revoke_one_session_api_v1_settings_access_sessions__session_id__delete
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Authorization
+      - name: X-Tenant-Context
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: X-Tenant-Context
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Revoke One Session Api V1 Settings Access Sessions  Session Id  Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AccessCodeRequest:
+      properties:
+        code:
+          type: string
+          title: Code
+        current_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Code
+      additionalProperties: false
+      type: object
+      required:
+      - code
+      title: AccessCodeRequest
+      description: 'Ganti kode akses konsol.
+
+
+        ``current_code`` wajib bila pemanggil masuk sebagai **sesi** (kode lama membuktikan bahwa
+
+        yang mengganti memang pemiliknya, bukan sesi yang dibajak). Kunci API berizin ``admin``
+
+        boleh mengganti tanpa kode lama karena ia tidak berasal dari kode itu.'
     ApiKeyCreateRequest:
       properties:
         label:
@@ -1028,6 +1416,23 @@ components:
       - knowledge_base_id
       title: KnowledgeUpdateRequest
       description: PRD 22 PUT — same payload, always replacing existing vectors.
+    LoginRequest:
+      properties:
+        code:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Code
+        remember:
+          type: boolean
+          title: Remember
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - code
+      title: LoginRequest
+      description: 'Kode akses + pilihan "ingat saya". Tidak ada field tenant: konteks dibentuk server.'
     ModelsProbeRequest:
       properties:
         base_url:

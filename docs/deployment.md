@@ -188,8 +188,14 @@ Format `API_KEYS_JSON` = peta `kunci → konteks`:
   `API_KEYS_JSON="$(tr -d '\n' < /etc/rag-service/api_keys.json)"` (pola ini dipakai `scripts/run_live.sh`).
 - Selain kunci, tersedia jalur **tenant context bertanda tangan**: `KMS_SHARED_SECRET`,
   `TENANT_CONTEXT_HEADER` (default `X-Tenant-Context`), `REQUIRE_TENANT_CONTEXT_TOKEN`.
-- Kunci di header: `Authorization: Bearer <kunci>`. Tanpa kunci → `401 AUTH_INVALID`;
+- Kunci di header: `Authorization: Bearer *** Tanpa kunci → `401 AUTH_INVALID`;
   kunci tanpa izin → `403 AUTH_FORBIDDEN` (+ `details.permission`).
+- **Konsol tanpa menempel kunci:** pasang satu **kode akses** di panel
+  *Pengaturan → Akses & Sesi*; kode itu ditukar menjadi **sesi** (`Authorization: Bearer sess_…`)
+  dengan masa berlaku 12 jam, atau 7 hari bila memilih *Ingat saya*. Pada pemasangan baru,
+  layanan menerbitkan **satu kunci admin bootstrap** (berkas mode `0600`, jalur dicatat di log)
+  justru supaya langkah pertama ini bisa dilakukan. Rinciannya di
+  [Konsol, kode akses & sesi](console-access.md).
 
 ---
 

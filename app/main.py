@@ -22,7 +22,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.deps import build_services, services_from_request, set_services
-from app.api.routes import extract, knowledge, query, search, settings as settings_routes, system
+from app.api.routes import auth, extract, knowledge, query, search, settings as settings_routes, system
+from app.core.bootstrap import ensure_bootstrap_admin
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.logging import configure_logging, get_logger, request_log
@@ -40,6 +41,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     overlay = read_overrides(Path(settings.settings_override_path))
     if overlay:
         logger.info("runtime settings overrides applied: %s", ",".join(apply_overrides(settings, overlay)))
+    # Satu kunci admin pertama bila belum ada kunci sama sekali; tanpa ini gerbang kode akses
+    # tidak bisa dipasang pada pemasangan baru (lihat app/core/bootstrap.py).
+    ensure_bootstrap_admin(settings)
     services = build_services(settings)
     app.state.services = services
     set_services(services)
@@ -100,6 +104,7 @@ def create_app() -> FastAPI:
         return RedirectResponse(url="/ui/")
 
     prefix = settings.api_prefix
+    app.include_router(auth.router, prefix=prefix)
     app.include_router(system.router, prefix=prefix)
     app.include_router(knowledge.router, prefix=prefix)
     app.include_router(query.router, prefix=prefix)

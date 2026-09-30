@@ -512,3 +512,46 @@ bash scripts/check_docs_serve.sh    # periksa penyajian (port 8100, data terpisa
 Catatan kejujuran: `mkdocs build --strict` lulus tanpa peringatan; salinan `site/` **tidak** dikomit
 (`.gitignore`) sehingga harus dibangun di server. Yang belum diuji di sini: penyajian oleh nginx
 (tidak ada nginx di mesin ini) dan `git push` situs ke hosting statis.
+
+---
+
+## 10. Gerbang kode akses: diuji di browser, bukan hanya di unit test
+
+Keluhan yang melahirkan fitur ini adalah keluhan layar: menekan **Buat kunci** di konsol gagal
+dengan `AUTH_INVALID` karena konsol di peramban tidak punya API key untuk dikirim. Karena itu
+bukti yang dikumpulkan bukan hanya hasil `pytest`, melainkan percakapan peramban sungguhan
+(Chrome lewat CDP) dengan server hidup di `127.0.0.1:8099`:
+
+| Langkah | Hasil yang terlihat |
+|---|---|
+| Buka `/ui/` saat kode akses aktif | gerbang tampil (`display: flex`), panel konsol tersembunyi, isian tunggal + *Ingat saya* (`7 hari`) |
+| Kirim kode salah | `Kode akses salah Sisa percobaan: 7. (AUTH_INVALID)`; gerbang tetap menutup layar |
+| Kirim kode benar | gerbang hilang, konsol terbuka, status `Terhubung. Model: …`, tombol Keluar muncul |
+| Panel **Akses & Sesi** | status kode (`Kode aktif (potongan uji******26), diubah …`), `2 / 200` sesi aktif, tombol *Keluarkan* per sesi |
+| **Buat kunci** tanpa menempel API key | kunci baru dibuat dari sesi (`Buat kunci` → `Kunci untuk default dibuat`) — keluhan aslinya berhenti di sini |
+| Muat ulang halaman | konsol langsung terbuka (sesi *Ingat saya* masih berlaku), tanpa gerbang |
+| Tombol Keluar | gerbang kembali dengan pesan *Anda sudah keluar…*, `localStorage` sesi kosong |
+| Konsol galat peramban | **nol** `error`/`unhandledrejection` selama seluruh perjalanan |
+
+Yang diuji otomatis (`pytest`) menyertai perilaku itu — `tests/integration/test_access_gate.py`
+(23 test) dan `tests/integration/test_bootstrap_admin.py` (8 test):
+
+- kode hanya tersimpan sebagai digest (`data/access.json` tidak memuat kode apa adanya);
+- token sesi hanya sebagai hash, dan tidak pernah muncul di respons mana pun;
+- `generation` (digest kode) tidak pernah dikirim ke klien — nilainya cukup untuk menebak kode;
+- sesi diterima di header yang sama dengan API key; `remember` menambah masa berlaku 12 jam → 7 hari;
+- mengganti kode mematikan semua sesi lama (termasuk sesi pemanggil); mencabut sesi dicatat, bukan dihapus;
+- hanya izin `admin` boleh membaca/mengubah kode; kunci yang sedang dipakai tidak bisa mencabut dirinya;
+- kunci bootstrap hanya terbit bila belum ada kunci `admin`/`*`, ditulis mode `0600`, tidak masuk log,
+  dan tidak diterbitkan ulang setelah dicabut.
+
+Satu bug nyata yang tertangkap justru dari uji ini: `status()` semula memotong digest `generation`
+menjadi 12 karakter untuk ditampilkan, sementara sesi menyimpan digest penuh — akibatnya **semua
+sesi hidup dianggap "kode sudah diganti"** (`active_sessions: 0`) dan tombol *Keluarkan* hilang.
+Perbaikannya: `generation` penuh untuk perbandingan internal, `public_status()` untuk respons HTTP.
+
+Perintah mengulang:
+
+```bash
+.venv/bin/python -m pytest tests/integration/test_access_gate.py tests/integration/test_bootstrap_admin.py -q
+```

@@ -1,18 +1,25 @@
 /* RAG console. No build step, no CDN: plain DOM, one state object per surface.
-   Two surfaces live here: the chat (upload, list, prompt) and the settings dialog
-   (connection, API keys, LLM, Jev, file formats, retrieval). Everything the browser can
-   decide alone is in localStorage; everything that changes the service goes through
-   /settings. A new API key is the one value the service shows exactly once. */
+   Three surfaces live here: the gate (one access code -> a session), the chat (upload, list,
+   prompt) and the settings dialog (connection, access & sessions, API keys, LLM, Jev, file
+   formats, retrieval). Everything the browser can decide alone is in localStorage; everything
+   that changes the service goes through /settings. Two values are shown exactly once by the
+   service and never again: a new API key and a new session token. */
 
 "use strict";
 
 const KEY = "rag.console.v3";
+const SESSION_KEY = "rag.session.v1";
 const DEFAULT_KB = "kb_chat";
-const PANELS = ["conn", "keys", "llm", "jev", "fmt", "retr"];
+const PANELS = ["conn", "access", "keys", "llm", "jev", "fmt", "retr"];
 
 const state = {
   base: "",
   key: "",
+  session: "",
+  sessionExpiresAt: "",
+  currentSessionId: "",
+  gate: null,
+  sessions: [],
   kb: DEFAULT_KB,
   mode: "answer",
   picked: new Set(),
@@ -78,9 +85,27 @@ function slug(name, fallback) {
 
 /* -------------------------------------------------------------- transport */
 
+/* Kredensial yang dipakai sekarang: API key yang sedang tertulis di panel Koneksi, atau
+   sesi hasil kode akses. Dibaca saat permintaan dikirim - bukan saat disimpan - supaya key
+   yang baru ditempel langsung terpakai tanpa harus menekan Simpan dulu (penyebab keluhan
+   "Missing credentials" saat membuat kunci). */
+function credential() {
+  const field = $("set-key");
+  const typed = field ? String(field.value || "").trim() : "";
+  return typed || state.session || "";
+}
+
+function usingSession() {
+  const field = $("set-key");
+  const typed = field ? String(field.value || "").trim() : "";
+  return !typed && !!state.session;
+}
+
 async function api(method, path, body, extraHeaders) {
+  readConnInputs();
   const headers = Object.assign({ Accept: "application/json" }, extraHeaders || {});
-  if (state.key) headers.Authorization = "Bearer " + state.key;
+  const bearer = credential();
+  if (bearer) headers.Authorization = "Bearer " + bearer;
   const init = { method: method, headers: headers };
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -97,7 +122,13 @@ async function api(method, path, body, extraHeaders) {
   }
   if (!response.ok || payload.success === false) {
     const error = (payload && payload.error) || {};
-    throw { code: error.code || "HTTP_" + response.status, message: error.message || "Permintaan gagal" };
+    const code = error.code || "HTTP_" + response.status;
+    // Sesi yang sudah tidak berlaku: kunci layar, jangan biarkan operator menebak-nebak.
+    if (code === "AUTH_INVALID" && usingSession()) {
+      clearSession();
+      showGate("Sesi Anda sudah berakhir. Masukkan kode akses lagi.");
+    }
+    throw { code: code, message: error.message || "Permintaan gagal", details: error.details || {} };
   }
   return payload.data;
 }
@@ -127,6 +158,7 @@ function restore() {
   state.base = location.origin + "/api/v1";
   $("set-base").value = state.base;
   loadPrefs();
+  loadSession();
   $("set-kb").value = state.kb;
   $("set-key").value = state.key;
   $("r-topk").value = state.opts.top_k;
@@ -144,6 +176,125 @@ function readConnInputs() {
   state.kb = $("set-kb").value.trim() || DEFAULT_KB;
 }
 
+/* ------------------------------------------------------------------- gate */
+
+/* Sesi: hasil menukar kode akses. Disimpan di localStorage supaya "ingat saya" bertahan
+   sampai masa berlakunya habis; server tetap penentu terakhir (token bisa dikeluarkan). */
+
+function loadSession() {
+  let stored = null;
+  try {
+    stored = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+  } catch (err) {
+    stored = null;
+  }
+  if (!stored || typeof stored !== "object" || !stored.token) return false;
+  const expires = stored.expires_at ? new Date(stored.expires_at).getTime() : 0;
+  if (expires && expires <= Date.now()) {
+    localStorage.removeItem(SESSION_KEY);
+    return false;
+  }
+  state.session = String(stored.token);
+  state.sessionExpiresAt = stored.expires_at || "";
+  return true;
+}
+
+function saveSession(token, expiresAt, remember) {
+  state.session = token;
+  state.sessionExpiresAt = expiresAt || "";
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ token: token, expires_at: expiresAt, remember: !!remember }));
+  } catch (err) {
+    /* localStorage bisa diblokir (mode privat): sesi tetap hidup sampai tab ditutup. */
+  }
+  const button = $("btn-logout");
+  if (button) button.hidden = false;
+}
+
+function clearSession() {
+  state.session = "";
+  state.sessionExpiresAt = "";
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch (err) {
+    /* diabaikan */
+  }
+  const button = $("btn-logout");
+  if (button) button.hidden = true;
+}
+
+function showGate(reason) {
+  const gate = $("gate");
+  const shell = $("app-shell");
+  if (!gate || !shell) return;
+  shell.hidden = true;
+  gate.hidden = false;
+  if (reason) $("gate-sub").textContent = reason;
+  const code = $("gate-code");
+  if (code) {
+    code.value = "";
+    window.setTimeout(() => code.focus(), 30);
+  }
+}
+
+function hideGate() {
+  const gate = $("gate");
+  const shell = $("app-shell");
+  if (gate) gate.hidden = true;
+  if (shell) shell.hidden = false;
+}
+
+async function loadGate() {
+  try {
+    const data = await api("GET", "/auth/gate");
+    state.gate = data;
+    if (data.remember_lifetime) $("gate-remember-days").textContent = data.remember_lifetime.label;
+    if (data.default_lifetime) $("access-life-default").textContent = data.default_lifetime.label;
+    if (data.remember_lifetime) $("access-life-remember").textContent = data.remember_lifetime.label;
+    return data;
+  } catch (err) {
+    state.gate = null;
+    return null;
+  }
+}
+
+async function login(event) {
+  if (event) event.preventDefault();
+  const code = $("gate-code").value;
+  if (!code) {
+    note("gate-status", "err", "Kode akses masih kosong.");
+    return;
+  }
+  $("btn-gate-login").disabled = true;
+  try {
+    const data = await api("POST", "/auth/login", { code: code, remember: $("gate-remember").checked });
+    saveSession(data.token, data.expires_at, data.remember);
+    $("gate-code").value = "";
+    note("gate-status", "ok", "Sesi dibuka sampai <strong>" + escapeHtml(shortTime(data.expires_at)) + "</strong>.");
+    hideGate();
+    const ok = await checkConnection();
+    if (ok) loadDocs();
+  } catch (err) {
+    const left = err.details && typeof err.details.attempts_left === "number" ? err.details.attempts_left : null;
+    note("gate-status", "err", escapeHtml(err.message || "gagal masuk") +
+      (left !== null && err.code === "AUTH_INVALID" ? " Sisa percobaan: <strong>" + left + "</strong>." : "") +
+      " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  } finally {
+    $("btn-gate-login").disabled = false;
+  }
+}
+
+async function logout() {
+  try {
+    await api("DELETE", "/auth/session");
+  } catch (err) {
+    /* Sesi mungkin sudah tidak berlaku di server; tetap keluar di sisi peramban. */
+  }
+  clearSession();
+  showGate("Anda sudah keluar. Masukkan kode akses untuk masuk lagi.");
+  clearNote("gate-status");
+}
+
 /* ------------------------------------------------------------------- views */
 
 function showView(name) {
@@ -154,6 +305,7 @@ function showView(name) {
     selectPanel(state.panel);
     loadSettings();
     loadApiKeys();
+    loadGate();
   } else if (sheet.open) {
     sheet.close();
   }
@@ -169,6 +321,7 @@ function selectPanel(name) {
   document.querySelectorAll("#settings-panels > [data-panel]").forEach((section) => {
     section.hidden = section.dataset.panel !== state.panel;
   });
+  if (state.panel === "access") loadAccess();
 }
 
 function currentView() {
@@ -184,9 +337,9 @@ function setConnection(tone, text) {
 
 async function checkConnection() {
   readConnInputs();
-  if (!state.key) {
-    setConnection("warn", "butuh API key");
-    note("conn-status", "warn", "Isi API key dulu, lalu uji lagi.");
+  if (!credential()) {
+    setConnection("warn", "butuh kredensial");
+    note("conn-status", "warn", "Masukkan kode akses, atau isi API key di panel Koneksi ini.");
     return false;
   }
   setConnection("", "menghubungkan...");
@@ -215,7 +368,7 @@ async function checkConnection() {
 }
 
 async function loadDocs() {
-  if (!state.key) return;
+  if (!credential()) return;
   try {
     const data = await api("GET", "/knowledge?limit=200&knowledge_base_id=" + encodeURIComponent(state.kb));
     renderDocs(data.documents || []);
@@ -545,8 +698,8 @@ function modelOptionRow(model, current) {
 async function loadSettings() {
   readConnInputs();
   clearNote("llm-note");
-  if (!state.key) {
-    note("llm-note", "warn", "Isi <strong>API key layanan</strong> di bagian Koneksi lalu uji koneksi; setelah itu setelan model bisa dibaca.");
+  if (!credential()) {
+    note("llm-note", "warn", "Masuk dengan <strong>kode akses</strong>, atau isi <strong>API key layanan</strong> di panel Koneksi lalu uji koneksi; setelah itu setelan model bisa dibaca.");
     return;
   }
   try {
@@ -836,13 +989,22 @@ function renderKeys(data) {
   note("keys-note", "", "Aktif <strong>" + (data.active || 0) + "</strong> dari batas " + (data.max_active_keys || 0) +
     ". Kunci yang Anda pakai: <span class=\"mono\">" + escapeHtml(who) + "</span>" +
     (context.key_id ? " (" + escapeHtml(context.key_id) + ")" : " (dari API_KEYS_JSON)"));
+
+  // Kunci bootstrap adalah pintu masuk pertama; setelah kode akses dipasang, ia sebaiknya hilang.
+  const bootstrap = keys.filter((entry) => entry.state === "active" && String(entry.label || "").indexOf("bootstrap") !== -1)[0];
+  if (bootstrap) {
+    note("keys-bootstrap", "warn", "Masih ada <strong>kunci bootstrap</strong> (" + escapeHtml(bootstrap.hint || bootstrap.key_id) +
+      ") dari pemasangan pertama. Pasang kode akses di panel <strong>Akses &amp; Sesi</strong>, masuk dengan kode itu, lalu cabut kunci ini dan hapus berkasnya di server.");
+  } else {
+    clearNote("keys-bootstrap");
+  }
 }
 
 async function loadApiKeys() {
-  if (!state.key) {
+  if (!credential()) {
     $("keys-rows").innerHTML = "";
     $("keys-empty").hidden = false;
-    $("keys-empty").textContent = "Isi API key di bagian Koneksi lebih dulu.";
+    $("keys-empty").textContent = "Masuk dengan kode akses lebih dulu.";
     return;
   }
   try {
@@ -930,6 +1092,144 @@ async function copyKey() {
 }
 
 /* ------------------------------------------------------------------ events */
+
+function sessionRow(entry) {
+  const device = escapeHtml(entry.label || entry.client || "peramban");
+  const state2 = entry.stale_code
+    ? '<span class="tag warn">kode sudah diganti</span>'
+    : entry.state === "active"
+      ? '<span class="tag ok">aktif</span>'
+      : entry.state === "revoked"
+        ? '<span class="tag off">keluar</span>'
+        : '<span class="tag warn">kedaluwarsa</span>';
+  const action = entry.state === "active" && !entry.stale_code
+    ? '<button class="btn ghost sm" type="button" data-session="' + escapeHtml(entry.session_id) + '">Keluarkan</button>'
+    : '<span class="help">tidak aktif</span>';
+  return "<tr" + (entry.state === "active" && !entry.stale_code ? "" : ' class="off"') + ">" +
+    "<td>" + device + '<span class="help mono">' + escapeHtml(entry.hint || "-") + "</span></td>" +
+    "<td>" + escapeHtml(shortTime(entry.created_at)) + "</td>" +
+    "<td>" + escapeHtml(shortTime(entry.expires_at)) + "</td>" +
+    "<td>" + escapeHtml(shortTime(entry.last_used_at)) + "</td>" +
+    "<td>" + (entry.remember ? '<span class="tag">1 minggu</span>' : '<span class="tag">12 jam</span>') + "</td>" +
+    "<td>" + state2 + "</td>" +
+    "<td>" + action + "</td></tr>";
+}
+
+function renderAccess(data) {
+  const access = data.access || {};
+  state.sessions = data.sessions || [];
+  state.currentSessionId = ((data.context || {}).session_id) || "";
+  $("access-life-default").textContent = (data.default_lifetime || {}).label || "-";
+  $("access-life-remember").textContent = (data.remember_lifetime || {}).label || "-";
+  $("sessions-rows").innerHTML = state.sessions.map(sessionRow).join("");
+  $("sessions-empty").hidden = state.sessions.length > 0;
+  $("sessions-count").textContent = (data.active_sessions || 0) + " / " + (data.max_active_sessions || 0);
+  $("access-hint").innerHTML = access.enabled
+    ? "Kode aktif (potongan " + escapeHtml(access.hint || "-") + "), diubah " + escapeHtml(shortTime(access.set_at)) +
+      " oleh <span class=\"mono\">" + escapeHtml(access.updated_by || "-") + "</span>."
+    : "Belum ada kode akses: konsol masih bisa dibuka dengan API key.";
+  $("btn-clear-access").disabled = !access.enabled;
+  $("access-current").disabled = !access.enabled;
+  ["access-new", "access-repeat"].forEach((id) => { $(id).value = ""; });
+  $("sessions-rows").querySelectorAll("[data-session]").forEach((button) => {
+    button.addEventListener("click", () => revokeSession(button.dataset.session));
+  });
+  const source = (data.context || {}).source || "-";
+  note("access-note", "", "Anda masuk sebagai <span class=\"mono\">" + escapeHtml(source) + "</span>" +
+    (data.context && data.context.organization_id ? " untuk tenant <span class=\"mono\">" + escapeHtml(data.context.organization_id) + "</span>" : "") +
+    ". Kode akses berlaku untuk seluruh layanan; sesi bisa dikeluarkan satu per satu.");
+}
+
+async function loadAccess() {
+  try {
+    renderAccess(await api("GET", "/settings/access"));
+  } catch (err) {
+    const forbidden = err.code === "AUTH_FORBIDDEN";
+    note("access-note", forbidden ? "warn" : "err", forbidden
+      ? "Kredensial ini tidak berizin <strong>admin</strong>, jadi kode akses dan daftar sesi tidak bisa dibaca."
+      : escapeHtml(err.message || "gagal membaca status akses") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+}
+
+async function saveAccess() {
+  const code = $("access-new").value;
+  const repeat = $("access-repeat").value;
+  if (!code) {
+    note("access-status", "err", "Kode akses baru masih kosong.");
+    return;
+  }
+  if (code !== repeat) {
+    note("access-status", "err", "Dua isian kode tidak sama; ulangi dengan kode yang sama.");
+    return;
+  }
+  const min = (state.gate && state.gate.min_code_length) || 6;
+  if (code.length < min) {
+    note("access-status", "err", "Kode akses minimal <strong>" + min + "</strong> karakter.");
+    return;
+  }
+  const payload = { code: code };
+  if ($("access-current").value) payload.current_code = $("access-current").value;
+  $("btn-save-access").disabled = true;
+  try {
+    const data = await api("PUT", "/settings/access", payload);
+    renderAccess(data);
+    $("access-current").value = "";
+    const revoked = data.sessions_revoked || 0;
+    note("access-status", "ok", "Kode akses tersimpan. " + (revoked
+      ? "<strong>" + revoked + "</strong> sesi lain dikeluarkan karena kode berganti."
+      : "Sesi Anda tetap berlaku."));
+    loadGate();
+  } catch (err) {
+    note("access-status", "err", escapeHtml(err.message || "gagal menyimpan kode") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  } finally {
+    $("btn-save-access").disabled = false;
+  }
+}
+
+async function clearAccess() {
+  if (!window.confirm("Matikan kode akses? Konsol hanya bisa dibuka dengan API key lagi, dan semua sesi dikeluarkan.")) return;
+  try {
+    const data = await api("DELETE", "/settings/access");
+    renderAccess(data);
+    note("access-status", "ok", "Kode akses dimatikan; " + (data.sessions_revoked || 0) + " sesi dikeluarkan.");
+    loadGate();
+  } catch (err) {
+    note("access-status", "err", escapeHtml(err.message || "gagal mematikan kode") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+}
+
+async function revokeAllSessions() {
+  if (!window.confirm("Keluarkan semua sesi konsol? Perangkat yang sedang terbuka harus memasukkan kode akses lagi.")) return;
+  try {
+    const data = await api("DELETE", "/settings/access/sessions");
+    renderAccess(data);
+    note("access-status", "ok", (data.sessions_revoked || 0) + " sesi dikeluarkan.");
+    loadGate();
+  } catch (err) {
+    note("access-status", "err", escapeHtml(err.message || "gagal mengeluarkan sesi") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+}
+
+async function revokeSession(sessionId) {
+  if (!sessionId) return;
+  const mine = !!state.session && sessionId === state.currentSessionId;
+  if (!window.confirm(mine
+    ? "Ini sesi yang sedang Anda pakai. Keluarkan sekarang? Anda harus memasukkan kode akses lagi."
+    : "Keluarkan sesi ini? Perangkat itu harus memasukkan kode akses lagi.")) return;
+  try {
+    const data = await api("DELETE", "/settings/access/sessions/" + encodeURIComponent(sessionId));
+    renderAccess(data);
+    note("access-status", "ok", "Sesi <span class=\"mono\">" + escapeHtml(sessionId) + "</span> dikeluarkan.");
+    if (mine) {
+      clearSession();
+      showGate("Sesi Anda baru saja dikeluarkan. Masukkan kode akses untuk masuk lagi.");
+    } else {
+      loadGate();
+    }
+  } catch (err) {
+    note("access-status", "err", escapeHtml(err.message || "gagal mengeluarkan sesi") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+}
 
 function wire() {
   $("btn-settings").addEventListener("click", () => showView(currentView() === "settings" ? "chat" : "settings"));
@@ -1032,13 +1332,40 @@ function wire() {
     note("fmt-status", "info", "Semua format yang didukung mesin ini dipilih. Klik Simpan format untuk menerapkan.");
   });
   $("btn-save-retr").addEventListener("click", saveRetrieval);
+  $("gate-form").addEventListener("submit", login);
+  $("btn-logout").addEventListener("click", logout);
+  $("btn-save-access").addEventListener("click", saveAccess);
+  $("btn-clear-access").addEventListener("click", clearAccess);
+  $("btn-revoke-sessions").addEventListener("click", revokeAllSessions);
+  $("access-new").addEventListener("input", () => clearNote("access-status"));
 }
 
-restore();
-wire();
-showView(currentView());
-if (state.key) {
-  checkConnection().then((ok) => { if (ok) loadDocs(); });
-} else {
-  setConnection("warn", "butuh API key");
+/* ------------------------------------------------------------------- boot */
+
+/* Urutan penting: gerbang diperiksa lebih dulu. Kalau konsol tidak memakai kode akses
+   (open access atau API key), gerbang tidak pernah muncul dan layar langsung terbuka. */
+async function boot() {
+  restore();
+  wire();
+  showView(currentView());
+  if (state.session) $("btn-logout").hidden = false;
+  try {
+    const gate = await loadGate();
+    if (gate && gate.enabled && !state.session) {
+      showGate("Konsol ini memakai kode akses. Masukkan kodenya untuk mulai.");
+      return;
+    }
+    if (state.session || state.key) {
+      const ok = await checkConnection();
+      if (ok) loadDocs();
+    } else if (gate && gate.enabled) {
+      setConnection("warn", "butuh kode akses");
+    } else {
+      setConnection("warn", "butuh API key");
+    }
+  } catch (err) {
+    setConnection("err", "layanan tidak terjangkau");
+  }
 }
+
+boot();

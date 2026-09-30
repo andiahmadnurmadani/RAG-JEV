@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20260930b">
+<link rel="stylesheet" href="style.css?v=20260930c">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -42,13 +42,41 @@
   <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2"/><path d="m17 6 2 2"/><path d="m14.5 8.5 2 2"/>
   </symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v2"/>
+  </symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8 6 12l4 4"/><path d="M6 12h9"/>
+  </symbol>
 </svg>
 
-<div class="app">
+<!-- ============================ gerbang kode akses =========================== -->
+<main class="gate" id="gate" hidden>
+  <form class="gate-card" id="gate-form">
+    <span class="gate-mark"><svg><use href="#i-lock"/></svg></span>
+    <h1>Kode akses</h1>
+    <p class="gate-sub" id="gate-sub">Masukkan kode akses konsol untuk melanjutkan.</p>
+    <div class="field">
+      <label for="gate-code">Kode akses</label>
+      <input type="password" id="gate-code" name="code" autocomplete="current-password" spellcheck="false" placeholder="kode akses">
+    </div>
+    <label class="switch" for="gate-remember">
+      <input type="checkbox" id="gate-remember" checked>
+      <span class="track"></span>
+      <span>Ingat saya <strong id="gate-remember-days">7 hari</strong> di perangkat ini</span>
+    </label>
+    <button class="btn primary" type="submit" id="btn-gate-login">Masuk</button>
+    <div id="gate-status"></div>
+    <p class="gate-help">Lupa kode? Kode tidak bisa dibaca balik dari server (yang tersimpan hanya sidik jarinya). Operator bisa memasang kode baru dari panel <strong>Akses &amp; Sesi</strong> memakai API key, atau mengosongkan berkas <span class="mono">data/access.json</span> di server untuk mematikan gerbang.</p>
+  </form>
+</main>
+
+<div class="app" id="app-shell">
   <header class="bar">
     <span class="brand"><span class="mark"><svg><use href="#i-doc"/></svg></span>RAG Chat</span>
     <span class="spacer"></span>
     <span class="pill" id="conn-pill" title="Status layanan"><span class="dot" id="conn-dot"></span><span id="conn-text">belum tersambung</span></span>
+    <button class="btn ghost icon" id="btn-logout" type="button" title="Keluar dari sesi ini" aria-label="Keluar" hidden><svg><use href="#i-logout"/></svg></button>
     <a class="btn ghost icon" id="link-docs" href="/guide/" target="_blank" rel="noopener" title="Dokumentasi" aria-label="Dokumentasi" style="text-decoration:none"><svg><use href="#i-doc"/></svg></a>
     <button class="btn ghost icon" id="btn-settings" title="Pengaturan" aria-label="Pengaturan"><svg><use href="#i-gear"/></svg></button>
   </header>
@@ -118,6 +146,7 @@
     <div class="sheet-body">
       <nav class="sheet-nav" id="settings-nav" aria-label="Bagian pengaturan">
         <button type="button" data-panel="conn" aria-selected="true">Koneksi</button>
+        <button type="button" data-panel="access" aria-selected="false"><svg><use href="#i-lock"/></svg>Akses &amp; Sesi</button>
         <button type="button" data-panel="keys" aria-selected="false"><svg><use href="#i-key"/></svg>Kunci API</button>
         <button type="button" data-panel="llm" aria-selected="false">Model AI</button>
         <button type="button" data-panel="jev" aria-selected="false">Jev</button>
@@ -151,6 +180,54 @@
           <button class="btn" id="btn-test-conn" type="button">Uji koneksi</button>
           <button class="btn primary" id="btn-save-conn" type="button">Simpan</button>
           <span id="conn-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="access" hidden>
+        <div class="group-head">
+          <h2>Akses &amp; Sesi</h2>
+          <p>Satu kode akses membuka konsol ini tanpa perlu menempel API key. Sesi berlaku terbatas: <span id="access-life-default">12 jam</span> biasa, <span id="access-life-remember">7 hari</span> bila "ingat saya" dicentang. Kode dan token tidak pernah dikembalikan server - hanya potongan tersamar.</p>
+        </div>
+        <div id="access-note"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="access-current">Kode akses sekarang</label>
+            <input type="password" id="access-current" spellcheck="false" autocomplete="current-password" placeholder="kosongkan bila masuk pakai API key">
+            <span class="help">Wajib diisi bila Anda masuk sebagai sesi; kunci API berizin admin boleh melewatinya.</span>
+          </div>
+          <div class="field">
+            <label for="access-new">Kode akses baru</label>
+            <input type="password" id="access-new" spellcheck="false" autocomplete="new-password" placeholder="kode akses baru">
+            <span class="help" id="access-hint">Belum ada kode akses: konsol masih bisa dibuka dengan API key.</span>
+          </div>
+          <div class="field">
+            <label for="access-repeat">Ulangi kode baru</label>
+            <input type="password" id="access-repeat" spellcheck="false" autocomplete="new-password">
+            <span class="help">Dua isian ini harus sama; salah ketik ditolak sebelum kode diganti.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-access" type="button">Simpan kode</button>
+          <button class="btn" id="btn-refresh-access" type="button">Muat ulang</button>
+          <span id="access-status"></span>
+        </div>
+
+        <div class="sub-head">
+          <h3>Sesi aktif</h3>
+          <span class="count" id="sessions-count">0</span>
+          <span class="spacer"></span>
+          <button class="btn ghost sm" id="btn-revoke-sessions" type="button">Keluarkan semua</button>
+        </div>
+        <table class="key-table">
+          <thead>
+            <tr><th>Perangkat</th><th>Mulai</th><th>Berakhir</th><th>Terakhir dipakai</th><th>Ingat</th><th>Status</th><th>Aksi</th></tr>
+          </thead>
+          <tbody id="sessions-rows"></tbody>
+        </table>
+        <div id="sessions-empty" class="empty">Belum ada sesi. Sesi muncul setelah konsol dibuka dengan kode akses.</div>
+        <div class="group-foot">
+          <button class="btn ghost" id="btn-clear-access" type="button">Matikan kode akses</button>
+          <span class="help">Setelah dimatikan, konsol hanya bisa dibuka dengan API key lagi.</span>
         </div>
       </section>
 
@@ -304,6 +381,7 @@
           <p>Kunci untuk memanggil layanan ini. Nilainya hanya tampil sekali saat dibuat, setelah itu tersimpan sebagai hash.</p>
         </div>
         <div id="keys-note"></div>
+        <div id="keys-bootstrap"></div>
         <div class="grid-2">
           <div class="field">
             <label for="key-label">Label</label>
@@ -394,6 +472,6 @@
   </form>
 </dialog>
 
-<script src="app.js?v=20260930b"></script>
+<script src="app.js?v=20260930c"></script>
 </body>
 </html>

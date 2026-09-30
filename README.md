@@ -242,6 +242,12 @@ terbukti dari beberapa pertanyaan yang dijawab `grounded=false` sebelum LLM dipa
 Buka `http://<host>:<port>/ui/` (root `/` dialihkan ke sana). Konsol ini statis, tanpa build
 step dan tanpa CDN, dilayani service yang sama sehingga tidak ada masalah CORS.
 
+**Sekali masuk, lalu tidak perlu apa-apa lagi.** Bila operator sudah memasang **kode akses**,
+kunjungan pertama hanya menampilkan satu isian kode (dan pilihan *Ingat saya* 7 hari). Kode itu
+ditukar menjadi **sesi** yang dikirim di header yang sama dengan API key, sehingga konsol bisa
+membuat kunci API, mengubah setelan, dan mengunggah dokumen **tanpa menempel API key ke mana pun**.
+Ini sekaligus menutup kegagalan lama `AUTH_INVALID: Missing credentials` saat menekan *Buat kunci*.
+
 Ada **dua layar** dan pembagiannya sengaja tegas: halaman utama hanya untuk bekerja, semua
 konfigurasi tinggal di layar Pengaturan.
 
@@ -263,7 +269,8 @@ dengan navigasi kiri; hanya satu panel tampil sekaligus supaya tidak perlu mengg
 
 | Panel | Isi | Sifat |
 |---|---|---|
-| **Koneksi** | base URL (dari alamat halaman), API key layanan, knowledge base, tombol Uji koneksi | disimpan di `localStorage` browser |
+| **Koneksi** | base URL (dari alamat halaman), API key layanan (opsional bila sudah masuk dengan kode akses), knowledge base, tombol Uji koneksi | disimpan di `localStorage` browser |
+| **Akses & Sesi** | status kode akses (potongan tersamar, waktu, pengubah), pemasangan/penggantian kode, dan daftar sesi aktif (perangkat, dibuat, kedaluwarsa, terakhir dipakai, *Ingat saya*, tombol **Keluarkan** per sesi, plus *Keluarkan semua*) | `GET/PUT/DELETE /api/v1/settings/access`, **wajib izin `admin`** |
 | **Kunci API** | daftar semua kunci yang berlaku (termasuk yang dari `API_KEYS_JSON`, ditandai *dari env*), plus pembuatan kunci baru: label, izin (`read` selalu ikut, `write`, `admin`), masa berlaku opsional, dan tenant opsional (hanya untuk kunci berizin `*`). Kunci baru tampil **sekali** dengan tombol Salin; baris kunci punya tombol **Cabut** | `GET/POST/DELETE /api/v1/settings/api-keys`, **wajib izin `admin`** |
 | **Model AI** | provider, base URL, API key, model + tombol **Muat daftar model** (daftar diambil langsung dari `GET {base_url}/models`, 400+ entri pada gateway uji) dengan saringan dan pemilihan klik | `PUT /api/v1/settings`, **wajib izin `admin`** |
 | **Jev** | saklar aktif, transport (`systemone` \| `mcp`), endpoint, model, API key, tombol Uji Jev (mengirim satu pertanyaan `noul` sungguhan dan menampilkan latensinya) | idem |
@@ -292,6 +299,21 @@ Aturan yang berlaku di layar ini:
   naikkan cap versinya di `app/ui/index.html` (ada test yang menjaga).
 - URL probe divalidasi lebih dulu (`http`/`https`, tanpa kredensial di URL, tanpa alamat
   link-local/metadata, tanpa redirect) karena berasal dari operator.
+
+### Gerbang kode akses: memasang pertama kali
+
+```bash
+# 1. pemasangan baru: kunci admin pertama ada di berkas ini (mode 0600, jalurnya juga di log)
+cat data/bootstrap_admin_key.json        # {"key": "rag_…", …}   → tempel ke panel Koneksi
+# 2. Pengaturan → Akses & Sesi → isi "Kode akses baru" dua kali → Simpan kode
+# 3. Keluar, masuk lagi dengan kode itu (centang "Ingat saya" bila perlu)
+# 4. Pengaturan → Kunci API → cabut "kunci bootstrap", lalu hapus berkasnya di server
+```
+
+Kode tersimpan sebagai SHA-256 (tidak bisa dibaca balik, hanya potongan tersamar yang tampil).
+Sesi bertahan 12 jam, atau 7 hari dengan *Ingat saya*; **mengganti kode langsung mematikan semua
+sesi lama**. Rinciannya — termasuk tabel env dan endpoint — ada di
+[docs/console-access.md](docs/console-access.md).
 
 ### Format berkas knowledge
 

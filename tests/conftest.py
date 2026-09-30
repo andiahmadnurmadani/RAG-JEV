@@ -51,6 +51,9 @@ def _configure_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "MAX_UPLOAD_MB": "8",
         "SETTINGS_OVERRIDE_PATH": str(tmp_path / "settings.json"),
         "API_KEYS_PATH": str(tmp_path / "api_keys.json"),
+        "ACCESS_PATH": str(tmp_path / "access.json"),
+        "SESSIONS_PATH": str(tmp_path / "sessions.json"),
+        "BOOTSTRAP_ADMIN_KEY_PATH": str(tmp_path / "bootstrap_admin_key.json"),
         "INDEXING_WORKERS": "1",
     }
     for key, value in env.items():

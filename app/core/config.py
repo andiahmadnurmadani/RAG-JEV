@@ -137,6 +137,26 @@ class Settings(BaseSettings):
     require_tenant_context_token: bool = False
     rate_limit_per_minute: int = 240
 
+    # ---- kode akses konsol + sesi browser --------------------------------
+    # Satu kode akses (passcode) membuka konsol tanpa perlu menempel API key. Kode disimpan
+    # sebagai hash di berkas; sesi yang "ingat saya" berlaku ui_remember_days hari.
+    access_path: str = str(BASE_DIR / "data" / "access.json")
+    sessions_path: str = str(BASE_DIR / "data" / "sessions.json")
+    ui_session_hours: int = 12
+    ui_remember_days: int = 7
+    ui_session_organization_id: str = "default"
+    ui_session_user_id: str = "operator"
+    ui_session_application_id: str = "rag-console"
+    # Izin yang diberikan ke sesi konsol: konsol adalah alat operator, jadi bawaannya penuh.
+    ui_session_permissions: str = "read,write,admin,*"
+    # Kunci admin pertama saat layanan belum punya kunci sama sekali (lihat app/core/bootstrap.py).
+    # Nilainya ditulis ke berkas mode 0600, bukan ke log; cabut lewat panel Kunci API setelah
+    # kode akses dipasang. Matikan dengan BOOTSTRAP_ADMIN_KEY=false.
+    # Kosong = ikut direktori API_KEYS_PATH, supaya berkasnya hidup di volume data yang sama
+    # (penting untuk container: berkas di dalam image hilang setiap redeploy).
+    bootstrap_admin_key: bool = True
+    bootstrap_admin_key_path: str = ""
+
     # ---- file handling (PRD 34) ------------------------------------------
     max_upload_mb: int = 32
     allowed_mime: str = "application/pdf,text/plain,text/markdown,text/html,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/json"
@@ -164,6 +184,12 @@ class Settings(BaseSettings):
     def cors_origins(self) -> List[str]:
         """Opt-in cross-origin access for the test console (empty = same-origin only)."""
         return [origin.strip() for origin in self.cors_origins_env.split(",") if origin.strip()]
+
+    @property
+    def ui_session_permission_list(self) -> List[str]:
+        """Izin sesi konsol. Kosong = sesi tidak berguna, jadi jatuh ke read+write."""
+        raw = [item.strip() for item in self.ui_session_permissions.split(",") if item.strip()]
+        return raw or ["read", "write"]
 
     @field_validator("chunk_overlap")
     @classmethod
@@ -200,7 +226,14 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         for path in (self.storage_dir, self.sparse_dir, self.qdrant_local_path):
             Path(path).mkdir(parents=True, exist_ok=True)
-        for file_path in (self.registry_path, self.job_store_path, self.settings_override_path, self.api_keys_path):
+        for file_path in (
+            self.registry_path,
+            self.job_store_path,
+            self.settings_override_path,
+            self.api_keys_path,
+            self.access_path,
+            self.sessions_path,
+        ):
             if file_path:
                 Path(file_path).parent.mkdir(parents=True, exist_ok=True)
 

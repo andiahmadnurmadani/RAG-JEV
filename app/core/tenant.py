@@ -23,6 +23,10 @@ class TrustedContext:
     # Diisi hanya bila kredensialnya kunci dari registry (bukan API_KEYS_JSON / token KMS).
     # Dipakai untuk menolak permintaan yang mencabut kunci yang sedang dipakainya sendiri.
     key_id: Optional[str] = None
+    # Diisi hanya bila kredensialnya sesi konsol: dipakai untuk "keluar" dan untuk menampilkan
+    # sesi mana yang sedang aktif, tanpa perlu meminta tokennya lagi.
+    session_id: Optional[str] = None
+    session_expires_at: Optional[str] = None
 
     def has_permission(self, permission: str) -> bool:
         if "*" in self.permissions:

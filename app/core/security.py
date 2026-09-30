@@ -79,13 +79,28 @@ def issue_context_token(settings: Settings, payload: Dict[str, Any]) -> str:
 
 
 def resolve_api_key(settings: Settings, presented: str) -> Dict[str, Any]:
-    """Map a presented API key onto its trusted context (constant-time compare).
+    """Map a presented credential onto its trusted context (constant-time compare).
 
-    Two sources, one answer: keys declared in ``API_KEYS_JSON`` (deploy-time) and keys
-    created from the settings screen, whose registry stores only a hash of the key.
+    Tiga sumber, satu jawaban: kunci di ``API_KEYS_JSON`` (tanam saat deploy), kunci yang
+    dibuat dari layar Pengaturan (registry menyimpan hash saja), dan sesi konsol hasil
+    menukar kode akses (``sess_...``, berlaku 12 jam / 7 hari bila "ingat saya").
     """
     if not presented:
         raise AppError("AUTH_INVALID", "Missing API key")
+
+    from app.core.access import SESSION_PREFIX, access_store, session_context, session_store
+
+    if presented.startswith(SESSION_PREFIX):
+        store = session_store(settings)
+        generation = access_store(settings).generation()
+        session = store.resolve(presented, generation)
+        if session is None:
+            raise AppError(
+                "AUTH_INVALID",
+                "Sesi tidak berlaku lagi (kedaluwarsa, dikeluarkan, atau kode akses sudah diganti)",
+            )
+        return session_context(settings, session)
+
     for key, ctx in settings.api_keys.items():
         if constant_time_equals(key, presented):
             out = dict(ctx)

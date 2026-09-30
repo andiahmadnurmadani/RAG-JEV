@@ -23,6 +23,14 @@ from pydantic import BaseModel, ConfigDict
 from app.api.deps import Services, services_from_request
 from app.api.middleware.auth import TrustedContext, trusted_context
 from app.core import settings_store
+from app.core.access import (
+    MAX_ACTIVE_SESSIONS,
+    MIN_CODE_LENGTH,
+    access_store,
+    session_lifetime,
+    session_store,
+    validate_code,
+)
 from app.core.api_keys import ALLOWED_PERMISSIONS, DEFAULT_PERMISSIONS, MAX_ACTIVE_KEYS, registry_for
 from app.core.errors import AppError, ok
 from app.core.logging import get_logger
@@ -77,6 +85,20 @@ class ApiKeyCreateRequest(BaseModel):
     user_id: Optional[str] = None
     application_id: Optional[str] = None
     expires_in_days: Optional[int] = None
+
+
+class AccessCodeRequest(BaseModel):
+    """Ganti kode akses konsol.
+
+    ``current_code`` wajib bila pemanggil masuk sebagai **sesi** (kode lama membuktikan bahwa
+    yang mengganti memang pemiliknya, bukan sesi yang dibajak). Kunci API berizin ``admin``
+    boleh mengganti tanpa kode lama karena ia tidak berasal dari kode itu.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    current_code: Optional[str] = None
 
 
 def _settings_path(services: Services) -> Path:
@@ -441,3 +463,124 @@ def revoke_api_key(
     entry = registry_for(settings).revoke(key_id)
     logger.info("kunci api dicabut key_id=%s oleh=%s", key_id, context.user_id)
     return ok({"entry": entry})
+
+
+# --------------------------------------------------------------------------- #
+# Kode akses konsol + sesi peramban
+# --------------------------------------------------------------------------- #
+def _access_payload(settings, context: TrustedContext) -> Dict[str, Any]:
+    """Status kode akses + daftar sesi aktif; tidak pernah memuat kode atau tokennya."""
+    status = access_store(settings).status()
+    lifetime_default = session_lifetime(settings, False)
+    lifetime_remember = session_lifetime(settings, True)
+    sessions = session_store(settings).public(status["generation"] or "")
+    sessions.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    return {
+        "access": access_store(settings).public_status(),
+        "sessions": sessions,
+        "active_sessions": len([item for item in sessions if item["state"] == "active" and not item["stale_code"]]),
+        "max_active_sessions": MAX_ACTIVE_SESSIONS,
+        "default_lifetime": lifetime_default,
+        "remember_lifetime": lifetime_remember,
+        "min_code_length": MIN_CODE_LENGTH,
+        "context": {**context.as_dict(), "key_id": context.key_id, "source": context.source,
+                    "session_id": context.session_id},
+    }
+
+
+@router.get("/settings/access")
+def read_access(
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Apakah konsol terkunci, sesi mana yang aktif, dan berapa lama sesi bertahan."""
+    _require_admin(context)
+    settings = services_from_request(request).settings
+    return ok(_access_payload(settings, context))
+
+
+@router.put("/settings/access")
+def set_access_code(
+    payload: AccessCodeRequest,
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Pasang atau ganti kode akses konsol. Mengganti kode langsung mematikan semua sesi lama."""
+    _require_admin(context)
+    settings = services_from_request(request).settings
+    store = access_store(settings)
+    already_set = bool(store.status()["enabled"])
+
+    if already_set and context.source == "session":
+        if not payload.current_code or not store.verify(payload.current_code):
+            raise AppError(
+                "AUTH_FORBIDDEN",
+                "Kode akses sekarang salah; masukkan kode lama untuk menggantinya",
+                details={"field": "current_code"},
+            )
+    validate_code(payload.code)
+    before = store.generation()
+    status = store.set_code(payload.code, updated_by=f"{context.source}:{context.user_id}")
+    revoked = 0
+    if before and before != store.generation():
+        # Sesi lama terikat versi kode: ganti kode = keluarkan semua sesi.
+        revoked = session_store(settings).revoke_all(except_id=context.session_id or "")
+    logger.info(
+        "kode akses konsol %s oleh=%s; sesi dikeluarkan=%s",
+        "diganti" if already_set else "dipasang",
+        context.user_id,
+        revoked,
+    )
+    return ok({**_access_payload(settings, context), "updated": True, "sessions_revoked": revoked, "status": store.public_status()})
+
+
+@router.delete("/settings/access")
+def clear_access_code(
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Matikan kode akses: konsol kembali hanya bisa dibuka dengan API key."""
+    _require_admin(context)
+    settings = services_from_request(request).settings
+    store = access_store(settings)
+    if not store.status()["enabled"]:
+        raise AppError("VALIDATION_ERROR", "Kode akses belum diatur")
+    store.clear()
+    revoked = session_store(settings).revoke_all(except_id=context.session_id or "")
+    logger.info("kode akses konsol dihapus oleh=%s; sesi dikeluarkan=%s", context.user_id, revoked)
+    return ok({**_access_payload(settings, context), "removed": True, "sessions_revoked": revoked})
+
+
+@router.delete("/settings/access/sessions")
+def revoke_all_sessions(
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Keluarkan semua sesi konsol, termasuk yang sekarang (kecuali diminta menyisakan satu)."""
+    _require_admin(context)
+    settings = services_from_request(request).settings
+    keep_current = bool(request.query_params.get("keep_current") in {"1", "true", "yes"})
+    except_id = context.session_id if keep_current else ""
+    revoked = session_store(settings).revoke_all(except_id=except_id or "")
+    logger.info("sesi konsol dikeluarkan=%s oleh=%s", revoked, context.user_id)
+    return ok({**_access_payload(settings, context), "sessions_revoked": revoked, "kept_current": keep_current})
+
+
+@router.delete("/settings/access/sessions/{session_id}")
+def revoke_one_session(
+    session_id: str,
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Keluarkan satu sesi tertentu (mis. perangkat yang hilang)."""
+    _require_admin(context)
+    settings = services_from_request(request).settings
+    if not str(session_id or "").startswith("ses_"):
+        raise AppError(
+            "VALIDATION_ERROR",
+            "Hanya sesi konsol yang bisa dikeluarkan di sini",
+            details={"session_id": session_id},
+        )
+    entry = session_store(settings).revoke(session_id)
+    logger.info("sesi %s dikeluarkan oleh=%s", session_id, context.user_id)
+    return ok({"entry": entry, **_access_payload(settings, context)})
