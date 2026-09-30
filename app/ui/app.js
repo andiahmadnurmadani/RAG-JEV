@@ -1011,11 +1011,15 @@ async function loadApiKeys() {
     renderKeys(await api("GET", "/settings/api-keys"));
   } catch (err) {
     const forbidden = err.code === "AUTH_FORBIDDEN";
+    const anonymous = err.code === "AUTH_INVALID";
     $("keys-rows").innerHTML = "";
     $("keys-empty").hidden = forbidden;
-    note("keys-note", forbidden ? "warn" : "err", forbidden
-      ? "Kunci ini tidak berizin <strong>admin</strong>, jadi daftar kunci tidak bisa dibaca atau diubah."
-      : escapeHtml(err.message || "gagal memuat daftar kunci") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+    note("keys-note", forbidden || anonymous ? "warn" : "err",
+      anonymous
+        ? "Butuh kredensial <strong>admin</strong> untuk melihat kunci: masuk dengan <strong>kode akses</strong>, atau tempel kunci API sekali di panel <strong>Koneksi</strong>."
+        : forbidden
+          ? "Kunci ini tidak berizin <strong>admin</strong>, jadi daftar kunci tidak bisa dibaca atau diubah."
+          : escapeHtml(err.message || "gagal memuat daftar kunci") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
   }
 }
 
@@ -1145,9 +1149,13 @@ async function loadAccess() {
     renderAccess(await api("GET", "/settings/access"));
   } catch (err) {
     const forbidden = err.code === "AUTH_FORBIDDEN";
-    note("access-note", forbidden ? "warn" : "err", forbidden
-      ? "Kredensial ini tidak berizin <strong>admin</strong>, jadi kode akses dan daftar sesi tidak bisa dibaca."
-      : escapeHtml(err.message || "gagal membaca status akses") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+    const anonymous = err.code === "AUTH_INVALID";
+    note("access-note", forbidden || anonymous ? "warn" : "err",
+      anonymous
+        ? "Panel ini butuh kredensial <strong>admin</strong>: masuk dengan <strong>kode akses</strong>, atau tempel kunci API sekali di panel <strong>Koneksi</strong>. Sesudah kode akses dipasang, kunci tidak perlu lagi."
+        : forbidden
+          ? "Kredensial ini tidak berizin <strong>admin</strong>, jadi kode akses dan daftar sesi tidak bisa dibaca."
+          : escapeHtml(err.message || "gagal membaca status akses") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
   }
 }
 
