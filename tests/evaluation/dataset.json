@@ -1,0 +1,125 @@
+{
+ "knowledge_base_id": "kb_eval",
+ "cases": [
+  {
+   "query": "Berapa kuota cuti tahunan karyawan?",
+   "expected_documents": [
+    "doc_sop_cuti"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa hari kerja batas pengajuan cuti tahunan?",
+   "expected_documents": [
+    "doc_sop_cuti"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa lama atasan menyetujui pengajuan cuti?",
+   "expected_documents": [
+    "doc_sop_cuti"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa upah lembur pada hari libur nasional?",
+   "expected_documents": [
+    "doc_sop_lembur"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa jam maksimal lembur per hari kerja?",
+   "expected_documents": [
+    "doc_sop_lembur"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Apa sanksi tiga kali keterlambatan dalam satu bulan?",
+   "expected_documents": [
+    "doc_sop_absensi"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa lama kata sandi harus dirotasi menurut ISO-27001?",
+   "expected_documents": [
+    "doc_iso27001"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa batas ambang pengadaan yang wajib tender terbuka?",
+   "expected_documents": [
+    "doc_pengadaan"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa nilai penjualan bulan Februari 2026?",
+   "expected_documents": [
+    "doc_penjualan_q1"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Apa isi paket asuransi kesehatan keluarga karyawan?",
+   "expected_documents": [],
+   "answerable": false
+  },
+  {
+   "query": "Berapa harga saham perusahaan di bursa efek tahun 2030?",
+   "expected_documents": [],
+   "answerable": false
+  },
+  {
+   "query": "Siapa nama direktur utama perusahaan periode 2035?",
+   "expected_documents": [],
+   "answerable": false
+  },
+  {
+   "query": "Berapa lama batas waktu pegawai melaporkan insiden keamanan informasi?",
+   "expected_documents": [
+    "doc_sop_insiden"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Siapa yang berwenang menaikkan tingkat klasifikasi insiden?",
+   "expected_documents": [
+    "doc_sop_insiden"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa hari kerja sebelum keberangkatan pengajuan perjalanan dinas domestik paling lambat diajukan?",
+   "expected_documents": [
+    "doc_perjalanan_dinas"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Kelas tiket pesawat apa yang dipakai untuk penerbangan di atas empat jam?",
+   "expected_documents": [
+    "doc_perjalanan_dinas"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Berapa nilai pengadaan yang wajib melalui tender terbuka?",
+   "expected_documents": [
+    "doc_pengadaan_ti"
+   ],
+   "answerable": true
+  },
+  {
+   "query": "Apa syarat tinjauan keamanan untuk pengadaan layanan hosting?",
+   "expected_documents": [
+    "doc_pengadaan_ti"
+   ],
+   "answerable": true
+  }
+ ]
+}

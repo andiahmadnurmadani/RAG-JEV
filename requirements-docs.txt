@@ -1,0 +1,10 @@
+# Perkakas dokumentasi (terpisah dari dependensi runtime).
+#
+#   uv pip install -r requirements-docs.txt        # di venv dokumentasi
+#   # atau tanpa venv:
+#   uvx --from mkdocs-material mkdocs build
+#
+# Dipakai oleh scripts/build_docs.sh.
+mkdocs==1.6.1
+mkdocs-material==9.6.20
+pymdown-extensions[extra]==10.16.1

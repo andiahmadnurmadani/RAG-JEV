@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Chat</title>
+<!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
+     peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
+     TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
+<link rel="stylesheet" href="style.css?v=20261002d">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 3v5h5"/><path d="M19 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9l6 6v11a1 1 0 0 1-1 1z"/>
+  </symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+  </symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+  </symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 2.6 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9.5 4.1a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21.4 11a2 2 0 1 1 0 4z"/>
+  </symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+  </symbol>
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 18l-6-6 6-6"/>
+  </symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10.3 4.3 2.6 17.3A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.7L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m5 13 4 4L19 7"/>
+  </symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 6l12 12"/><path d="M18 6 6 18"/>
+  </symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2"/><path d="m17 6 2 2"/><path d="m14.5 8.5 2 2"/>
+  </symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v2"/>
+  </symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8 6 12l4 4"/><path d="M6 12h9"/>
+  </symbol>
+</svg>
+
+<!-- ============================ gerbang kode akses =========================== -->
+<main class="gate" id="gate" hidden>
+  <form class="gate-card" id="gate-form">
+    <span class="gate-mark"><svg><use href="#i-lock"/></svg></span>
+    <h1>Kode akses</h1>
+    <p class="gate-sub" id="gate-sub">Masukkan kode akses konsol untuk melanjutkan.</p>
+    <div class="field">
+      <label for="gate-code">Kode akses</label>
+      <input type="password" id="gate-code" name="code" autocomplete="current-password" spellcheck="false" placeholder="kode akses">
+    </div>
+    <label class="switch" for="gate-remember">
+      <input type="checkbox" id="gate-remember" checked>
+      <span class="track"></span>
+      <span>Ingat saya <strong id="gate-remember-days">7 hari</strong> di perangkat ini</span>
+    </label>
+    <button class="btn primary" type="submit" id="btn-gate-login">Masuk</button>
+    <div id="gate-status"></div>
+    <p class="gate-help">Lupa kode? Kode tidak bisa dibaca balik dari server (yang tersimpan hanya sidik jarinya). Operator bisa memasang kode baru dari panel <strong>Akses &amp; Sesi</strong> memakai API key, atau mengosongkan berkas <span class="mono">data/access.json</span> di server untuk mematikan gerbang.</p>
+  </form>
+</main>
+
+<div class="app" id="app-shell">
+  <header class="bar">
+    <span class="brand"><span class="mark"><svg><use href="#i-doc"/></svg></span>RAG Chat</span>
+    <span class="spacer"></span>
+    <span class="pill" id="conn-pill" title="Status layanan"><span class="dot" id="conn-dot"></span><span id="conn-text">belum tersambung</span></span>
+    <button class="btn ghost icon" id="btn-logout" type="button" title="Keluar dari sesi ini" aria-label="Keluar" hidden><svg><use href="#i-logout"/></svg></button>
+    <a class="btn ghost icon" id="link-docs" href="/guide/" target="_blank" rel="noopener" title="Dokumentasi" aria-label="Dokumentasi" style="text-decoration:none"><svg><use href="#i-doc"/></svg></a>
+    <button class="btn ghost icon" id="btn-settings" title="Pengaturan" aria-label="Pengaturan"><svg><use href="#i-gear"/></svg></button>
+  </header>
+
+  <!-- ================================ chat view =============================== -->
+  <main class="main view" id="view-chat">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Dokumen</h2>
+        <span class="count" id="docs-count">0</span>
+      </div>
+      <div class="panel-body">
+        <div class="drop" id="dropzone">
+          <div class="title">Tarik berkas ke sini</div>
+          <div class="sub" id="drop-hint">PDF, DOCX, TXT, MD, HTML, JSON</div>
+          <div class="actions">
+            <button class="btn sm" id="btn-browse" type="button"><svg><use href="#i-upload"/></svg>Pilih berkas</button>
+            <button class="btn sm" id="btn-paste" type="button">Tempel teks</button>
+            <button class="btn sm" id="btn-url" type="button">Dari URL</button>
+          </div>
+          <input type="file" id="file-input" multiple hidden>
+        </div>
+        <div id="upload-status"></div>
+        <ul class="doclist" id="docs-list"></ul>
+        <p class="empty" id="docs-empty">Belum ada dokumen pada knowledge base ini. Unggah satu untuk mulai bertanya.</p>
+        <div class="row" id="docs-tools" hidden style="margin-top:12px">
+          <button class="btn ghost sm" id="btn-select-none" type="button">Lepas semua centang</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="chat">
+      <div class="thread" id="thread">
+        <div class="thread-inner" id="thread-inner">
+          <p class="empty" id="thread-empty">Tanyakan apa pun tentang dokumen Anda. Jawaban hanya memakai isi dokumen, dan menolak bila tidak ada dasarnya.</p>
+        </div>
+      </div>
+      <form class="composer" id="form-ask" autocomplete="off">
+        <div class="composer-inner">
+          <div class="composer-field">
+            <textarea id="prompt" rows="1" placeholder="Tulis pertanyaan...  (Enter kirim, Shift+Enter baris baru)" aria-label="Pertanyaan"></textarea>
+            <button class="btn primary icon" id="btn-send" type="submit" aria-label="Kirim"><svg><use href="#i-send"/></svg></button>
+          </div>
+          <div class="composer-tools">
+            <span class="seg" role="group" aria-label="Mode">
+              <button type="button" id="btn-mode-answer" aria-pressed="true">Jawab</button>
+              <button type="button" id="btn-mode-search" aria-pressed="false">Cari saja</button>
+            </span>
+            <span class="scope-chip" id="scope-chip">semua dokumen</span>
+            <span class="spacer" style="flex:1"></span>
+            <span id="req-id"></span>
+          </div>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <!-- ============================ settings dialog ============================= -->
+  <dialog id="dlg-settings" class="sheet" aria-labelledby="settings-title">
+    <div class="sheet-head">
+      <div class="lead">
+        <h1 id="settings-title">Pengaturan</h1>
+        <p>Kunci API layanan ini disimpan di browser Anda. Model, Jev, dan format berkas berlaku untuk seluruh layanan, jadi hanya kunci berizin admin yang dapat membacanya.</p>
+      </div>
+      <button class="btn ghost icon" id="btn-settings-close" type="button" title="Tutup" aria-label="Tutup pengaturan"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="sheet-body">
+      <nav class="sheet-nav" id="settings-nav" aria-label="Bagian pengaturan">
+        <button type="button" data-panel="conn" aria-selected="true">Koneksi</button>
+        <button type="button" data-panel="access" aria-selected="false"><svg><use href="#i-lock"/></svg>Akses &amp; Sesi</button>
+        <button type="button" data-panel="keys" aria-selected="false"><svg><use href="#i-key"/></svg>Kunci API</button>
+        <button type="button" data-panel="llm" aria-selected="false">Model AI</button>
+        <button type="button" data-panel="jev" aria-selected="false">Jev</button>
+        <button type="button" data-panel="fmt" aria-selected="false">Format berkas</button>
+        <button type="button" data-panel="retr" aria-selected="false">Retrieval</button>
+        <button type="button" data-panel="web" aria-selected="false">Sumber web</button>
+        <button type="button" data-panel="summary" aria-selected="false">Ringkasan</button>
+      </nav>
+      <div class="sheet-panels" id="settings-panels">
+      <section class="group" data-panel="conn">
+        <div class="group-head">
+          <h2>Koneksi</h2>
+          <p>Titik akhir layanan RAG dan knowledge base yang Anda pakai di halaman chat.</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="set-base">Base URL API</label>
+            <input type="text" id="set-base" spellcheck="false">
+            <span class="help">Otomatis dari alamat halaman ini.</span>
+          </div>
+          <div class="field">
+            <label for="set-kb">Knowledge base</label>
+            <input type="text" id="set-kb" spellcheck="false" placeholder="kb_utama">
+            <span class="help">Pemisah dokumen dalam satu tenant.</span>
+          </div>
+          <div class="field">
+            <label for="set-key">API key layanan</label>
+            <input type="password" id="set-key" spellcheck="false" placeholder="tempel API key di sini">
+            <span class="help" id="set-key-help">Disimpan di localStorage browser, tidak pernah dikirim ke mana pun selain layanan ini.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn" id="btn-test-conn" type="button">Uji koneksi</button>
+          <button class="btn primary" id="btn-save-conn" type="button">Simpan</button>
+          <span id="conn-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="access" hidden>
+        <div class="group-head">
+          <h2>Akses &amp; Sesi</h2>
+          <p>Satu kode akses membuka konsol ini tanpa perlu menempel API key. Sesi berlaku terbatas: <span id="access-life-default">12 jam</span> biasa, <span id="access-life-remember">7 hari</span> bila "ingat saya" dicentang. Kode dan token tidak pernah dikembalikan server - hanya potongan tersamar.</p>
+        </div>
+        <div id="access-note"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="access-current">Kode akses sekarang</label>
+            <input type="password" id="access-current" spellcheck="false" autocomplete="current-password" placeholder="kosongkan bila masuk pakai API key">
+            <span class="help">Wajib diisi bila Anda masuk sebagai sesi; kunci API berizin admin boleh melewatinya.</span>
+          </div>
+          <div class="field">
+            <label for="access-new">Kode akses baru</label>
+            <input type="password" id="access-new" spellcheck="false" autocomplete="new-password" placeholder="kode akses baru">
+            <span class="help" id="access-hint">Belum ada kode akses: konsol masih bisa dibuka dengan API key.</span>
+          </div>
+          <div class="field">
+            <label for="access-repeat">Ulangi kode baru</label>
+            <input type="password" id="access-repeat" spellcheck="false" autocomplete="new-password">
+            <span class="help">Dua isian ini harus sama; salah ketik ditolak sebelum kode diganti.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-access" type="button">Simpan kode</button>
+          <button class="btn" id="btn-refresh-access" type="button">Muat ulang</button>
+          <span id="access-status"></span>
+        </div>
+
+        <div class="sub-head">
+          <h3>Sesi aktif</h3>
+          <span class="count" id="sessions-count">0</span>
+          <span class="spacer"></span>
+          <button class="btn ghost sm" id="btn-revoke-sessions" type="button">Keluarkan semua</button>
+        </div>
+        <table class="key-table">
+          <thead>
+            <tr><th>Perangkat</th><th>Mulai</th><th>Berakhir</th><th>Terakhir dipakai</th><th>Ingat</th><th>Status</th><th>Aksi</th></tr>
+          </thead>
+          <tbody id="sessions-rows"></tbody>
+        </table>
+        <div id="sessions-empty" class="empty">Belum ada sesi. Sesi muncul setelah konsol dibuka dengan kode akses.</div>
+        <div class="group-foot">
+          <button class="btn ghost" id="btn-clear-access" type="button">Matikan kode akses</button>
+          <span class="help">Setelah dimatikan, konsol hanya bisa dibuka dengan API key lagi.</span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="llm" hidden>
+        <div class="group-head">
+          <h2>Model AI</h2>
+          <p>Generator jawaban. Ambil daftar model langsung dari endpoint, lalu pilih satu.</p>
+        </div>
+        <div id="llm-note"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="llm-provider">Provider</label>
+            <select id="llm-provider">
+              <option value="openai_compatible">openai_compatible</option>
+              <option value="mock">mock (tanpa model)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="llm-model">Model</label>
+            <input type="text" id="llm-model" spellcheck="false" placeholder="cmc/Qwen/Qwen3.6-Plus">
+          </div>
+          <div class="field">
+            <label for="llm-base">Base URL</label>
+            <input type="text" id="llm-base" spellcheck="false" placeholder="https://gateway.example/v1">
+          </div>
+          <div class="field">
+            <label for="llm-key">API key</label>
+            <input type="password" id="llm-key" spellcheck="false" placeholder="kosongkan bila tidak berubah">
+            <span class="help" id="llm-key-help">Kosong = kunci tersimpan dipakai apa adanya. Isi untuk menggantinya.</span>
+          </div>
+          <div class="field">
+            <label for="llm-max-tokens">Batas token jawaban</label>
+            <input type="number" id="llm-max-tokens" min="64" max="64000" step="128" value="8192">
+            <span class="help">Jawaban panjang (daftar tabel/kolom) butuh ruang lebih. Terlalu kecil = jawaban terpotong di tengah.</span>
+          </div>
+        </div>
+        <div class="model-picker" id="llm-picker" hidden>
+          <div class="head">
+            <span id="llm-picker-info">0 model</span>
+            <span class="spacer"></span>
+            <input type="text" class="srch" id="llm-model-filter" placeholder="Saring model..." aria-label="Saring model">
+            <button class="btn ghost sm" id="btn-llm-picker-close" type="button">Tutup</button>
+          </div>
+          <ul class="model-list" id="llm-models"></ul>
+        </div>
+        <div class="group-foot">
+          <button class="btn" id="btn-llm-models" type="button">Muat daftar model</button>
+          <button class="btn primary" id="btn-save-llm" type="button">Simpan model</button>
+          <span id="llm-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="jev" hidden>
+        <div class="group-head">
+          <h2>Jev</h2>
+          <p>Lapisan keputusan: memilih capability, bukan menulis jawaban.</p>
+        </div>
+        <div id="jev-note"></div>
+        <div class="row" style="align-items:center">
+          <label class="switch" for="jev-enabled">
+            <input type="checkbox" id="jev-enabled">
+            <span class="track"></span>
+            <span>Aktifkan Jev</span>
+          </label>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="jev-provider">Transport</label>
+            <select id="jev-provider">
+              <option value="systemone">systemone (POST state + questions)</option>
+              <option value="mcp">mcp (tools/call)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="jev-model">Model</label>
+            <input type="text" id="jev-model" spellcheck="false" placeholder="oc/jev-1.13-free">
+          </div>
+          <div class="field" id="jev-url-field">
+            <label for="jev-url">Endpoint System One</label>
+            <input type="text" id="jev-url" spellcheck="false" placeholder="http://localhost:20128/v1/systemone">
+          </div>
+          <div class="field">
+            <label for="jev-key">API key</label>
+            <input type="password" id="jev-key" spellcheck="false" placeholder="kosongkan bila tidak berubah">
+            <span class="help" id="jev-key-help">Kosong = kunci tersimpan dipakai apa adanya.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn" id="btn-jev-probe" type="button">Uji Jev</button>
+          <button class="btn primary" id="btn-save-jev" type="button">Simpan Jev</button>
+          <span id="jev-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="fmt" hidden>
+        <div class="group-head">
+          <h2>Format berkas</h2>
+          <p>Jenis berkas yang boleh jadi knowledge, berlaku untuk semua tenant dan untuk halaman utama.</p>
+        </div>
+        <div id="fmt-note"></div>
+        <div id="fmt-groups"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="fmt-max">Batas ukuran berkas (MB)</label>
+            <input type="number" id="fmt-max" min="1" max="512" step="1" value="25">
+            <span class="help" id="fmt-max-help">Ditolak sebelum diunggah.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn" id="btn-fmt-all" type="button">Pilih semua yang tersedia</button>
+          <button class="btn primary" id="btn-save-fmt" type="button">Simpan format</button>
+          <span id="fmt-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="retr" hidden>
+        <div class="group-head">
+          <h2>Retrieval</h2>
+          <p>Pilihan per permintaan dari browser ini; tidak mengubah setelan layanan.</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="r-topk">top_k</label>
+            <input type="number" id="r-topk" min="1" max="50" step="1">
+          </div>
+          <div class="field">
+            <label for="r-threshold">threshold</label>
+            <input type="number" id="r-threshold" min="0" max="1" step="0.05">
+          </div>
+          <div class="field">
+            <label for="r-route">Keputusan Jev</label>
+            <select id="r-route">
+              <option value="">otomatis (dari Jev)</option>
+              <option value="knowledge_query">knowledge_query</option>
+              <option value="knowledge_search">knowledge_search</option>
+              <option value="knowledge_summary">knowledge_summary</option>
+              <option value="knowledge_extract">knowledge_extract</option>
+            </select>
+            <span class="help">Memaksa capability untuk permintaan berikutnya.</span>
+          </div>
+        </div>
+        <div class="row">
+          <label class="switch" for="r-strict"><input type="checkbox" id="r-strict"><span class="track"></span><span>strict grounding</span></label>
+          <label class="switch" for="r-hybrid"><input type="checkbox" id="r-hybrid"><span class="track"></span><span>hybrid (BM25 + vektor)</span></label>
+          <label class="switch" for="r-reranker"><input type="checkbox" id="r-reranker"><span class="track"></span><span>reranker</span></label>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-retr" type="button">Simpan pilihan</button>
+          <span id="retr-status"></span>
+        </div>
+
+        <div class="group-head">
+          <h2>Dokumen besar</h2>
+          <p>Setelan layanan (perlu izin admin, berlaku untuk semua tenant). Naikkan anggaran konteks kalau dokumennya besar; turunkan kalau model yang dipakai berjendela kecil.</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="s-context-tokens">Anggaran konteks (token)</label>
+            <input type="number" id="s-context-tokens" min="2000" max="200000" step="1000" value="24000">
+            <span class="help">Berapa banyak isi dokumen yang benar-benar dikirim ke model. 0 = ikut batas karakter.</span>
+          </div>
+          <div class="field">
+            <label for="s-topk">top_k bawaan</label>
+            <input type="number" id="s-topk" min="1" max="50" step="1" value="12">
+            <span class="help">Jumlah potongan hasil pencarian sebelum dokumen dilengkapi.</span>
+          </div>
+          <div class="field">
+            <label for="s-maxchunks">Maks. potongan per dokumen</label>
+            <input type="number" id="s-maxchunks" min="1" max="200" step="1" value="8">
+            <span class="help">Batas potongan satu dokumen di tahap pencarian.</span>
+          </div>
+        </div>
+        <div class="row">
+          <label class="switch" for="s-expand"><input type="checkbox" id="s-expand"><span class="track"></span><span>lengkapi dokumen sampai utuh</span></label>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-retr-svc" type="button">Simpan setelan konteks</button>
+          <span id="retr-svc-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="web" hidden>
+        <div class="group-head">
+          <h2>Sumber web</h2>
+          <p>Knowledge bisa diambil dari halaman web atau berkas publik. Panel ini mengatur batas penjelajahannya; berlaku untuk semua tenant.</p>
+        </div>
+        <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
+          <label class="switch" for="s-web-enabled"><input type="checkbox" id="s-web-enabled" checked><span class="track"></span><span>Izinkan knowledge dari web</span></label>
+          <label class="switch" for="s-web-samehost"><input type="checkbox" id="s-web-samehost" checked><span class="track"></span><span>Hanya tautan pada alamat yang sama</span></label>
+          <label class="switch" for="s-web-followfiles"><input type="checkbox" id="s-web-followfiles" checked><span class="track"></span><span>Ikut ambil berkas yang ditautkan (PDF/DOCX)</span></label>
+          <label class="switch" for="s-web-robots"><input type="checkbox" id="s-web-robots" checked><span class="track"></span><span>Hormati robots.txt</span></label>
+          <label class="switch" for="s-web-private"><input type="checkbox" id="s-web-private"><span class="track"></span><span>Izinkan alamat privat/intranet</span></label>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="s-web-pages">Maks halaman per crawl</label>
+            <input type="number" id="s-web-pages" min="1" max="200" step="1" value="20">
+            <span class="help">Batas berapa halaman diambil dari satu alamat web.</span>
+          </div>
+          <div class="field">
+            <label for="s-web-depth">Kedalaman tautan</label>
+            <input type="number" id="s-web-depth" min="0" max="5" step="1" value="2">
+            <span class="help">0 = hanya halaman yang diberikan.</span>
+          </div>
+        </div>
+        <p class="help" style="margin:0">Alamat metadata mesin (169.254.169.254, *.internal) selalu ditolak, termasuk saat alamat privat diizinkan. Bawaannya alamat privat <strong>mati</strong> supaya server ini tidak bisa disuruh membaca jaringan dalam.</p>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-web-svc" type="button">Simpan setelan web</button>
+          <span id="web-svc-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="summary" hidden>
+        <div class="group-head">
+          <h2>Ringkasan dokumen</h2>
+          <p>Saat dokumen diunggah, isinya diringkas sekali dan ringkasannya ikut disimpan sebagai knowledge. Pertanyaan yang meminta ringkasan lalu dijawab dari ringkasan itu - bukan dari sebagian potongan hasil pencarian.</p>
+        </div>
+        <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
+          <label class="switch" for="s-summary-enabled"><input type="checkbox" id="s-summary-enabled" checked><span class="track"></span><span>Buat ringkasan setiap dokumen</span></label>
+        </div>
+        <div class="grid-3">
+          <div class="field">
+            <label for="s-summary-window">Jendela per tahap (token)</label>
+            <input type="number" id="s-summary-window" min="1000" max="200000" step="1000" value="12000">
+            <span class="help">Dokumen besar diringkas bertahap; ini ukuran tiap tahapnya.</span>
+          </div>
+          <div class="field">
+            <label for="s-summary-maxtok">Panjang ringkasan (token)</label>
+            <input type="number" id="s-summary-maxtok" min="256" max="32000" step="256" value="2048">
+            <span class="help">Ruang menulis ringkasan. Terlalu kecil = ringkasan terpotong.</span>
+          </div>
+          <div class="field">
+            <label for="s-summary-maxdocs">Maks dokumen per pertanyaan</label>
+            <input type="number" id="s-summary-maxdocs" min="1" max="20" step="1" value="3">
+            <span class="help">Berapa ringkasan dokumen boleh ikut saat user minta ringkasan.</span>
+          </div>
+        </div>
+        <p class="help" style="margin:0">Isi dokumen <strong>tidak pernah</strong> dikorbankan demi ringkasan: pada anggaran konteks yang mepet, isi asli yang didahulukan dan ringkasan hanya mengisi sisa. Ringkasan juga tidak ikut bersaing di pencarian biasa, supaya jawaban faktual tetap datang dari isi aslinya.</p>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-summary-svc" type="button">Simpan setelan ringkasan</button>
+          <span id="summary-svc-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="keys" hidden>
+        <div class="group-head">
+          <h2>Kunci API</h2>
+          <p>Kunci untuk memanggil layanan ini. Nilainya hanya tampil sekali saat dibuat, setelah itu tersimpan sebagai hash.</p>
+        </div>
+        <div id="keys-note"></div>
+        <div id="keys-bootstrap"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="key-label">Label</label>
+            <input type="text" id="key-label" spellcheck="false" placeholder="mis. Bot WhatsApp CS">
+            <span class="help">Untuk mengenali kunci ini di daftar.</span>
+          </div>
+          <div class="field">
+            <label for="key-expiry">Masa berlaku (hari)</label>
+            <input type="number" id="key-expiry" min="1" max="3650" step="1" placeholder="kosong = tanpa batas">
+            <span class="help">Setelah lewat, kunci berhenti berlaku sendiri.</span>
+          </div>
+        </div>
+        <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
+          <label class="switch" for="key-perm-read"><input type="checkbox" id="key-perm-read" checked disabled><span class="track"></span><span>read</span></label>
+          <label class="switch" for="key-perm-write"><input type="checkbox" id="key-perm-write" checked><span class="track"></span><span>write</span></label>
+          <label class="switch" for="key-perm-admin"><input type="checkbox" id="key-perm-admin"><span class="track"></span><span>admin</span></label>
+          <span class="help">read selalu ikut; admin hanya bila kunci ini memang dipakai mengurus layanan.</span>
+        </div>
+        <details class="adv">
+          <summary>Tenant kunci (opsional)</summary>
+          <div class="grid-3">
+            <div class="field">
+              <label for="key-org">organization_id</label>
+              <input type="text" id="key-org" spellcheck="false">
+            </div>
+            <div class="field">
+              <label for="key-user">user_id</label>
+              <input type="text" id="key-user" spellcheck="false">
+            </div>
+            <div class="field">
+              <label for="key-app">application_id</label>
+              <input type="text" id="key-app" spellcheck="false">
+            </div>
+          </div>
+          <span class="help" id="key-tenant-help">Kosong = ikut konteks kunci yang Anda pakai sekarang.</span>
+        </details>
+        <div class="key-result" id="key-result" hidden>
+          <label for="key-value">Kunci baru: tampil sekali</label>
+          <div class="row">
+            <input type="text" id="key-value" readonly spellcheck="false">
+            <button class="btn sm" id="btn-copy-key" type="button">Salin</button>
+          </div>
+          <span class="help" id="key-result-help">Simpan sekarang; setelah ditutup, nilainya tidak bisa ditampilkan lagi.</span>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-create-key" type="button">Buat kunci</button>
+          <button class="btn" id="btn-keys-refresh" type="button">Muat ulang daftar</button>
+          <span id="keys-status"></span>
+        </div>
+        <div class="key-list">
+          <table class="key-table">
+            <thead>
+              <tr><th>Label</th><th>Kunci</th><th>Tenant</th><th>Izin</th><th>Dibuat</th><th>Dipakai</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="keys-rows"></tbody>
+          </table>
+          <p class="empty" id="keys-empty">Belum ada kunci. Hanya kunci dari layar ini yang bisa dicabut; kunci API_KEYS_JSON diubah lewat env.</p>
+        </div>
+      </section>
+      </div>
+    </div>
+  </dialog>
+</div>
+
+<dialog id="dlg-paste">
+  <form method="dialog" class="field" style="gap:12px;min-width:min(560px,86vw)">
+    <label for="paste-name">Nama dokumen</label>
+    <input type="text" id="paste-name" placeholder="SOP Cuti 2026">
+    <label for="paste-text">Isi teks</label>
+    <textarea id="paste-text" rows="9" placeholder="Tempel isi dokumen di sini"></textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" value="cancel" type="submit">Batal</button>
+      <button class="btn primary" id="paste-confirm" value="ok" type="submit">Indeks</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-url">
+  <form method="dialog" class="field" style="gap:12px;min-width:min(560px,86vw)">
+    <label for="url-value">URL berkas publik atau halaman web</label>
+    <input type="text" id="url-value" spellcheck="false" placeholder="https://contoh.id/dokumen.pdf atau https://contoh.id/panduan">
+    <div class="row" style="gap:16px;align-items:center">
+      <label class="switch" for="url-crawl" style="flex:1">
+        <input type="checkbox" id="url-crawl">
+        <span class="track"></span>
+        <span>Jelajahi tautan di halaman ini (jadi satu dokumen berisi banyak halaman)</span>
+      </label>
+    </div>
+    <div id="url-crawl-opts" hidden>
+      <div class="row" style="gap:12px">
+        <div class="field" style="flex:1">
+          <label for="url-max-pages">Maks halaman</label>
+          <input type="number" id="url-max-pages" min="1" max="200" value="20">
+        </div>
+        <div class="field" style="flex:1">
+          <label for="url-max-depth">Kedalaman tautan</label>
+          <input type="number" id="url-max-depth" min="0" max="5" value="2">
+        </div>
+      </div>
+      <span class="help">Hanya tautan pada alamat yang sama yang diikuti, dan robots.txt dihormati.</span>
+    </div>
+    <label for="url-name">Nama dokumen (opsional)</label>
+    <input type="text" id="url-name" placeholder="diambil dari nama berkas / judul halaman bila kosong">
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" value="cancel" type="submit">Batal</button>
+      <button class="btn primary" id="url-confirm" value="ok" type="submit">Indeks</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-summary">
+  <form method="dialog" class="field" style="gap:12px;min-width:min(640px,88vw)">
+    <h3 id="summary-title" style="margin:0">Ringkasan</h3>
+    <pre id="summary-body" class="mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;margin:0"></pre>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn primary" value="ok" type="submit">Tutup</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js?v=20261002d"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+# Rahasia & konfigurasi lokal -- JANGAN pernah ikut ter-commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Data runtime: basis vektor (Qdrant), indeks sparse, tabel SQLite, job store,
+# setelan yang disimpan lewat UI (berisi kunci API), dan berkas uji yang diunggah
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Lingkungan Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Cadangan & berkas sementara
+ui_backup_0900/
+*.log
+*.bak
+tmp/
+
+# Hasil build situs dokumentasi (dibangun ulang oleh scripts/build_docs.sh).
+# Bila ingin menyajikan docs tanpa build di server, hapus baris ini —
+# tetapi ingat MkDocs menghasilkan ratusan berkas HTML.
+site/
+scratch/

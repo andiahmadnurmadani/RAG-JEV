@@ -1,0 +1,33 @@
+# Konteks build untuk Dockerfile produksi. Semua yang di-ignore di bawah tidak perlu dikirim
+# ke daemon Docker (mempercepat build dan mencegah data/rahasia ikut masuk image).
+
+.git
+.gitignore
+.gitattributes
+
+# Rahasia / konfigurasi lokal
+.env
+.env.*
+!.env.example
+
+# Data runtime (knowledge, vektor, tabel, log) — tidak boleh masuk image
+data
+site
+ui_backup_0900
+*.sqlite
+*.sqlite3
+*.log
+*.junit.xml
+
+# Artefak Python
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Repo lokal / venv uji
+data/tmp/olevenv

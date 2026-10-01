@@ -1,0 +1,16 @@
+# Berkas teks selalu LF supaya skrip shell dan Docker (Linux) tetap jalan,
+# walau repo dikerjakan dari Windows.
+* text=auto eol=lf
+
+# Berkas biner: jangan pernah dikonversi akhir barisnya (kalau tidak,
+# berkas uji .doc/.xls/.ppt akan rusak dan pembacanya gagal).
+*.doc binary
+*.xls binary
+*.ppt binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.sqlite binary
+*.woff binary
+*.woff2 binary

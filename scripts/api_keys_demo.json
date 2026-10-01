@@ -1,0 +1,14 @@
+{
+  "live-key-org-a": {
+    "user_id": "user_a",
+    "organization_id": "org_a",
+    "application_id": "app_ui",
+    "permissions": ["read", "write", "admin"]
+  },
+  "live-key-org-b": {
+    "user_id": "user_b",
+    "organization_id": "org_b",
+    "application_id": "app_ui",
+    "permissions": ["read", "write"]
+  }
+}
