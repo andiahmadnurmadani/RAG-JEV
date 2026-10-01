@@ -43,6 +43,11 @@ class Candidate:
     sparse_score: Optional[float] = None
     fused_score: Optional[float] = None
     rerank_score: Optional[float] = None
+    # Bagian dokumen yang DISERTAKAN untuk melengkapi dokumen (bukan hasil pencarian baris
+    # teratas). Dipakai perender konteks untuk menandai urutan dokumen + menyusun catatan
+    # kelengkapan, bukan untuk mengubah skor.
+    expanded: bool = False
+    document_order: int = 0
 
     def to_source(self) -> Dict[str, Any]:
         return {

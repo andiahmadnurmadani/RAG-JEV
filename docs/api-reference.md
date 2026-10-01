@@ -472,6 +472,7 @@ Skema: `SettingsUpdateRequest`
 | `llm` | object | null | — |  |
 | `jev` | object | null | — |  |
 | `uploads` | object | null | — |  |
+| `retrieval` | object | null | — |  |
 
 | Kode | Arti |
 |---|---|
@@ -842,7 +843,7 @@ Tag: query
 
 | Field | Tipe | Wajib | Keterangan |
 |---|---|---|---|
-| `top_k` | integer | — | (default: `5`) |
+| `top_k` | integer | — | (default: `12`) |
 | `strict_grounding` | boolean | — | (default: `True`) |
 | `include_sources` | boolean | — | (default: `True`) |
 | `use_hybrid` | boolean | null | — |  |
@@ -876,6 +877,7 @@ Tag: query
 | `llm` | object | null | — |  |
 | `jev` | object | null | — |  |
 | `uploads` | object | null | — |  |
+| `retrieval` | object | null | — |  |
 
 ### `ValidationError`
 

@@ -13,17 +13,19 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-from app.core.tenant import TrustedContext
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.metrics import incr, observe
+from app.core.tenant import TrustedContext
 from app.jev.policies import RouteDecision
-from app.parsing.tables import scope_note as table_scope_note
 from app.jev.router import JevRouter
-from app.rag.context import BuiltContext, build_context
-from app.rag.generator import Generator, NO_ANSWER_EN, NO_ANSWER_ID
-from app.rag.retriever import Candidate, Retriever, RetrievalResult
+from app.parsing.tables import scope_note as table_scope_note
+from app.qdrant import repository
+from app.rag.chunker import estimate_tokens
+from app.rag.context import BuiltContext, DocumentCoverage, build_context, merge_expanded
+from app.rag.generator import NO_ANSWER_EN, NO_ANSWER_ID, Generator
+from app.rag.retriever import Candidate, RetrievalResult, Retriever
 from app.tables import analytics as table_analytics
 from app.tables.store import TableStore
 
@@ -46,6 +48,9 @@ class PipelineResult:
     raw_extraction: Dict[str, Any] = field(default_factory=dict)
     computed: Optional[Dict[str, Any]] = None
     table_note: Optional[str] = None
+    # Berapa bagian setiap dokumen yang benar-benar masuk konteks (transparansi ke klien:
+    # "dokumen ini dibaca lengkap" vs "sebagian").
+    document_coverage: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class RagPipeline:
@@ -167,10 +172,20 @@ class RagPipeline:
             return self._with_table_hint(self._no_answer(result, "below_threshold", retrieval), table_reason)
 
         observe("best_relevance_score", best)
-        built = build_context(
+        budget = settings.context_token_budget
+        candidates, coverage = self._expand_context(
             retrieval.candidates,
-            max_tokens=max(256, settings.llm_context_chars // 4),
-            max_chunks=min(8, max(1, top_k + 2)),
+            context=context,
+            knowledge_base_id=knowledge_base_id,
+            document_ids=document_ids,
+            budget_tokens=budget,
+        )
+        result.document_coverage = [item.to_dict() for item in coverage]
+        built = build_context(
+            candidates,
+            max_tokens=budget,
+            max_chunks=max(1, len(candidates)),
+            coverage=coverage,
         )
         result.context = built
         result.injection_flags = built.injection_flags
@@ -206,6 +221,9 @@ class RagPipeline:
             "reranker": retrieval.reranker_used,
             "rerank_ms": retrieval.rerank_ms,
             "context_tokens": built.tokens,
+            "context_chunks": len(built.used),
+            "context_expanded_chunks": sum(1 for candidate in built.used if candidate.expanded),
+            "document_coverage": [item.to_dict() for item in coverage],
             "input_tokens": generated.usage.input_tokens,
             "output_tokens": generated.usage.output_tokens,
             "retrieval_ms": retrieval.elapsed_ms,
@@ -215,6 +233,131 @@ class RagPipeline:
             # Perhitungan tabel diminta tetapi ditolak: klien harus tahu alasannya.
             result.table_note = table_reason
         return result
+
+    # ------------------------------------------------------------------ #
+    def _expand_context(
+        self,
+        candidates: Sequence[Candidate],
+        *,
+        context: TrustedContext,
+        knowledge_base_id: Optional[str],
+        document_ids: Optional[Sequence[str]],
+        budget_tokens: int,
+    ) -> tuple[List[Candidate], List[DocumentCoverage]]:
+        """Lengkapi konteks dengan SISA potongan dokumen yang sudah terambil.
+
+        Pencarian kemiripan selalu menghasilkan sebagian: beberapa potongan teratas dari
+        dokumen yang bisa punya puluhan bagian. Pertanyaan seperti "struktur lengkap database
+        X" tidak bisa dijawab dari sebagian - model lalu menulis bahwa datanya tidak ada di
+        konteks, padahal datanya ADA di indeks. Di sini dokumen yang muncul di hasil pencarian
+        diikuti sampai habis (urut dokumen) selama anggaran token masih cukup, dan kelengkapan
+        yang benar-benar tercapai dilaporkan apa adanya.
+        """
+        settings = self._settings
+        extras: List[tuple[str, List[Candidate]]] = []
+        allowed = {str(item) for item in (document_ids or []) if item}
+        top_documents: List[Candidate] = []
+        for candidate in candidates:
+            if allowed and candidate.document_id not in allowed:
+                # Lingkup dokumen yang diminta klien tetap mengikat di jalur pelengkap.
+                continue
+            if candidate.document_id not in [item.document_id for item in top_documents]:
+                top_documents.append(candidate)
+
+        if settings.context_expand_documents and top_documents:
+            spent = sum(estimate_tokens(candidate.content) + 60 for candidate in candidates)
+            for top in top_documents[: max(1, int(settings.context_expand_max_documents))]:
+                if spent >= budget_tokens:
+                    break
+                try:
+                    parts = repository.list_document_chunks(
+                        settings,
+                        organization_id=context.organization_id,
+                        document_id=top.document_id,
+                        knowledge_base_id=knowledge_base_id,
+                    )
+                except Exception as exc:  # noqa: BLE001 - pelengkap, bukan jalur wajib
+                    logger.warning("gagal melengkapi dokumen %s: %s", top.document_id, exc)
+                    continue
+                if not parts:
+                    continue
+                already = {item.chunk_id for item in candidates if item.document_id == top.document_id}
+                added: List[Candidate] = []
+                for position, payload in enumerate(parts, start=1):
+                    chunk_id = str(payload.get("chunk_id") or "")
+                    content = str(payload.get("content") or "")
+                    if not chunk_id or not content.strip() or chunk_id in already:
+                        continue
+                    tokens = estimate_tokens(content)
+                    if spent + tokens > budget_tokens:
+                        break
+                    added.append(
+                        Candidate(
+                            chunk_id=chunk_id,
+                            document_id=top.document_id,
+                            content=content,
+                            document_name=str(payload.get("document_name") or top.document_name),
+                            page=payload.get("page"),
+                            section=str(payload.get("section") or ""),
+                            source_url=str(payload.get("source_url") or ""),
+                            language=str(payload.get("language") or ""),
+                            expanded=True,
+                            document_order=position,
+                        )
+                    )
+                    spent += tokens
+                if added:
+                    extras.append((top.document_id, added))
+
+        coverage = self._document_coverage(candidates, extras, context=context)
+        return merge_expanded(candidates, extras), coverage
+
+    def _document_coverage(
+        self,
+        candidates: Sequence[Candidate],
+        extras: Sequence[tuple[str, Sequence[Candidate]]],
+        *,
+        context: TrustedContext,
+    ) -> List[DocumentCoverage]:
+        """Hitung berapa bagian tiap dokumen yang ikut ke konteks vs jumlah di indeks."""
+
+        settings = self._settings
+        tally: Dict[str, Dict[str, Any]] = {}
+        for candidate in candidates:
+            entry = tally.setdefault(candidate.document_id, {"name": candidate.document_name, "included": 0})
+            entry["included"] += 1
+        for document_id, parts in extras:
+            entry = tally.setdefault(
+                document_id,
+                {"name": parts[0].document_name if parts else "", "included": 0},
+            )
+            entry["included"] += len(parts)
+
+        coverage: List[DocumentCoverage] = []
+        for document_id, entry in tally.items():
+            try:
+                total = repository.count_document(
+                    settings, organization_id=context.organization_id, document_id=document_id
+                )
+            except Exception as exc:  # noqa: BLE001 - pelengkap
+                logger.warning("gagal menghitung dokumen %s: %s", document_id, exc)
+                total = 0
+            if total <= 0:
+                # Jumlah tidak diketahui (-1) atau nol: jangan mengaku "sebagian" atas dasar
+                # angka yang tidak dipercaya; laporkan apa yang benar-benar dikirim.
+                total = entry["included"]
+            coverage.append(
+                DocumentCoverage(
+                    document_id=document_id,
+                    document_name=str(entry["name"] or document_id),
+                    included=entry["included"],
+                    total=int(total),
+                    complete=entry["included"] >= int(total),
+                    ordered=any(document_id == doc for doc, _ in extras),
+                )
+            )
+        coverage.sort(key=lambda item: (not item.complete, -item.included))
+        return coverage
 
     # ------------------------------------------------------------------ #
     def _answer_from_tables(
@@ -365,10 +508,20 @@ class RagPipeline:
             result.no_answer_reason = "no_candidates"
             return result
 
-        built = build_context(
+        budget = self._settings.context_token_budget
+        candidates, coverage = self._expand_context(
             retrieval.candidates,
-            max_tokens=max(256, self._settings.llm_context_chars // 4),
-            max_chunks=min(12, top_k),
+            context=context,
+            knowledge_base_id=knowledge_base_id,
+            document_ids=document_ids,
+            budget_tokens=budget,
+        )
+        result.document_coverage = [item.to_dict() for item in coverage]
+        built = build_context(
+            candidates,
+            max_tokens=budget,
+            max_chunks=max(1, len(candidates)),
+            coverage=coverage,
         )
         result.context = built
         result.injection_flags = built.injection_flags

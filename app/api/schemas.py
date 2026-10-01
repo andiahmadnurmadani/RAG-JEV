@@ -40,7 +40,9 @@ class KnowledgeUpdateRequest(KnowledgeIndexRequest):
 class QueryOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    top_k: int = Field(default=5, ge=1, le=50)
+    # Berapa potongan yang diambil untuk konteks. Kecil = jawaban "tidak lengkap" walau datanya
+    # ada; besar = model benar-benar membaca dokumennya. Batas atas tetap 50.
+    top_k: int = Field(default=12, ge=1, le=50)
     strict_grounding: bool = True
     include_sources: bool = True
     use_hybrid: Optional[bool] = None
@@ -102,11 +104,27 @@ class SourceOut(BaseModel):
     score: float = 0.0
 
 
+class DocumentCoverageOut(BaseModel):
+    """Berapa bagian satu dokumen yang benar-benar dikirim ke model (transparansi konteks)."""
+
+    document_id: str = ""
+    document_name: str = ""
+    included: int = 0
+    total: int = 0
+    complete: bool = False
+    ordered: bool = False
+
+
 class QueryUsageOut(BaseModel):
     retrieved_chunks: int = 0
     reranked_chunks: int = 0
     reranker: str = "none"
     context_tokens: int = 0
+    # Berapa potongan dokumen yang BENAR-BENAR sampai ke konteks (termasuk bagian pelengkap
+    # supaya dokumennya utuh) - bukan sekadar berapa yang ditemukan pencarian.
+    context_chunks: int = 0
+    context_expanded_chunks: int = 0
+    document_coverage: List[DocumentCoverageOut] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
     retrieval_ms: float = 0.0

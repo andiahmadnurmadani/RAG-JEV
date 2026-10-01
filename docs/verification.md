@@ -555,3 +555,34 @@ Perintah mengulang:
 ```bash
 .venv/bin/python -m pytest tests/integration/test_access_gate.py tests/integration/test_bootstrap_admin.py -q
 ```
+
+## 11. Dokumen besar: diukur pada berkas asli, bukan diklaim
+
+Keluhan yang melahirkan perubahan ini: `Struktur Lengkap Database KMS Telin (2).pdf` (20 halaman)
+sudah diunggah, tetapi jawabannya berbunyi *"tidak lengkap — chunk terpotong … info tidak ditemukan
+di konteks"*. Jadi buktinya pun harus memakai berkas itu, dari ujung ke ujung.
+
+Angka hasil pengukuran (parser + pemotong + konteks produksi):
+
+| Ukuran | Sebelum | Sesudah |
+|---|---|---|
+| Pembaca PDF | `pypdf` | `PyMuPDF` (urutan tata letak, tabel jadi baris `\| a \| b \|`) |
+| Halaman terbaca | 20 | 20 (tidak ada halaman kosong) |
+| Baris sumber hilang | ada baris tabel terbelah | **0 dari 959** |
+| Potongan dokumen | ~20 potongan raksasa, sebagian terbelah di tengah baris | 21 potongan, semuanya berakhir di batas baris |
+| Potongan sampai ke model | 5 (dan maks. 3 per dokumen) | **21 (+13 potongan pelengkap)** |
+| Token konteks | ~4–6k | 19.038 (anggaran 24.000) |
+| Kelengkapan yang dilaporkan | tidak ada laporan | `{included: 21, total: 21, complete: true, ordered: true}` |
+
+Uji otomatisnya ada di repositori dan bisa diulang:
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/integration/test_real_kms_pdf.py -q -s   # berkas asli
+.venv/Scripts/python.exe -m pytest tests/integration/test_large_document_context.py tests/unit/test_pdf_and_large_tables.py -q
+```
+
+`test_real_kms_pdf.py` mengulang jalur yang sama dengan pengguna (unggah → tanya) dan dilewati
+kalau berkas PDF-nya tidak ada di mesin ini. `test_large_document_context.py` mengunci perilaku
+konteks: dokumen 40 bagian harus masuk konteks **seluruhnya** saat `top_k` kecil, dilaporkan
+sebagian saat anggarannya memang kecil, tetap di dalam batas tenant, dan berhenti menambah
+potongan ketika saklar pelengkap dimatikan.

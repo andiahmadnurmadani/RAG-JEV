@@ -50,6 +50,18 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "extensions": ("upload_extensions", "list"),
         "max_upload_mb": ("max_upload_mb", "int"),
     },
+    # Perilaku pengambilan konteks - inilah yang menentukan berapa banyak isi dokumen yang
+    # benar-benar dibaca model. Global, karena satu tenant yang menaikkannya akan memakai
+    # kuota model bersama. Disediakan supaya pemasangan bisa disetel tanpa redeploy: anggaran
+    # konteks naik ketika dokumennya besar, dan turun ketika modelnya berjendela kecil.
+    "retrieval": {
+        "context_max_tokens": ("context_max_tokens", "int"),
+        "final_top_k": ("final_top_k", "int"),
+        "max_chunks_per_document": ("max_chunks_per_document", "int"),
+        "context_expand_documents": ("context_expand_documents", "bool"),
+        "reranker_enabled": ("reranker_enabled", "bool"),
+        "strict_grounding": ("strict_grounding", "bool"),
+    },
 }
 
 def mask_secret(value: str) -> Optional[str]:

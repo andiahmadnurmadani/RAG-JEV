@@ -84,8 +84,28 @@ Ditambah system prompt PRD 17 (jangan mengarang, jangan pakai pengetahuan luar, 
 sitasi) dan pengingat PRD 35 (dokumen = data tak tepercaya). Marker prompt-injection yang
 ditemukan di dokumen dihitung (`prompt_injection_flags`) dan **tidak pernah** diikuti.
 
-Budget konteks = `LLM_CONTEXT_CHARS / 4` token (≈4 karakter/token); chunk yang tidak muat
-dibuang dan dilaporkan sebagai `dropped`, bukan diam-diam dipotong.
+Budget konteks = `CONTEXT_MAX_TOKENS` (bawaan 24000); kalau nilainya 0, dipakai
+`LLM_CONTEXT_CHARS / 4`. Chunk yang tidak muat dibuang dan dilaporkan sebagai `dropped`,
+bukan diam-diam dipotong.
+
+### Pelengkap dokumen (pertanyaan "seluruh isinya")
+
+Pencarian kemiripan selalu mengembalikan *sebagian* dokumen; itu cukup untuk pertanyaan tentang
+satu kebijakan, tetapi tidak untuk "jelaskan struktur lengkap dokumen ini". Karena itu, ketika
+`CONTEXT_EXPAND_DOCUMENTS=true` (bawaan), setiap dokumen yang muncul di hasil pencarian
+**diikuti sampai habis**: `list_document_chunks()` mengambil sisa potongannya dalam urutan
+dokumen (tetap disaring `organization_id` + `document_id`), lalu `merge_expanded()` menambahkan
+yang belum ada - pencarian dulu, pelengkap kemudian, tanpa duplikat. Potongan pelengkap ditandai
+`[DOCUMENT_PART] bagian N` supaya model membacanya sebagai satu dokumen, bukan hasil pencarian lain.
+
+Kelengkapannya dilaporkan terbuka: `usage.document_coverage[]` berisi
+`{document_id, document_name, included, total, complete, ordered}`, dan di dalam konteks ada
+blok `<<<DOCUMENT_COVERAGE …>>>` yang menyatakan status tiap dokumen secara apa adanya. Ini
+penting: tanpa catatan itu, model menebak apa yang "tidak ada di konteks", dan tebakan yang salah
+terlihat seperti data yang terpotong.
+
+Ukuran nyata pada PDF 20 halaman (50.413 karakter): 21 potongan, 19.038 token, semuanya masuk
+satu konteks (`complete: true`). Rinciannya di `docs/large-documents.md`.
 
 ## 6. Generation dan no-answer (PRD 16)
 

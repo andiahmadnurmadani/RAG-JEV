@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     dense_top_k: int = 30
     sparse_top_k: int = 30
     fusion_top_k: int = 40
-    final_top_k: int = 5
+    final_top_k: int = 12
     rrf_k: int = 60
     rerank_threshold: float = 0.35
     strict_grounding: bool = True
@@ -92,8 +92,24 @@ class Settings(BaseSettings):
     relevance_threshold: float = 0.35
     reranker_enabled: bool = True
     reranker_candidates: int = 40
-    max_chunks_per_document: int = 3
+    # Berapa banyak potongan dari SATU dokumen yang boleh masuk konteks. Batas kecil membuat
+    # pertanyaan "seluruh isi dokumen ini" mustahil dijawab: pertanyaan seperti itu butuh
+    # dokumennya utuh, bukan tiga potongan paling mirip.
+    max_chunks_per_document: int = 8
     answer_language: Literal["id", "en"] = "id"
+
+    # ---- konteks yang dikirim ke LLM (PRD 12) ----------------------------
+    # Anggaran token untuk blok RETRIEVED_CONTEXT. Ini yang menentukan berapa bagian dokumen
+    # benar-benar terbaca model; terlalu kecil = jawaban "tidak lengkap" walau datanya ada.
+    # 24000 dipilih dari pengukuran nyata: PDF "Struktur Lengkap Database KMS Telin" (20
+    # halaman, 50k karakter) menjadi 18.5k token, jadi dokumen sekelas itu muat UTUH dalam
+    # satu panggilan. Model berjendela kecil bisa menurunkannya dari panel Ambil (tanpa redeploy).
+    context_max_tokens: int = 24000
+    # Sertakan sisa potongan dokumen yang terambil (urutan dokumen) supaya pertanyaan yang
+    # menyangkut satu dokumen utuh bisa dijawab lengkap, bukan hanya potongan teratas.
+    context_expand_documents: bool = True
+    context_expand_max_documents: int = 3
+    context_expand_min_chunks: int = 2      # hanya dokumen dengan >= N potongan di konteks
 
     # ---- generation (PRD 8.1, 17) ----------------------------------------
     llm_provider: Literal["openai_compatible", "ollama", "mock"] = "mock"
@@ -106,7 +122,7 @@ class Settings(BaseSettings):
     llm_timeout: float = 120.0
     llm_max_tokens: int = 1024
     llm_temperature: float = 0.1
-    llm_context_chars: int = 12000
+    llm_context_chars: int = 96000
 
     # ---- Jev orchestration (PRD 18, 19) ----------------------------------
     jev_mode: Literal["live", "heuristic", "off"] = "heuristic"
@@ -179,6 +195,17 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return int(self.max_upload_mb) * 1024 * 1024
+
+    @property
+    def context_token_budget(self) -> int:
+        """Anggaran token blok konteks untuk LLM.
+
+        ``CONTEXT_MAX_TOKENS`` bila diisi; kalau 0, diturunkan dari ``LLM_CONTEXT_CHARS``
+        (≈4 karakter per token) supaya pemasangan lama tetap punya batas yang masuk akal.
+        """
+        if self.context_max_tokens and self.context_max_tokens > 0:
+            return max(512, int(self.context_max_tokens))
+        return max(512, int(self.llm_context_chars) // 4)
 
     @property
     def cors_origins(self) -> List[str]:

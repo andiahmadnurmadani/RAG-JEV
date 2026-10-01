@@ -13,7 +13,7 @@ import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.core.errors import AppError
 from app.parsing import doc_binary, ppt_binary, sheet_dates, xls_binary
@@ -52,6 +52,105 @@ def _normalize(text: str) -> str:
 
 
 def parse_pdf(content: bytes, document_name: str) -> ParsedDocument:
+    """Teks PDF, dengan tabel dirender sebagai baris ``| a | b |`` bila bisa.
+
+    Dua mesin dipakai berurutan. PyMuPDF dulu karena urutan bacanya mengikuti tata letak
+    (kolom tidak tertukar) dan ia bisa mengenali tabel; tanpa itu isi tabel datang sebagai
+    baris berspasi yang tidak bisa dipotong per baris - potongan jadi terbelah di tengah baris
+    dan baris tabel inti tidak bisa ditemukan kembali. pypdf tetap jadi cadangan supaya
+    pemasangan tanpa PyMuPDF tidak kehilangan apa pun.
+    """
+    pages = _pdf_pages_pymupdf(content)
+    parser = "pymupdf"
+    if pages is None:
+        pages = _pdf_pages_pypdf(content)
+        parser = "pypdf"
+    if not any(page.text for page in pages):
+        raise AppError("INDEXING_FAILED", "PDF contains no extractable text (scanned file?)")
+    return ParsedDocument(document_name=document_name, pages=pages, parser=parser)
+
+
+def _pdf_pages_pymupdf(content: bytes) -> Optional[List[ParsedPage]]:
+    """Halaman-halaman PDF lewat PyMuPDF; ``None`` bila pustakanya tidak ada."""
+
+    try:
+        import pymupdf as fitz  # PyMuPDF >= 1.24 (nama modul baru)
+    except ImportError:
+        try:
+            import fitz  # PyMuPDF lama
+        except ImportError:  # pragma: no cover - bergantung pemasangan
+            return None
+
+    pages: List[ParsedPage] = []
+    try:
+        with fitz.open(stream=content, filetype="pdf") as document:
+            for number, page in enumerate(document, start=1):
+                try:
+                    text = _pymupdf_page_text(page)
+                except Exception:  # noqa: BLE001 — satu halaman rusak tidak boleh mematikan berkas
+                    text = ""
+                pages.append(ParsedPage(page=number, text=_normalize(text)))
+    except Exception:  # noqa: BLE001 - berkas tidak terbaca PyMuPDF: biarkan pypdf mencoba
+        return None
+    return pages or None
+
+
+def _pymupdf_page_text(page: Any) -> str:
+    """Teks satu halaman, dengan area tabel diganti baris berformat ``| sel | sel |``.
+
+    Blok teks yang berada DI DALAM area tabel dibuang supaya isinya tidak muncul dua kali
+    (sekali sebagai prosa, sekali sebagai baris tabel) - duplikat menggandakan token dan
+    membuat pencarian mengembalikan dua potongan yang isinya sama.
+    """
+
+    tables: List[Any] = []
+    try:
+        found = page.find_tables()
+        tables = list(getattr(found, "tables", []) or [])
+    except Exception:  # noqa: BLE001 - deteksi tabel bersifat bonus
+        tables = []
+    plain = page.get_text("text", sort=True) or ""
+    if not tables:
+        return plain
+
+    boxes = [tuple(getattr(table, "bbox", ()) or ()) for table in tables]
+    pieces: List[tuple[float, float, str]] = []
+    for block in page.get_text("blocks", sort=True) or []:
+        try:
+            x0, y0, x1, y1, text = block[0], block[1], block[2], block[3], block[4]
+        except (IndexError, TypeError):  # pragma: no cover - bentuk blok tak terduga
+            continue
+        if not str(text or "").strip():
+            continue
+        centre = ((float(x0) + float(x1)) / 2.0, (float(y0) + float(y1)) / 2.0)
+        if any(_point_in_box(centre, box) for box in boxes if len(box) == 4):
+            continue
+        pieces.append((float(y0), float(x0), str(text).strip()))
+
+    for table in tables:
+        rows = []
+        for row in getattr(table, "extract", lambda: [])() or []:
+            cells = [" ".join(str(cell or "").split()) for cell in row]
+            if any(cells):
+                rows.append("| " + " | ".join(cells) + " |")
+        if not rows:
+            continue
+        box = tuple(getattr(table, "bbox", ()) or ())
+        y = float(box[1]) if len(box) == 4 else 0.0
+        x = float(box[0]) if len(box) == 4 else 0.0
+        pieces.append((y, x, "\n".join(rows)))
+
+    pieces.sort(key=lambda item: (round(item[0], 1), item[1]))
+    rendered = "\n\n".join(text for _, _, text in pieces)
+    return rendered or plain
+
+
+def _point_in_box(point: tuple[float, float], box: tuple[float, float, float, float]) -> bool:
+    x, y = point
+    return box[0] <= x <= box[2] and box[1] <= y <= box[3]
+
+
+def _pdf_pages_pypdf(content: bytes) -> List[ParsedPage]:
     try:
         from pypdf import PdfReader
     except ImportError as exc:  # pragma: no cover
@@ -63,9 +162,7 @@ def parse_pdf(content: bytes, document_name: str) -> ParsedDocument:
             pages.append(ParsedPage(page=number, text=_normalize(page.extract_text() or "")))
         except Exception:  # noqa: BLE001 — a single unreadable page must not kill the document
             pages.append(ParsedPage(page=number, text=""))
-    if not any(p.text for p in pages):
-        raise AppError("INDEXING_FAILED", "PDF contains no extractable text (scanned file?)")
-    return ParsedDocument(document_name=document_name, pages=pages, parser="pypdf")
+    return pages
 
 
 def _word_part_text(xml: str) -> str:

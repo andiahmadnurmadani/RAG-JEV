@@ -21,6 +21,9 @@ numpy==2.4.6
 
 # Parsing (PRD 10)
 pypdf==6.19.0
+# PyMuPDF: ekstraksi PDF sesuai tata letak + deteksi tabel (baris dirender "| a | b |").
+# Tanpa ini, isi tabel PDF datang sebagai baris berspasi dan potongan terbelah di tengah baris.
+pymupdf==1.28.2
 
 # Observability / tests
 psutil==7.2.2

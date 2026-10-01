@@ -87,6 +87,7 @@ nav:
   - Desain:
       - Arsitektur: architecture.md
       - Pipeline RAG: rag-pipeline.md
+      - Dokumen besar (tanpa data hilang): large-documents.md
       - Isolasi tenant: tenant-isolation.md
   - Operasi:
       - Deploy & menjalankan: deployment.md

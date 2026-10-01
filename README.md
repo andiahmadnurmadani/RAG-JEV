@@ -276,6 +276,7 @@ dengan navigasi kiri; hanya satu panel tampil sekaligus supaya tidak perlu mengg
 | **Jev** | saklar aktif, transport (`systemone` \| `mcp`), endpoint, model, API key, tombol Uji Jev (mengirim satu pertanyaan `noul` sungguhan dan menampilkan latensinya) | idem |
 | **Format berkas** | daftar centang jenis berkas per grup (Dokumen, Presentasi, Spreadsheet, Teks, Gambar) yang boleh jadi knowledge, plus batas ukuran berkas (MB). Format yang belum didukung mesin ini tampil nonaktif beserta alasannya (mis. `program tesseract belum terpasang`). Tombol *Pilih semua yang tersedia* dan *Simpan format* | `PUT /api/v1/settings`, **wajib izin `admin`** |
 | **Retrieval** | `top_k`, `threshold`, keputusan Jev (otomatis/`knowledge_query`/`knowledge_search`/`knowledge_summary`/`knowledge_extract`), `strict_grounding`, `hybrid`, `reranker` | pilihan per permintaan, hanya di browser |
+| **Retrieval → Dokumen besar** | anggaran konteks (token), `top_k` bawaan, maks. potongan per dokumen, saklar *lengkapi dokumen sampai utuh* | `PUT /api/v1/settings`, **wajib izin `admin`** |
 
 Aturan yang berlaku di layar ini:
 
@@ -407,6 +408,7 @@ Semua perilaku model/provider dipilih lewat env var (`.env.example` memuat semua
 | `JEV_ENABLED`, `JEV_MCP_URL`, `JEV_API_KEY` | orkestrasi Jev; jika gagal → fallback heuristik, bukan error |
 | `SETTINGS_OVERRIDE_PATH` | berkas override setelan LLM/Jev/**format berkas** dari layar Pengaturan (default `data/settings.json`) |
 | `UPLOAD_EXTENSIONS`, `MAX_UPLOAD_MB` | titik awal kebijakan format berkas; kosong = seluruh katalog yang didukung mesin ini (dipersempit kapan saja lewat Pengaturan) |
+| `CONTEXT_MAX_TOKENS`, `FINAL_TOP_K`, `MAX_CHUNKS_PER_DOCUMENT`, `CONTEXT_EXPAND_DOCUMENTS` | seberapa besar isi dokumen yang sampai ke model: anggaran konteks (bawaan 24000 token), jumlah potongan pencarian (12), batas potongan per dokumen (8), dan pelengkap dokumen sampai utuh (aktif). Bisa juga disetel dari panel **Retrieval → Dokumen besar** tanpa redeploy - lihat `docs/large-documents.md` |
 | `API_KEYS_JSON`, `KMS_SHARED_SECRET` | sumber tunggal `organization_id` yang tepercaya |
 | `RELEVANCE_THRESHOLD`, `STRICT_GROUNDING` | gerbang no-answer |
 

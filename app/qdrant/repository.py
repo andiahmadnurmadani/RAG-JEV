@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from qdrant_client import models as qmodels
 
@@ -273,6 +273,66 @@ def get_chunks_by_ids(
                 out.setdefault(key, payload)
         if offset is None or not records:
             break
+    return out
+
+
+def list_document_chunks(
+    settings: Settings,
+    *,
+    organization_id: str,
+    document_id: str,
+    knowledge_base_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Semua potongan satu dokumen, urut sesuai dokumen aslinya, di dalam batas tenant.
+
+    Dipakai saat konteks perlu dilengkapi menjadi dokumen utuh: pencarian kemiripan selalu
+    mengembalikan sebagian (potongan paling mirip), sedangkan pertanyaan "isi lengkap dokumen
+    ini" hanya bisa dijawab benar kalau seluruh bagiannya ikut dikirim ke model. Payload di
+    sini melewati filter tenant yang sama seperti pencarian - tidak ada jalan pintas.
+    """
+    if not collection_exists_guard(settings) or not document_id:
+        return []
+
+    conditions = [
+        qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
+        qmodels.FieldCondition(key="document_id", match=qmodels.MatchValue(value=document_id)),
+    ]
+    if knowledge_base_id:
+        conditions.append(
+            qmodels.FieldCondition(key="knowledge_base_id", match=qmodels.MatchValue(value=knowledge_base_id))
+        )
+    query_filter = qmodels.Filter(must=conditions)
+
+    client = get_client(settings)
+    out: List[Dict[str, Any]] = []
+    offset = None
+    while True:
+        records, offset = client.scroll(
+            collection_name=settings.qdrant_collection,
+            scroll_filter=query_filter,
+            limit=256,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for record in records:
+            payload = dict(record.payload or {})
+            if payload.get("organization_id") != organization_id:
+                logger.error("tenant mismatch while listing document %s", document_id)
+                continue
+            out.append(payload)
+        if offset is None or not records:
+            break
+
+    def order(payload: Dict[str, Any]) -> Tuple[int, str]:
+        index = payload.get("chunk_index")
+        if isinstance(index, int):
+            return index, str(payload.get("chunk_id", ""))
+        raw = str(payload.get("chunk_id", ""))
+        digits = raw.rsplit("_", 1)[-1]
+        return (int(digits) if digits.isdigit() else 0), raw
+
+    out.sort(key=order)
     return out
 
 

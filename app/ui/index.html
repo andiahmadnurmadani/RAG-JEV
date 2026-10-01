@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20260930e">
+<link rel="stylesheet" href="style.css?v=20261001a">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -373,6 +373,35 @@
           <button class="btn primary" id="btn-save-retr" type="button">Simpan pilihan</button>
           <span id="retr-status"></span>
         </div>
+
+        <div class="group-head">
+          <h2>Dokumen besar</h2>
+          <p>Setelan layanan (perlu izin admin, berlaku untuk semua tenant). Naikkan anggaran konteks kalau dokumennya besar; turunkan kalau model yang dipakai berjendela kecil.</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="s-context-tokens">Anggaran konteks (token)</label>
+            <input type="number" id="s-context-tokens" min="2000" max="200000" step="1000" value="24000">
+            <span class="help">Berapa banyak isi dokumen yang benar-benar dikirim ke model. 0 = ikut batas karakter.</span>
+          </div>
+          <div class="field">
+            <label for="s-topk">top_k bawaan</label>
+            <input type="number" id="s-topk" min="1" max="50" step="1" value="12">
+            <span class="help">Jumlah potongan hasil pencarian sebelum dokumen dilengkapi.</span>
+          </div>
+          <div class="field">
+            <label for="s-maxchunks">Maks. potongan per dokumen</label>
+            <input type="number" id="s-maxchunks" min="1" max="200" step="1" value="8">
+            <span class="help">Batas potongan satu dokumen di tahap pencarian.</span>
+          </div>
+        </div>
+        <div class="row">
+          <label class="switch" for="s-expand"><input type="checkbox" id="s-expand"><span class="track"></span><span>lengkapi dokumen sampai utuh</span></label>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-retr-svc" type="button">Simpan setelan konteks</button>
+          <span id="retr-svc-status"></span>
+        </div>
       </section>
 
       <section class="group" data-panel="keys" hidden>
@@ -472,6 +501,6 @@
   </form>
 </dialog>
 
-<script src="app.js?v=20260930e"></script>
+<script src="app.js?v=20261001a"></script>
 </body>
 </html>

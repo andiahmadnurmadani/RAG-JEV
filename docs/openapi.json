@@ -2454,7 +2454,7 @@
             "maximum": 50.0,
             "minimum": 1.0,
             "title": "Top K",
-            "default": 5
+            "default": 12
           },
           "strict_grounding": {
             "type": "boolean",
@@ -2656,6 +2656,18 @@
               }
             ],
             "title": "Uploads"
+          },
+          "retrieval": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieval"
           }
         },
         "additionalProperties": false,

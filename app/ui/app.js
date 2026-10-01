@@ -23,7 +23,7 @@ const state = {
   kb: DEFAULT_KB,
   mode: "answer",
   picked: new Set(),
-  opts: { top_k: 5, threshold: 0.35, strict: true, hybrid: true, reranker: false, route: "" },
+  opts: { top_k: 12, threshold: 0.35, strict: true, hybrid: true, reranker: false, route: "" },
   limits: { max_mb: null, allowed: [], allowed_ext: [] },
   catalog: [],
   models: [],
@@ -624,6 +624,19 @@ function renderAnswer(node, data) {
   } else {
     chips.push(["reranker", usage.reranker || "-"]);
     chips.push(["context_tokens", usage.context_tokens != null ? usage.context_tokens : "-"]);
+    if (usage.context_chunks) {
+      const extra = usage.context_expanded_chunks ? " (+" + usage.context_expanded_chunks + " pelengkap)" : "";
+      chips.push(["bagian di konteks", usage.context_chunks + extra]);
+    }
+    const coverage = usage.document_coverage || [];
+    if (coverage.length) {
+      const item = coverage[0];
+      const total = item.total || item.included;
+      chips.push([
+        "dokumen",
+        (item.document_name || item.document_id) + ": " + item.included + "/" + total + (item.complete ? " lengkap" : " sebagian"),
+      ]);
+    }
   }
   chips.push(["retrieval_ms", usage.retrieval_ms != null ? usage.retrieval_ms : "-"]);
   chips.push(["rendering_ms", usage.generation_ms != null ? Math.round(usage.generation_ms) : "-"]);
@@ -661,7 +674,7 @@ function renderHits(node, data) {
 
 function queryOptions() {
   const options = {
-    top_k: Number(state.opts.top_k) || 5,
+    top_k: Number(state.opts.top_k) || 12,
     threshold: Number(state.opts.threshold) || 0,
     strict_grounding: !!state.opts.strict,
     include_sources: true,
@@ -724,6 +737,7 @@ async function loadSettings() {
       renderFormats(data.catalog, data.sections.uploads);
       clearNote("fmt-note");
     }
+    if (data.sections.retrieval) renderRetrievalService(data.sections.retrieval);
   } catch (err) {
     const forbidden = err.code === "AUTH_FORBIDDEN";
     const message = forbidden
@@ -909,7 +923,7 @@ async function probeJev() {
 
 function saveRetrieval() {
   state.opts = {
-    top_k: Number($("r-topk").value) || 5,
+    top_k: Number($("r-topk").value) || 12,
     threshold: Number($("r-threshold").value) || 0,
     strict: $("r-strict").checked,
     hybrid: $("r-hybrid").checked,
@@ -918,6 +932,36 @@ function saveRetrieval() {
   };
   savePrefs();
   note("retr-status", "ok", "Pilihan disimpan untuk browser ini.");
+}
+
+function renderRetrievalService(retrieval) {
+  if (retrieval.context_max_tokens != null) $("s-context-tokens").value = retrieval.context_max_tokens;
+  if (retrieval.final_top_k != null) $("s-topk").value = retrieval.final_top_k;
+  if (retrieval.max_chunks_per_document != null) $("s-maxchunks").value = retrieval.max_chunks_per_document;
+  $("s-expand").checked = retrieval.context_expand_documents !== false;
+}
+
+async function saveRetrievalService() {
+  const payload = {
+    retrieval: {
+      context_max_tokens: Number($("s-context-tokens").value) || 0,
+      final_top_k: Number($("s-topk").value) || 12,
+      max_chunks_per_document: Number($("s-maxchunks").value) || 8,
+      context_expand_documents: $("s-expand").checked,
+    },
+  };
+  note("retr-svc-status", "info", "Menyimpan setelan konteks...");
+  try {
+    const data = await api("PUT", "/settings", payload);
+    note("retr-svc-status", "ok", "Tersimpan: <span class=\"mono\">" + escapeHtml((data.applied || []).join(", ")) + "</span>");
+    if (data.sections && data.sections.retrieval) renderRetrievalService(data.sections.retrieval);
+  } catch (err) {
+    const forbidden = err.code === "AUTH_FORBIDDEN";
+    const message = forbidden
+      ? "Setelan layanan hanya bisa diubah dengan kunci berizin <strong>admin</strong>."
+      : escapeHtml(err.message || "gagal menyimpan") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>";
+    note("retr-svc-status", forbidden ? "warn" : "err", message);
+  }
 }
 
 function setMode(mode) {
@@ -1340,6 +1384,7 @@ function wire() {
     note("fmt-status", "info", "Semua format yang didukung mesin ini dipilih. Klik Simpan format untuk menerapkan.");
   });
   $("btn-save-retr").addEventListener("click", saveRetrieval);
+  $("btn-save-retr-svc").addEventListener("click", saveRetrievalService);
   $("gate-form").addEventListener("submit", login);
   $("btn-logout").addEventListener("click", logout);
   $("btn-save-access").addEventListener("click", saveAccess);

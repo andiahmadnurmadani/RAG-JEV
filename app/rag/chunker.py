@@ -42,10 +42,38 @@ def looks_like_table(block_text: str) -> bool:
     return matching >= max(1, int(len(rows) * 0.6))
 
 
+def looks_like_line_structure(block_text: str) -> bool:
+    """True bila blok jelas tersusun baris pendek (tabel berspasi, daftar kolom, dump SQL).
+
+    PDF tanpa pengenalan tabel menghasilkan baris tabel berspasi pemisah, jadi tidak ada ``|``
+    maupun tab. Blok seperti itu tidak boleh dipotong menurut kalimat: baris tabel tidak
+    berakhir dengan titik, sehingga satu blok jadi satu potongan raksasa - atau terbelah di
+    tengah baris, yang membuat barisnya tidak bisa ditemukan lagi.
+    """
+    lines = [line.strip() for line in (block_text or "").splitlines() if line.strip()]
+    if len(lines) < 8:
+        return False
+    lengths = sorted(len(line) for line in lines)
+    median = lengths[len(lengths) // 2]
+    return median <= 120
+
+
 def estimate_tokens(text: str) -> int:
+    """Perkiraan jumlah token - deterministik, tanpa dependensi.
+
+    Dua ukuran diambil yang TERBESAR, karena keduanya bisa menipu sendiri-sendiri: jumlah kata
+    (``kata * 1.34``) mengabaikan teks tanpa spasi, sedangkan ukuran karakter (``karakter / 6``)
+    mengabaikan teks pendek berisi banyak kata. Tanpa lantai berbasis karakter, satu baris
+    panjang tanpa spasi (blob base64, ID panjang, deretan angka hasil pembaca PDF) dihitung
+    beberapa token saja - akibatnya tabel raksasa masuk sebagai satu potongan dan anggaran
+    konteks tidak lagi berarti.
+    """
+
     if not text:
         return 0
-    return max(1, math.ceil(len(text.split()) * TOKENS_PER_WORD))
+    by_words = len(text.split()) * TOKENS_PER_WORD
+    by_chars = len(text) / 6
+    return max(1, math.ceil(max(by_words, by_chars)))
 
 
 @dataclass
@@ -73,14 +101,12 @@ class Chunk:
 def _blocks_for_page(page: ParsedPage) -> List[Block]:
     """Split one page into ordered blocks while preserving position offsets."""
     blocks: List[Block] = []
-    cursor = 0
     text = page.text
     # separate on blank lines, keeping exact offsets
     for match in re.finditer(r"[^\n]+(?:\n(?!\s*\n)[^\n]+)*", text):
         raw = match.group(0)
         stripped = raw.strip()
         if not stripped:
-            cursor = match.end()
             continue
         kind, level = "paragraph", 0
         md = HEADING_MD.match(stripped)
@@ -131,12 +157,73 @@ def _split_table(block: Block, max_tokens: int) -> List[Block]:
     return pieces or [block]
 
 
+def _split_lines(block: Block, max_tokens: int) -> List[Block]:
+    """Potong blok tersusun-baris HANYA di batas baris (tidak pernah di tengah baris).
+
+    Satu baris yang sendirinya melebihi anggaran dipotong keras demi keamanan ukuran, tetapi
+    itu pilihan terakhir: baris tabel yang terbelah tidak bisa lagi ditemukan sebagai satu
+    kesatuan oleh pencarian teks.
+    """
+
+    limit_chars = max(200, max_tokens * 4)
+    pieces: List[Block] = []
+    current: List[str] = []
+    offset = block.start
+
+    def flush() -> None:
+        nonlocal current, offset
+        if not current:
+            return
+        text = "\n".join(current)
+        pieces.append(Block(text, block.kind, block.level, offset, offset + len(text)))
+        offset += len(text) + 1
+        current = []
+
+    for line in block.text.splitlines():
+        if not line.strip():
+            continue
+        if len(line) > limit_chars:
+            flush()
+            for start in range(0, len(line), limit_chars):
+                piece = line[start : start + limit_chars]
+                pieces.append(Block(piece, block.kind, block.level, offset, offset + len(piece)))
+                offset += len(piece) + 1
+            continue
+        candidate = "\n".join(current + [line])
+        if current and estimate_tokens(candidate) > max_tokens:
+            flush()
+        current.append(line)
+    flush()
+    return pieces or [block]
+
+
+def _split_hard(block: Block, max_tokens: int) -> List[Block]:
+    """Pilihan terakhir: potong menurut anggaran karakter saat tidak ada batas yang lebih baik.
+
+    Dipakai untuk teks yang tidak punya titik/kalimat DAN tidak tersusun baris pendek, mis. kolom
+    angka/kode panjang hasil pembaca PDF. Tanpa ini, satu halaman seperti itu menjadi satu
+    potongan raksasa yang menembus anggaran konteks dan mendesak dokumen lain keluar.
+    """
+
+    limit = max(200, max_tokens * 6)          # selaras dengan lantai karakter di estimate_tokens
+    text = block.text
+    pieces: List[Block] = []
+    offset = block.start
+    for start in range(0, len(text), limit):
+        piece = text[start : start + limit]
+        pieces.append(Block(piece, block.kind, block.level, offset, offset + len(piece)))
+        offset += len(piece)
+    return pieces or [block]
+
+
 def _split_oversized(block: Block, max_tokens: int) -> List[Block]:
     """Split a block that alone exceeds the budget, on sentence boundaries."""
     if estimate_tokens(block.text) <= max_tokens:
         return [block]
     if block.kind == "table":
         return _split_table(block, max_tokens)
+    if looks_like_line_structure(block.text):
+        return _split_lines(block, max_tokens)
     pieces: List[Block] = []
     sentences = re.split(r"(?<=[.!?])\s+", block.text)
     current: List[str] = []
@@ -153,6 +240,9 @@ def _split_oversized(block: Block, max_tokens: int) -> List[Block]:
     if current:
         body = " ".join(current)
         pieces.append(Block(body, block.kind, block.level, offset, offset + len(body)))
+    if len(pieces) <= 1:
+        # Tidak ada satu pun batas kalimat yang ditemukan: potong keras menurut anggaran.
+        return _split_hard(block, max_tokens)
     return pieces
 
 

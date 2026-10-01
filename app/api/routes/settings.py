@@ -50,6 +50,7 @@ class SettingsUpdateRequest(BaseModel):
     llm: Optional[Dict[str, Any]] = None
     jev: Optional[Dict[str, Any]] = None
     uploads: Optional[Dict[str, Any]] = None
+    retrieval: Optional[Dict[str, Any]] = None
 
 
 class ModelsProbeRequest(BaseModel):
@@ -187,6 +188,42 @@ def _validate_uploads(updates: Dict[str, Dict[str, Any]]) -> None:
             raise AppError("VALIDATION_ERROR", "max_upload_mb harus antara 1 dan 512", details={"max_upload_mb": limit})
 
 
+def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
+    """Batas kewajaran sebelum disimpan: nilai ngawur membuat SEMUA permintaan gagal.
+
+    Anggaran konteks yang jauh melebihi jendela model bukan "lebih lengkap", tapi panggilan
+    yang ditolak penyedia - dan itu lebih buruk daripada jawaban sebagian. Jadi nilainya
+    dibatasi, bukan diterima apa adanya.
+    """
+
+    section = updates.get("retrieval")
+    if not section:
+        return
+    limits = {
+        "context_max_tokens": (2000, 200_000),
+        "final_top_k": (1, 50),
+        "max_chunks_per_document": (1, 200),
+        "reranker_enabled": None,
+        "strict_grounding": None,
+        "context_expand_documents": None,
+    }
+    for field, bounds in limits.items():
+        if field not in section or bounds is None:
+            continue
+        low, high = bounds
+        try:
+            value = int(section[field])
+        except (TypeError, ValueError) as exc:
+            raise AppError("VALIDATION_ERROR", f"{field} harus berupa angka bulat") from exc
+        if not low <= value <= high:
+            raise AppError(
+                "VALIDATION_ERROR",
+                f"{field} harus antara {low} dan {high}",
+                details={field: value},
+            )
+        section[field] = value
+
+
 # --------------------------------------------------------------------------- #
 @router.get("/settings")
 def read_settings(
@@ -215,6 +252,7 @@ def update_settings(
     if not updates:
         raise AppError("VALIDATION_ERROR", "no known settings field in the request")
     _validate_uploads(updates)
+    _validate_retrieval(updates)
 
     merged = settings_store.merge(settings_store.read_overrides(path), updates)
     settings_store.write_overrides(path, merged)
@@ -520,7 +558,7 @@ def set_access_code(
             )
     validate_code(payload.code)
     before = store.generation()
-    status = store.set_code(payload.code, updated_by=f"{context.source}:{context.user_id}")
+    store.set_code(payload.code, updated_by=f"{context.source}:{context.user_id}")
     revoked = 0
     if before and before != store.generation():
         # Sesi lama terikat versi kode: ganti kode = keluarkan semua sesi.
