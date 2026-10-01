@@ -158,3 +158,56 @@ def test_worker_stats_publish_both_queues(client):
     assert "summary_queued" in worker
     assert "summary_workers" in worker
     assert worker["summary_workers"] >= 1
+
+
+class _FakePipeline:
+    """Pipeline tiruan: cukup untuk menguji siklus hidup antrian ringkasan."""
+
+    def __init__(self) -> None:
+        self.sink = None
+        self.started = threading.Event()
+        self.finished = threading.Event()
+
+    def set_summary_sink(self, sink) -> None:
+        self.sink = sink
+
+    def run_summary(self, **payload) -> None:
+        self.started.set()
+        time.sleep(0.5)
+        self.finished.set()
+
+
+def test_stopping_the_worker_waits_for_a_running_summary(settings):
+    """stop() harus MENUNGGU ringkasan yang sedang jalan, bukan meninggalkannya.
+
+    Ringkasan menulis ke Qdrant di thread terpisah. Kalau stop() tidak menunggu, penulisan itu
+    masih berjalan saat pemanggil menutup client Qdrant - dan penulisan ke client yang sudah
+    ditutup membuat proses MATI (access violation di qdrant_client/persistence.py), bukan
+    sekadar galat Python. Gejalanya nyata: suite uji pernah crash di tengah jalan.
+    """
+    import asyncio
+
+    from app.workers.indexing import IndexingWorker
+
+    pipeline = _FakePipeline()
+    worker = IndexingWorker(settings, pipeline, jobs=object())
+
+    async def scenario() -> bool:
+        await worker.start()
+        # Pemanggil nyatanya adalah thread pengindeksan (bukan thread loop), jadi di sini pun
+        # submit_summary dipanggil dari thread lain - kalau tidak, coroutine-nya tidak pernah
+        # dijalankan karena loop sedang tidak menyisihkan waktu.
+        await asyncio.get_running_loop().run_in_executor(
+            None, lambda: worker.submit_summary({"job_id": "job_x", "document_id": "doc_x"})
+        )
+        for _ in range(100):
+            if pipeline.started.is_set():
+                break
+            await asyncio.sleep(0.05)
+        assert pipeline.started.is_set(), "ringkasan tidak pernah mulai"
+        await worker.stop()
+        # Bila stop() menunggu, pekerjaannya sudah selesai saat stop() kembali.
+        return pipeline.finished.is_set()
+
+    assert asyncio.run(scenario()) is True, "stop() tidak menunggu ringkasan selesai"
+

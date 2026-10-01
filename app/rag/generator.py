@@ -53,6 +53,15 @@ Rules:
 5. Preserve numbers, dates, names, and policies accurately.
 6. Do not expose internal metadata unless requested and permitted.
 
+Formatting:
+- Answer in Markdown (GitHub-flavoured). It is rendered in a chat panel, so use Markdown to make
+  the answer easy to scan - never output a file, an attachment, or a download link.
+- Use `##`/`###` headings when the answer has sections; `-` bullets for lists; a Markdown table
+  when the data is tabular (one column per field, header row included).
+- Use **bold** for the key term or figure in a sentence, and `code` for column names, table names,
+  field names, and literal values copied from the document.
+- Do not wrap the whole answer in a code fence, and do not repeat the question.
+
 {untrusted_notice}
 Cite sources with the bracketed context number, for example [1] or [2][3].
 Answer in the same language as the user's question.""".format(untrusted_notice=UNTRUSTED_NOTICE)
@@ -86,6 +95,8 @@ Aturan:
 6. Jangan menyapa pembaca, jangan membuka dengan "berdasarkan dokumen", dan jangan menutup
    dengan tawaran bantuan. Langsung ke isinya.
 7. Bahasa ringkasan mengikuti bahasa dokumen (Indonesia bila dokumennya Indonesia).
+8. Tulis dalam Markdown (bukan berkas, bukan lampiran): judul `##` untuk bagian, `-` untuk
+   daftar, dan tabel Markdown bila isinya memang tabel. Pakai `code` untuk nama kolom/tabel.
 
 """
     + UNTRUSTED_NOTICE
@@ -106,6 +117,8 @@ Rules:
 6. Do not address the reader, do not open with "based on the document", and do not close with
    an offer of help. Go straight to the content.
 7. Write the summary in the document's language.
+8. Write in Markdown (not a file, not an attachment): `##` headings for sections, `-` for lists,
+   and a Markdown table when the content is tabular. Use `code` for column/table names.
 
 """
     + UNTRUSTED_NOTICE

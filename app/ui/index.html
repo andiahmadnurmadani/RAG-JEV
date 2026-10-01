@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261002d">
+<link rel="stylesheet" href="style.css?v=20261002e">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -594,13 +594,14 @@
 <dialog id="dlg-summary">
   <form method="dialog" class="field" style="gap:12px;min-width:min(640px,88vw)">
     <h3 id="summary-title" style="margin:0">Ringkasan</h3>
-    <pre id="summary-body" class="mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;margin:0"></pre>
+    <div id="summary-body" class="markdown" style="max-height:60vh;overflow:auto;margin:0"></div>
     <div class="row" style="justify-content:flex-end">
       <button class="btn primary" value="ok" type="submit">Tutup</button>
     </div>
   </form>
 </dialog>
 
-<script src="app.js?v=20261002d"></script>
+<script src="markdown.js?v=20261002e"></script>
+<script src="app.js?v=20261002e"></script>
 </body>
 </html>
