@@ -997,15 +997,36 @@ class IndexingWorker:
         )
 
     async def stop(self) -> None:
+        """Hentikan worker dengan aman: tunggu pekerjaan yang sedang berjalan selesai dulu.
+
+        Ringkasan berjalan di thread terpisah dan menulis ke Qdrant/sparse. Kalau shutdown
+        memakai ``wait=False``, thread itu masih menulis ketika pemanggil (mis. fixture uji,
+        atau proses yang berhenti) menutup client Qdrant - dan penulisan ke client yang sudah
+        ditutup itu membuat proses mati (access violation), bukan sekadar galat Python.
+        Karena itu: hentikan penerimaan pekerjaan baru, batalkan yang masih menunggu di antrian,
+        lalu TUNGGU yang sedang berjalan benar-benar selesai.
+        """
         self._running = False
         for task in self._tasks:
             task.cancel()
         self._tasks = []
+        # Buang pekerjaan yang belum sempat mulai supaya tidak menunggu tanpa guna.
+        for queue in (self._queue, self._summary_queue):
+            if queue is not None:
+                while not queue.empty():
+                    try:
+                        queue.get_nowait()
+                        queue.task_done()
+                    except asyncio.QueueEmpty:  # pragma: no cover - balapan antrian
+                        break
         for executor in (self._executor, self._summary_executor):
             if executor is not None:
-                executor.shutdown(wait=False, cancel_futures=True)
+                # wait=True: pekerjaan yang sedang jalan diselesaikan sebelum kita lanjut.
+                executor.shutdown(wait=True, cancel_futures=True)
         self._executor = None
         self._summary_executor = None
+        self._queue = None
+        self._summary_queue = None
 
     def submit(self, payload: Dict[str, Any]) -> JobRecord:
         record = self._jobs.create(**{key: payload[key] for key in _JOB_FIELDS if key in payload})

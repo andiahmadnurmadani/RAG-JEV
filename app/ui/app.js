@@ -42,6 +42,38 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// Salin teks Markdown ke papan klip. Clipboard API hanya ada di konteks aman (https/localhost);
+// di akses http biasa tombolnya tetap harus bekerja, jadi ada jalur cadangan textarea.
+async function copyMarkdown(button, text) {
+  let copied = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    }
+  } catch (err) {
+    copied = false;
+  }
+  if (!copied) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      copied = document.execCommand("copy");
+    } catch (err) {
+      copied = false;
+    }
+    document.body.removeChild(area);
+  }
+  const original = button.textContent;
+  button.textContent = copied ? "Tersalin" : "Gagal menyalin";
+  window.setTimeout(() => { button.textContent = original; }, 1600);
+}
+
 function mb(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
@@ -456,7 +488,15 @@ async function showSummary(documentId) {
     return;
   }
   $("summary-title").textContent = "Ringkasan: " + name;
-  $("summary-body").textContent = body + noteText;
+  // Ringkasan juga diminta berformat Markdown; render agar judul/daftar/tabel terbaca.
+  const summaryBody = $("summary-body");
+  const markdownText = body + noteText;
+  if (window.Markdown && typeof window.Markdown.render === "function") {
+    summaryBody.classList.add("markdown");
+    summaryBody.innerHTML = window.Markdown.render(markdownText);
+  } else {
+    summaryBody.textContent = markdownText;
+  }
   box.showModal();
 }
 
@@ -663,7 +703,29 @@ function computedBlock(computed) {
 
 function renderAnswer(node, data) {
   const bubble = node.querySelector(".bubble");
-  bubble.textContent = data.answer || "";
+  const answer = data.answer || "";
+  // Jawaban diminta dalam Markdown; render supaya judul/daftar/tabel terbaca, bukan `##` mentah.
+  // Bila renderer gagal dimuat (halaman lama), jatuh ke teks biasa - jangan tampilkan kosong.
+  if (window.Markdown && typeof window.Markdown.render === "function") {
+    bubble.classList.add("markdown");
+    bubble.innerHTML = window.Markdown.render(answer);
+  } else {
+    bubble.textContent = answer;
+  }
+
+  // Salin sebagai Markdown: pemakai meminta hasilnya berformat .md (teks Markdown), bukan berkas.
+  if (answer.trim()) {
+    const tools = document.createElement("div");
+    tools.className = "answer-tools";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "linkish";
+    copy.textContent = "Salin .md";
+    copy.title = "Salin jawaban sebagai teks Markdown";
+    copy.addEventListener("click", () => copyMarkdown(copy, answer));
+    tools.appendChild(copy);
+    node.appendChild(tools);
+  }
 
   const sources = data.sources || [];
   if (sources.length) {
