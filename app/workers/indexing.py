@@ -223,6 +223,13 @@ class IndexingPipeline:
         # Dipakai untuk membuat ringkasan knowledge turunan saat dokumen diindeks. Boleh None
         # (mis. pada uji unit): ringkasan dilewati dan alasannya dilaporkan apa adanya.
         self._generator = generator
+        # Cara menyerahkan pembuatan ringkasan ke jalur terpisah. Diisi oleh IndexingWorker;
+        # None berarti ringkasan dikerjakan di tempat (pipeline dijalankan langsung).
+        self._summary_sink = None
+
+    def set_summary_sink(self, sink) -> None:
+        """Daftarkan cara mengantrikan ringkasan (dipanggil worker saat start)."""
+        self._summary_sink = sink
 
     # ------------------------------------------------------------------ #
     def run(
@@ -321,34 +328,15 @@ class IndexingPipeline:
             if not chunks:
                 raise AppError("INDEXING_FAILED", "no extractable text found in document")
 
-            # Ringkasan dokumen (knowledge turunan): dibuat dari potongan yang baru saja
-            # dibentuk, lalu diindeks sebagai potongan tersendiri dengan document_id yang sama.
-            summary_text, summary_tokens, summary_error, summary_passes = self._summarize(
-                chunks,
-                document_id=document_id,
-                document_name=document_name or parsed.document_name,
-                organization_id=organization_id,
-                knowledge_base_id=knowledge_base_id,
-                language=language or parsed.language,
-                source_url=file_url,
-                metadata=metadata,
-            )
-
             self._jobs.update(job_id, stage="embedding")
             vectors = self._encode(chunks, organization_id, knowledge_base_id, document_id, document_name, parsed, file_url, language, metadata)
-            summary_points: List[Dict[str, Any]] = []
-            if summary_text:
-                summary_points = self._summary_points(
-                    summary_text,
-                    organization_id=organization_id,
-                    knowledge_base_id=knowledge_base_id,
-                    document_id=document_id,
-                    document_name=document_name or parsed.document_name,
-                    language=language or parsed.language,
-                    source_url=file_url,
-                    metadata=metadata,
-                )
 
+            # ISI DIINDESKAN DULU, ringkasan MENYUSUL DI JALUR TERPISAH.
+            #
+            # Sebelumnya ringkasan dibuat di sini juga, dan karena satu-satunya worker dipakai
+            # bersama, unggahan kecil menunggu di antrian selama dokumen besar diringkas
+            # (map-reduce = puluhan panggilan LLM; di produksi sempat 15 menit). Sekarang isi
+            # selesai dan langsung bisa dicari, lalu ringkasan dikerjakan worker lain.
             self._jobs.update(job_id, stage="upserting")
             if replace:
                 repository.delete_document(self._settings, organization_id=organization_id, document_id=document_id)
@@ -358,39 +346,54 @@ class IndexingPipeline:
                 if self._tables is not None and not supports_tables(parse_name):
                     self._tables.delete_document(organization_id=organization_id, document_id=document_id)
             written = repository.upsert_chunks(self._settings, dim=self._embedder.dim, points=vectors)
-            if summary_points:
-                # Ringkasan diindeks terpisah supaya jumlah "isi" dokumen tidak ikut berubah:
-                # kelengkapan isi tetap dihitung dari potongan aslinya saja.
-                repository.upsert_chunks(self._settings, dim=self._embedder.dim, points=summary_points)
             self._sparse.upsert(
                 organization_id,
                 knowledge_base_id,
-                [(chunk.chunk_id, document_id, chunk.content) for chunk in chunks]
-                + ([(SUMMARY_CHUNK_ID, document_id, summary_text)] if summary_text else []),
+                [(chunk.chunk_id, document_id, chunk.content) for chunk in chunks],
             )
 
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             metric_observe("embedding_latency", duration_ms / 1000.0)
             metric_incr("chunks_created", len(chunks))
-            if summary_text:
-                metric_incr("summaries_created")
-            record = self._jobs.update(
-                job_id,
-                status=STATUS_COMPLETED,
-                stage="completed",
-                chunks=written,
-                tables=tables_saved,
-                tokens=sum(chunk.token_count for chunk in chunks),
-                duration_ms=duration_ms,
-                summary=summary_text,
-                summary_tokens=summary_tokens,
-                summary_of=document_id,
-                summary_error=summary_error,
-            )
+            # Status tetap "processing" sampai ringkasan selesai: `completed` berarti pekerjaan
+            # benar-benar tuntas, bukan "isinya sudah masuk tapi ringkasannya belum". Yang
+            # dipisah adalah ANTRIANNYA, bukan arti statusnya - lihat _queue_summary.
+            if self._settings.document_summary_enabled:
+                record = self._jobs.update(
+                    job_id,
+                    stage="summarizing",
+                    chunks=written,
+                    tables=tables_saved,
+                    tokens=sum(chunk.token_count for chunk in chunks),
+                    duration_ms=duration_ms,
+                )
+                self._queue_summary(
+                    job_id=job_id,
+                    document_id=document_id,
+                    organization_id=organization_id,
+                    knowledge_base_id=knowledge_base_id,
+                    document_name=document_name or parsed.document_name,
+                    language=language or parsed.language,
+                    source_url=file_url,
+                    metadata=metadata,
+                )
+            else:
+                record = self._jobs.update(
+                    job_id,
+                    status=STATUS_COMPLETED,
+                    stage="completed",
+                    chunks=written,
+                    tables=tables_saved,
+                    tokens=sum(chunk.token_count for chunk in chunks),
+                    duration_ms=duration_ms,
+                    # Fitur ringkasan dimatikan: isi dokumen tetap selesai, dan alasannya
+                    # dicatat supaya tidak terlihat seperti ringkasan yang gagal.
+                    summary_error="ringkasan dimatikan (DOCUMENT_SUMMARY_ENABLED=false)",
+                )
             logger.info(
                 "indexed document %s (%d chunks) for org %s", document_id, written, organization_id
             )
-            return record
+            return self._jobs.get(job_id) or record
         except Exception as exc:  # noqa: BLE001
             metric_incr("documents_failed")
             message = exc.message if isinstance(exc, AppError) else str(exc)
@@ -503,19 +506,42 @@ class IndexingPipeline:
             knowledge_base_id,
             [(chunk.chunk_id, document_id, chunk.content) for chunk in chunks],
         )
+        # Sama seperti jalur berkas: isi selesai dulu, ringkasan di jalur terpisah.
+        if self._settings.document_summary_enabled:
+            self._jobs.update(
+                job_id,
+                stage="summarizing",
+                chunks=written,
+                tables=0,
+                tokens=sum(chunk.token_count for chunk in chunks),
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
+            self._queue_summary(
+                job_id=job_id,
+                document_id=document_id,
+                organization_id=organization_id,
+                knowledge_base_id=knowledge_base_id,
+                document_name=display_name,
+                language=language or "id",
+                source_url=web_url,
+                metadata=enriched,
+            )
+        else:
+            self._jobs.update(
+                job_id,
+                status=STATUS_COMPLETED,
+                stage="completed",
+                chunks=written,
+                tables=0,
+                tokens=sum(chunk.token_count for chunk in chunks),
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                summary_error="ringkasan dimatikan (DOCUMENT_SUMMARY_ENABLED=false)",
+            )
 
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
         metric_observe("embedding_latency", duration_ms / 1000.0)
         metric_incr("chunks_created", len(chunks))
-        record = self._jobs.update(
-            job_id,
-            status=STATUS_COMPLETED,
-            stage="completed",
-            chunks=written,
-            tables=0,
-            tokens=sum(chunk.token_count for chunk in chunks),
-            duration_ms=duration_ms,
-        )
+        record = self._jobs.get(job_id) or self._jobs.update(job_id, status=STATUS_COMPLETED, stage="completed")
         logger.info(
             "indexed web %s: %d halaman, %d chunk, %d dilewati, org %s",
             web_url,
@@ -527,37 +553,111 @@ class IndexingPipeline:
         return record
 
     # ------------------------------------------------------------------ #
-    def _summarize(
+    def _queue_summary(
         self,
-        chunks,
         *,
+        job_id: str,
         document_id: str,
-        document_name: str,
         organization_id: str,
         knowledge_base_id: str,
+        document_name: str,
         language: str,
         source_url: str,
         metadata: Optional[Dict[str, Any]],
-    ) -> tuple[str, int, str, int]:
-        """Buat ringkasan dokumen dari potongannya. Gagal = dilaporkan, bukan menggagalkan indeks."""
+    ) -> None:
+        """Serahkan pembuatan ringkasan ke worker ringkasan (jalur terpisah).
+
+        Pipeline tidak tahu soal worker; pemanggil yang punya worker (``IndexingWorker``)
+        mengeset ``_summary_sink``. Bila tidak ada (pipeline dijalankan langsung, mis. di uji
+        unit), ringkasan dikerjakan di tempat supaya hasilnya tetap ada.
+        """
+        payload = {
+            "job_id": job_id,
+            "document_id": document_id,
+            "organization_id": organization_id,
+            "knowledge_base_id": knowledge_base_id,
+            "document_name": document_name,
+            "language": language,
+            "source_url": source_url,
+            "metadata": metadata,
+        }
+        if not self._settings.document_summary_enabled:
+            return
+        if self._summary_sink is not None:
+            try:
+                self._summary_sink(payload)
+                return
+            except Exception as exc:  # noqa: BLE001 - jalur ringkasan tidak boleh fatal
+                logger.warning("gagal mengantrikan ringkasan %s: %s", document_id, exc)
+        # Fallback: kerjakan langsung (tanpa worker, atau antrian gagal).
+        self.run_summary(**payload)
+
+    # ------------------------------------------------------------------ #
+    def run_summary(
+        self,
+        *,
+        job_id: str,
+        document_id: str,
+        organization_id: str,
+        knowledge_base_id: str,
+        document_name: str = "",
+        language: str = "",
+        source_url: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[JobRecord]:
+        """Buat ringkasan dokumen yang ISINYA SUDAH terindeks (jalur terpisah).
+
+        Dipanggil oleh worker ringkasan setelah isi dokumen tersimpan, sehingga unggahan lain
+        tidak menunggu di antrian pengindeksan. Kegagalan di sini tidak pernah mengubah status
+        isi: yang dicatat hanya ``summary_error``.
+        """
         from app.rag.summary import summarize_document
 
+        record = self._jobs.get(job_id)
+        if record is None:
+            logger.warning("ringkasan untuk job %s dilewati: job tidak ada", job_id)
+            return None
+
+        if not self._settings.document_summary_enabled:
+            # Fitur dimatikan: tutup pekerjaan sebagai selesai, dengan alasan yang jelas.
+            self._jobs.update(
+                job_id,
+                status=STATUS_COMPLETED,
+                stage="completed",
+                summary_error="ringkasan dimatikan (DOCUMENT_SUMMARY_ENABLED=false)",
+            )
+            return self._jobs.get(job_id)
+
         if self._generator is None:
-            return "", 0, "ringkasan tidak dibuat: generator LLM tidak tersedia di jalur indeks", 0
+            self._jobs.update(
+                job_id,
+                status=STATUS_COMPLETED,
+                stage="completed",
+                summary_error="ringkasan tidak dibuat: generator LLM tidak tersedia di jalur indeks",
+            )
+            return self._jobs.get(job_id)
 
         try:
-            parts = [
-                {
-                    "chunk_id": chunk.chunk_id,
-                    "document_id": document_id,
-                    "content": chunk.content,
-                    "document_name": document_name,
-                    "page": chunk.page,
-                    "section": chunk.section,
-                    "source_url": getattr(chunk, "source_url", "") or source_url,
-                }
-                for chunk in chunks
-            ]
+            parts = repository.list_document_chunks(
+                self._settings,
+                organization_id=organization_id,
+                document_id=document_id,
+                knowledge_base_id=knowledge_base_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - ringkasan opsional
+            self._jobs.update(
+                job_id, status=STATUS_COMPLETED, stage="completed",
+                summary_error=f"ringkasan gagal membaca isi: {exc}"[:300],
+            )
+            return self._jobs.get(job_id)
+        if not parts:
+            self._jobs.update(
+                job_id, status=STATUS_COMPLETED, stage="completed",
+                summary_error="ringkasan dilewati: dokumen tidak punya isi",
+            )
+            return self._jobs.get(job_id)
+
+        try:
             result = summarize_document(
                 generator=self._generator,
                 settings=self._settings,
@@ -568,20 +668,71 @@ class IndexingPipeline:
                 language=language,
                 parts=parts,
             )
-        except Exception as exc:  # noqa: BLE001 - ringkasan opsional, isi dokumen tetap masuk
+        except Exception as exc:  # noqa: BLE001 - ringkasan opsional
             logger.warning("ringkasan dokumen %s gagal: %s", document_id, exc)
-            return "", 0, f"ringkasan gagal: {exc}"[:300], 0
-        if result.error:
-            logger.info("ringkasan dokumen %s tidak dibuat: %s", document_id, result.error)
-        else:
-            logger.info(
-                "ringkasan dokumen %s: %d token, %d bagian, %d langkah",
-                document_id,
-                result.tokens,
-                result.parts,
-                result.passes,
+            self._jobs.update(
+                job_id, status=STATUS_COMPLETED, stage="completed",
+                summary_error=f"ringkasan gagal: {exc}"[:300],
             )
-        return result.text, result.tokens, result.error, result.passes
+            return self._jobs.get(job_id)
+
+        if not result.text.strip():
+            self._jobs.update(
+                job_id,
+                status=STATUS_COMPLETED,
+                stage="completed",
+                summary_error=(result.error or "model tidak menghasilkan ringkasan")[:300],
+            )
+            return self._jobs.get(job_id)
+
+        error = result.error
+        if not error and result.partial:
+            # Ringkasan sebagian tidak boleh terbaca sebagai ringkasan lengkap.
+            error = f"ringkasan sebagian - {result.partial}"
+
+        try:
+            points = self._summary_points(
+                result.text,
+                organization_id=organization_id,
+                knowledge_base_id=knowledge_base_id,
+                document_id=document_id,
+                document_name=document_name,
+                language=language,
+                source_url=source_url,
+                metadata=metadata,
+            )
+            repository.upsert_chunks(self._settings, dim=self._embedder.dim, points=points)
+            self._sparse.upsert(
+                organization_id,
+                knowledge_base_id,
+                [(SUMMARY_CHUNK_ID, document_id, result.text)],
+            )
+        except Exception as exc:  # noqa: BLE001 - gagal menyimpan ringkasan tidak fatal
+            logger.warning("ringkasan dokumen %s gagal disimpan: %s", document_id, exc)
+            self._jobs.update(
+                job_id, status=STATUS_COMPLETED, stage="completed",
+                summary_error=f"ringkasan gagal disimpan: {exc}"[:300],
+            )
+            return self._jobs.get(job_id)
+
+        metric_incr("summaries_created")
+        logger.info(
+            "ringkasan dokumen %s siap: %d token, %d bagian, %d langkah%s",
+            document_id,
+            result.tokens,
+            result.parts,
+            result.passes,
+            f" (sebagian: {result.partial})" if result.partial else "",
+        )
+        return self._jobs.update(
+            job_id,
+            status=STATUS_COMPLETED,
+            stage="completed",
+            summary=result.text,
+            summary_tokens=result.tokens,
+            summary_of=document_id,
+            summary_error=error,
+        )
 
     def _summary_points(
         self,
@@ -781,6 +932,10 @@ class IndexingWorker:
         self._executor: Optional[ThreadPoolExecutor] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._running = False
+        # Jalur ringkasan dipisah supaya panggilan LLM yang panjang tidak menahan antrian
+        # pengindeksan (lihat submit_summary).
+        self._summary_queue: Optional[asyncio.Queue] = None
+        self._summary_executor: Optional[ThreadPoolExecutor] = None
 
     @property
     def running(self) -> bool:
@@ -798,21 +953,36 @@ class IndexingWorker:
         self._executor = ThreadPoolExecutor(
             max_workers=self._settings.indexing_workers, thread_name_prefix="indexer"
         )
+        summary_workers = max(1, int(getattr(self._settings, "summary_workers", 2)))
+        self._summary_queue = asyncio.Queue()
+        self._summary_executor = ThreadPoolExecutor(max_workers=summary_workers, thread_name_prefix="summarizer")
         self._tasks = [
             asyncio.create_task(self._consume(worker_id), name=f"indexer-{worker_id}")
             for worker_id in range(self._settings.indexing_workers)
+        ] + [
+            asyncio.create_task(self._consume_summary(worker_id), name=f"summarizer-{worker_id}")
+            for worker_id in range(summary_workers)
         ]
         self._running = True
-        logger.info("indexing worker started (%d slots)", self._settings.indexing_workers)
+        # Ringkasan dikerjakan di jalur terpisah supaya panggilan LLM yang panjang tidak
+        # menahan antrian pengindeksan.
+        self._pipeline.set_summary_sink(self.submit_summary)
+        logger.info(
+            "indexing worker started (%d slot indeks, %d slot ringkasan)",
+            self._settings.indexing_workers,
+            summary_workers,
+        )
 
     async def stop(self) -> None:
         self._running = False
         for task in self._tasks:
             task.cancel()
         self._tasks = []
-        if self._executor is not None:
-            self._executor.shutdown(wait=False, cancel_futures=True)
-            self._executor = None
+        for executor in (self._executor, self._summary_executor):
+            if executor is not None:
+                executor.shutdown(wait=False, cancel_futures=True)
+        self._executor = None
+        self._summary_executor = None
 
     def submit(self, payload: Dict[str, Any]) -> JobRecord:
         record = self._jobs.create(**{key: payload[key] for key in _JOB_FIELDS if key in payload})
@@ -850,8 +1020,59 @@ class IndexingWorker:
             "running": self._running,
             "workers": self._settings.indexing_workers,
             "queued": self.queued,
+            "summary_queued": self.summary_queued,
+            "summary_workers": self._settings.summary_workers,
             "jobs": self._jobs.stats(),
         }
+
+    # ------------------------------------------------------------------ #
+    # Ringkasan: jalur TERPISAH dari pengindeksan
+    # ------------------------------------------------------------------ #
+    def submit_summary(self, payload: Dict[str, Any]) -> None:
+        """Antrikan pembuatan ringkasan untuk satu dokumen yang isinya sudah terindeks.
+
+        Dipisah dari antrian pengindeksan dengan sengaja. Ringkasan memanggil LLM - puluhan
+        kali untuk dokumen besar - sehingga kalau dikerjakan di worker yang sama, setiap
+        unggahan berikutnya menunggu di antrian. Isi dokumen tidak boleh tersandera oleh
+        ringkasannya: isi sudah tersimpan saat fungsi ini dipanggil.
+        """
+        if not self._running or self._summary_queue is None or self._loop is None:
+            # Tanpa worker (mis. uji unit yang menjalankan pipeline langsung): ringkasan
+            # dikerjakan di tempat supaya hasilnya tetap ada.
+            self._pipeline.run_summary(**payload)
+            return
+        asyncio.run_coroutine_threadsafe(self._summary_queue.put(payload), self._loop)
+
+    @property
+    def summary_queued(self) -> int:
+        return self._summary_queue.qsize() if self._summary_queue else 0
+
+    async def _consume_summary(self, worker_id: int) -> None:
+        assert self._summary_queue is not None and self._summary_executor is not None
+        while True:
+            payload = await self._summary_queue.get()
+            try:
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    self._summary_executor,
+                    lambda: self._pipeline.run_summary(**payload),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - ringkasan opsional
+                document_id = str(payload.get("document_id") or "")
+                logger.error("ringkasan untuk %s gagal di worker %d: %s", document_id, worker_id, exc)
+                try:
+                    self._jobs.update(
+                        str(payload.get("job_id") or ""),
+                        status=STATUS_COMPLETED,
+                        stage="completed",
+                        summary_error=f"ringkasan gagal: {exc}"[:300],
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            finally:
+                self._summary_queue.task_done()
 
 
 _JOB_FIELDS = (

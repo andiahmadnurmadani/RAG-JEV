@@ -26,6 +26,7 @@ Aturan yang dipegang:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -44,6 +45,9 @@ class SummaryResult:
     parts: int = 0
     truncated: bool = False
     error: str = ""
+    # Diisi bila ringkasannya hanya mencakup sebagian dokumen (batas tahap/waktu/potongan).
+    # Dipakai supaya "ringkasan sebagian" tidak terbaca sebagai "ringkasan lengkap".
+    partial: str = ""
 
     def __bool__(self) -> bool:
         return bool(self.text.strip())
@@ -146,6 +150,9 @@ def summarize_document(
 
     budget = max(2000, int(getattr(settings, "summary_window_tokens", 12000)))
     max_parts = max(1, int(getattr(settings, "summary_max_parts", 400)))
+    max_stages = max(1, int(getattr(settings, "summary_max_stages", 12)))
+    deadline = time.monotonic() + max(10.0, float(getattr(settings, "summary_budget_seconds", 120.0)))
+    partial_reason = ""
     if len(parts) > max_parts:
         # Jangan diam-diam memotong: katakan bahwa ringkasannya mencakup sebagian.
         logger.warning(
@@ -155,13 +162,40 @@ def summarize_document(
             max_parts,
         )
         parts = parts[:max_parts]
+        partial_reason = f"dokumen punya lebih dari {max_parts} potongan; ringkasan mencakup bagian awal"
 
     groups = _group_parts(parts, budget)
+    if len(groups) > max_stages:
+        # Batas tahap: dokumen raksasa tidak boleh menjelajah tanpa ujung. Yang dilewati
+        # dilaporkan, bukan disembunyikan.
+        logger.warning(
+            "dokumen %s butuh %d tahap ringkasan, dibatasi %d tahap",
+            document_id,
+            len(groups),
+            max_stages,
+        )
+        groups = groups[:max_stages]
+        partial_reason = partial_reason or f"ringkasan dibatasi {max_stages} tahap pertama"
+
     pieces: List[str] = []
     passes = 0
     truncated = False
+    stopped_early = False
 
     for group in groups:
+        if time.monotonic() > deadline:
+            # Waktu habis: berhenti meringkas. Pengindeksan berjalan berurutan, jadi ringkasan
+            # yang terlalu lama menahan unggahan lain di antrian - dan isi dokumen sudah
+            # tersimpan lebih dulu, jadi tidak ada yang hilang.
+            stopped_early = True
+            logger.warning(
+                "ringkasan dokumen %s dihentikan setelah %.0f detik (%d dari %d tahap selesai)",
+                document_id,
+                float(getattr(settings, "summary_budget_seconds", 120.0)),
+                passes,
+                len(groups),
+            )
+            break
         built = _context_from_parts(group, budget)
         if not built.used:
             continue
@@ -178,22 +212,32 @@ def summarize_document(
             pieces.append(text)
 
     if not pieces:
-        return SummaryResult(error="model tidak menghasilkan ringkasan", passes=passes, truncated=truncated)
+        reason = "waktu ringkasan habis sebelum satu tahap pun selesai" if stopped_early else "model tidak menghasilkan ringkasan"
+        return SummaryResult(error=reason, passes=passes, truncated=truncated)
 
     # Satu kelompok = ringkasannya sudah final. Lebih dari satu = ringkas ulang gabungannya.
-    final = pieces[0] if len(pieces) == 1 else _reduce(generator, settings, pieces, document_name, language, budget)
-    if len(pieces) > 1:
+    if len(pieces) == 1:
+        final = pieces[0]
+    elif time.monotonic() > deadline:
+        # Waktu habis di tahap reduce: gabungkan apa adanya daripada tidak ada ringkasan.
+        stopped_early = True
+        final = "\n\n".join(pieces)
+    else:
+        final = _reduce(generator, settings, pieces, document_name, language, budget)
         passes += 1
 
     final = final.strip()
     if not final:
         return SummaryResult(error="ringkasan akhir kosong", passes=passes, truncated=truncated)
+    if stopped_early:
+        partial_reason = partial_reason or "waktu ringkasan habis; ringkasan mencakup bagian yang sempat diproses"
     return SummaryResult(
         text=final,
         tokens=estimate_tokens(final),
         passes=passes,
         parts=len(parts),
         truncated=truncated,
+        partial=partial_reason,
     )
 
 

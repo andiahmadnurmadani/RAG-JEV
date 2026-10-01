@@ -221,6 +221,13 @@ class Settings(BaseSettings):
     summary_max_parts: int = 400
     # Berapa dokumen yang ringkasannya boleh ikut saat pertanyaannya minta ringkasan.
     summary_max_documents: int = 3
+    # Batas WAKTU membuat ringkasan (detik). Ringkasan dokumen besar bisa memakan puluhan
+    # panggilan model, dan karena pengindeksan berjalan berurutan, itu menahan unggahan lain
+    # di antrian. Setelah batas ini tercapai, ringkasan dihentikan dan alasannya dilaporkan -
+    # isi dokumen sudah tersimpan lebih dulu, jadi tidak ada yang hilang.
+    summary_budget_seconds: float = 120.0
+    # Batas jumlah kelompok (panggilan map) supaya dokumen raksasa tidak menjelajah tanpa ujung.
+    summary_max_stages: int = 12
 
     # Ekstensi yang boleh jadi knowledge (lihat app/parsing/formats.py).
     # Kosong = pakai daftar default katalog, dikurangi format yang belum tersedia di mesin ini.
@@ -230,6 +237,11 @@ class Settings(BaseSettings):
     worker_concurrency: int = 1
     worker_poll_seconds: float = 0.5
     indexing_workers: int = 1
+    # Jalur terpisah untuk membuat ringkasan. Ringkasan memanggil LLM (puluhan kali untuk
+    # dokumen besar), jadi kalau ia dikerjakan di worker indeks yang sama, unggahan lain
+    # mengantri menunggu. Dengan jalur sendiri, isi dokumen tetap diproses berurutan cepat
+    # dan ringkasan menyusul tanpa menahan antrian.
+    summary_workers: int = 2
 
     @property
     def max_upload_bytes(self) -> int:

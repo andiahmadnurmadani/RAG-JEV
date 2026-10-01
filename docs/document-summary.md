@@ -105,6 +105,45 @@ curl -X POST "$BASE/query" -H "Authorization: Bearer $KEY" -H 'Content-Type: app
 `usage.context_summary_chunks` menunjukkan berapa potongan ringkasan ikut ke konteks;
 `usage.context_chunks` tetap berarti **berapa bagian isi** yang dibaca.
 
+
+## Kenapa unggahan kecil tidak lagi mengantri lama
+
+Keluhan yang melahirkan bagian ini: mengunggah berkas kecil terasa lama dan berstatus *queued*.
+Sebabnya bukan berkas kecilnya, melainkan **dokumen besar yang sedang diringkas**. Ringkasan
+memanggil LLM berkali-kali (map-reduce: satu panggilan per kelompok potongan), dan semuanya
+dikerjakan di worker yang sama dengan pengindeksan - jadi setiap unggahan berikutnya menunggu.
+Di produksi satu dokumen 1.828 potongan menahan antrian sekitar **15 menit**.
+
+Dua perubahan menyelesaikannya:
+
+1. **Jalur ringkasan dipisah** (`SUMMARY_WORKERS`, bawaan 2). Isi dokumen tetap diproses
+   berurutan dengan cepat; ringkasan dikerjakan worker lain. Terukur: berkas kecil selesai
+   **2,7 detik** sementara ringkasan dokumen besar masih berjalan.
+2. **Batas waktu & tahap ringkasan** (`SUMMARY_BUDGET_SECONDS` 120 detik,
+   `SUMMARY_MAX_STAGES` 12). Dokumen raksasa tidak bisa lagi menyandera antrian tanpa ujung.
+
+Yang **tidak** berubah: arti status. `completed` tetap berarti pekerjaan benar-benar tuntas,
+termasuk ringkasannya. Yang dipisah adalah antriannya, bukan makna statusnya - supaya klien lama
+tidak salah paham bahwa semuanya sudah selesai.
+
+Saat status masih `processing` dengan tahap `summarizing`, **isinya sudah tersimpan dan sudah
+bisa dicari**. Di konsol, itu ditampilkan sebagai pesan "N chunk sudah masuk dan bisa dipakai,
+ringkasan sedang dibuat di latar belakang".
+
+Ringkasan yang berhenti karena batas waktu/batas tahap dilaporkan sebagai **ringkasan sebagian**
+(`summary_error`), bukan disamarkan sebagai ringkasan lengkap.
+
+## Uji antrian
+
+```bash
+# 3 uji: ringkasan lambat tidak menahan unggahan berikutnya; status jujur; stats dua antrian
+.venv/Scripts/python.exe -m pytest tests/integration/test_summary_queue.py -q
+
+# hidup: unggah dokumen besar, lalu berkas kecil tanpa menunggu, ukur waktunya
+PORT=8099 JEV_ENABLED=false bash scripts/run_live.sh
+.venv/Scripts/python.exe scripts/verify_summary_queue_live.py
+```
+
 ## Batas yang jujur
 
 - Ringkasan adalah **turunan**: ia bisa keliru kalau modelnya keliru, walaupun prompt-nya sudah

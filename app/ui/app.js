@@ -469,25 +469,44 @@ function renderScope() {
 }
 
 async function trackJob(documentId, label) {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 700));
+  // Isi dokumen tersimpan LEBIH DULU daripada ringkasannya (stage "summarizing"), tetapi status
+  // baru "completed" setelah ringkasan selesai. Jadi beri tahu pemakai begitu isinya siap
+  // dipakai, dan tetap tunggu sampai pekerjaannya benar-benar tuntas.
+  let toldContentReady = false;
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
     let status = null;
     try {
       status = await api("GET", "/knowledge/" + encodeURIComponent(documentId));
     } catch (err) {
       return;
     }
+    if (status.stage === "summarizing" && !toldContentReady) {
+      toldContentReady = true;
+      note("upload-status", "info", escapeHtml(label) + ": " + escapeHtml(status.chunks) + " chunk sudah masuk dan bisa dipakai. Ringkasan sedang dibuat di latar belakang - unggahan lain tidak ikut menunggu.");
+      loadDocs();
+    }
     if (status.status === "completed") {
-      note("upload-status", "ok", escapeHtml(label) + " selesai: " + escapeHtml(status.chunks) + " chunk, " + escapeHtml(status.tokens) + " token.");
+      const summaryNote = status.summary
+        ? " Ringkasan: " + escapeHtml(status.summary_tokens || 0) + " token" +
+          (status.summary_error ? " (" + escapeHtml(status.summary_error.slice(0, 120)) + ")" : "") + "."
+        : (status.summary_error ? " Tanpa ringkasan: " + escapeHtml(status.summary_error.slice(0, 140)) + "." : "");
+      note("upload-status", "ok", escapeHtml(label) + " selesai: " + escapeHtml(status.chunks) + " chunk, " +
+        escapeHtml(status.tokens) + " token." + summaryNote);
       loadDocs();
       return;
     }
     if (status.status === "failed" || status.status === "deleted") {
       note("upload-status", "err", escapeHtml(label) + " gagal: " + escapeHtml((status.error || "tidak diketahui").slice(0, 240)));
+      loadDocs();
       return;
+    }
+    if (status.stage === "queued" && attempt > 4) {
+      note("upload-status", "info", escapeHtml(label) + " masih menunggu di antrian (ada dokumen lain yang sedang diproses).");
     }
   }
   note("upload-status", "warn", escapeHtml(label) + " masih diproses; buka daftar dokumen beberapa saat lagi.");
+  loadDocs();
 }
 
 async function submitIndex(payload, label) {

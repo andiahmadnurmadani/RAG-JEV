@@ -410,6 +410,8 @@ Semua perilaku model/provider dipilih lewat env var (`.env.example` memuat semua
 | `JEV_ENABLED`, `JEV_MCP_URL`, `JEV_API_KEY` | orkestrasi Jev; jika gagal → fallback heuristik, bukan error |
 | `SETTINGS_OVERRIDE_PATH` | berkas override setelan LLM/Jev/**format berkas** dari layar Pengaturan (default `data/settings.json`) |
 | `UPLOAD_EXTENSIONS`, `MAX_UPLOAD_MB` | titik awal kebijakan format berkas; kosong = seluruh katalog yang didukung mesin ini (dipersempit kapan saja lewat Pengaturan) |
+| `SUMMARY_WORKERS` | `2` | Jalur ringkasan terpisah dari pengindeksan - panggilan LLM panjang tidak menahan antrian unggahan. |
+| `SUMMARY_BUDGET_SECONDS` | `120` | Batas waktu membuat ringkasan satu dokumen; setelah itu dihentikan dan alasannya dilaporkan. |
 | `DOCUMENT_SUMMARY_ENABLED` | `true` | Buat ringkasan setiap dokumen saat diindeks (knowledge turunan). |
 | `SUMMARY_MAX_TOKENS` | `2048` | Panjang ringkasan yang diminta dari model. |
 | `SUMMARY_MAX_DOCUMENTS` | `3` | Berapa ringkasan dokumen boleh ikut saat user minta ringkasan. |

@@ -696,3 +696,36 @@ ringkasan di depan dan ia menghabiskan anggaran token sampai **seluruh isi dokum
 dari konteks** pada anggaran kecil - persis kebalikan dari tujuan fiturnya. Perbaikannya: isi
 dihitung lebih dulu, ringkasan hanya mengisi sisa dengan porsi sendiri
 (`test_the_content_is_never_dropped_in_favour_of_the_summary`).
+
+## 14. Antrian unggahan: diukur, bukan dikira
+
+Keluhan: "upload knowledge prosesnya lama sekali dan malah queued padahal kecil size-nya".
+Log produksi menunjukkan sebabnya bukan ukuran berkas itu:
+
+```
+13:41:54  index requested document=laporan_tahunan_bank_bjb_2025
+13:46:21  WARNING dokumen ... punya 1828 potongan, ringkasan dibatasi 400 potongan pertama
+13:46:54  WARNING ringkasan terpotong ... (berulang tiap ~35-50 detik)
+13:56:44  WARNING ringkasan terpotong ...   <- 15 menit kemudian, masih jalan
+```
+
+Ringkasan dokumen besar itu map-reduce: 400 potongan / ~13 potongan per jendela = ~31 panggilan
+LLM, masing-masing 35-50 detik. Karena pengindeksan hanya punya **satu** worker dan ringkasan
+dikerjakan di worker yang sama, setiap unggahan lain menunggu di antrian.
+
+Perbaikan dan angkanya:
+
+| Ukuran | Sebelum | Sesudah |
+|---|---|---|
+| Jalur ringkasan | worker yang sama dengan indeks (1 slot) | antrian terpisah (`SUMMARY_WORKERS=2`) |
+| Berkas kecil saat dokumen besar diringkas | menunggu sampai ringkasan selesai | **selesai 2,7 detik**, terukur di uji hidup |
+| Batas ringkasan dokumen raksasa | tanpa batas (15 menit di produksi) | 120 detik / 12 tahap, sisanya dilaporkan "ringkasan sebagian" |
+| Arti status `completed` | berubah di versi antara (isinya saja) | tetap: tuntas termasuk ringkasan |
+
+Uji yang mengunci: `tests/integration/test_summary_queue.py` (3 uji) - ringkasan lambat tidak
+menahan unggahan berikutnya, status tidak dilaporkan selesai sebelum ringkasan selesai, dan
+`/ready` menerbitkan kedua antrian (`queued`, `summary_queued`, `summary_workers`).
+
+Uji hidup `scripts/verify_summary_queue_live.py`: unggah dokumen besar, lalu berkas kecil tanpa
+menunggu -> **berkas kecil selesai 2,7 detik** sementara dokumen besar masih `processing`
+tahap `summarizing`, dan isi berkas kecil itu sudah bisa ditemukan lewat pencarian.
