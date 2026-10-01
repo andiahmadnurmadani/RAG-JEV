@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.rag.constants import SUMMARY_CHUNK_ID
 
 logger = get_logger(__name__)
 
@@ -31,6 +32,9 @@ class SparseEntry:
     chunk_id: str
     document_id: str
     tokens: List[str]
+    # Potongan ringkasan dokumen: ikut disimpan supaya bisa dicari saat pertanyaannya memang
+    # minta ringkasan, tetapi tidak ikut bersaing pada pencarian biasa.
+    is_summary: bool = False
 
 
 @dataclass
@@ -108,7 +112,14 @@ class SparseIndex:
                 entry for entry in scope_obj.entries if (entry.document_id, entry.chunk_id) not in incoming
             ]
             for chunk_id, document_id, content in items:
-                scope_obj.entries.append(SparseEntry(chunk_id=chunk_id, document_id=document_id, tokens=tokenize(content)))
+                scope_obj.entries.append(
+                    SparseEntry(
+                        chunk_id=chunk_id,
+                        document_id=document_id,
+                        tokens=tokenize(content),
+                        is_summary=chunk_id == SUMMARY_CHUNK_ID,
+                    )
+                )
                 added += 1
             scope_obj.model = None
             self._persist(organization_id, knowledge_base_id, scope_obj)
@@ -151,6 +162,7 @@ class SparseIndex:
         knowledge_base_id: str,
         top_k: int = 30,
         document_ids: Optional[Sequence[str]] = None,
+        include_summary: bool = False,
     ) -> List[Tuple[str, float]]:
         """Return ``[(f"{document_id}::{chunk_id}", normalised_score)]``.
 
@@ -162,6 +174,9 @@ class SparseIndex:
         *filters* candidates — it does not rebuild statistics. That is a deliberate
         trade-off: rebuilding the index per prompt would cost more than the ranking
         difference, and the scores are normalised against the surviving set anyway.
+
+        ``include_summary`` bawaannya False: potongan ringkasan tidak ikut pencarian biasa
+        supaya ia tidak mendesak potongan isi keluar dari ``top_k``.
         """
         scope_obj = self._scope(organization_id, knowledge_base_id)
         wanted = {str(item) for item in (document_ids or []) if item} or None
@@ -175,7 +190,8 @@ class SparseIndex:
             paired = [
                 (f"{entry.document_id}::{entry.chunk_id}", float(score))
                 for entry, score in zip(scope_obj.entries, scores)
-                if wanted is None or entry.document_id in wanted
+                if (wanted is None or entry.document_id in wanted)
+                and (include_summary or not entry.is_summary)
             ]
         ranked = sorted(paired, key=lambda item: item[1], reverse=True)[:top_k]
         if not ranked:

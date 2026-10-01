@@ -74,7 +74,7 @@ def build_services(settings: Optional[Settings] = None) -> Services:
     jev = JevRouter(settings, JevClient(settings))
     jobs = JobStore(settings.job_store_path)
     tables = TableStore(settings.table_store_path)
-    indexing = IndexingPipeline(settings, embedder, sparse, jobs, tables)
+    indexing = IndexingPipeline(settings, embedder, sparse, jobs, tables, generator=generator)
     worker = IndexingWorker(settings, indexing, jobs)
     rag = RagPipeline(settings, retriever, generator, jev, tables)
     return Services(

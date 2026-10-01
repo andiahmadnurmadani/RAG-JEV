@@ -140,6 +140,8 @@ class QueryUsageOut(BaseModel):
     # supaya dokumennya utuh) - bukan sekadar berapa yang ditemukan pencarian.
     context_chunks: int = 0
     context_expanded_chunks: int = 0
+    # Potongan ringkasan dokumen yang ikut ke konteks (terpisah dari isi).
+    context_summary_chunks: int = 0
     document_coverage: List[DocumentCoverageOut] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
@@ -243,6 +245,11 @@ class DocumentStatusOut(BaseModel):
     # Untuk dokumen hasil crawl web: berapa halaman yang masuk, berapa yang dilewati.
     web_pages: int = 0
     web_skipped: int = 0
+    # Ringkasan dokumen (knowledge turunan). ``summary`` kosong berarti belum/tidak diringkas;
+    # ``summary_error`` menjelaskan alasannya supaya tidak terbaca sebagai "sudah diringkas".
+    summary: str = ""
+    summary_tokens: int = 0
+    summary_error: str = ""
 
 
 class HealthOut(BaseModel):

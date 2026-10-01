@@ -68,6 +68,49 @@ If the context lacks the requested data, return an empty result.
     + UNTRUSTED_NOTICE
 )
 
+# Ringkasan knowledge turunan. Aturannya sengaja ketat: ringkasan yang menyimpang dari isi
+# dokumen akan dipakai sebagai "fakta" pada pertanyaan berikutnya, jadi kesalahan di sini
+# berlipat. Tidak ada angka, nama, atau kebijakan yang boleh muncul tanpa ada di konteks.
+SUMMARY_PROMPT_ID = (
+    """Anda menyusun ringkasan resmi untuk sebuah dokumen pengetahuan organisasi.
+
+Aturan:
+1. Pakai HANYA isi konteks yang diberikan. Jangan menambah pengetahuan dari luar.
+2. Jangan mengarang angka, tanggal, nama, atau kebijakan. Bila sesuatu tidak ada di konteks,
+   jangan ditulis.
+3. Tulis ringkasan padat dan mandiri: pembaca yang hanya membaca ringkasan ini harus paham isi
+   pokok dokumennya.
+4. Pertahankan istilah, nama kolom, nama tabel, dan angka persis seperti di dokumen.
+5. Bila dokumen memuat daftar (tabel, langkah, syarat), sebutkan butir-butir utamanya -
+   jangan hanya bilang "berisi daftar".
+6. Jangan menyapa pembaca, jangan membuka dengan "berdasarkan dokumen", dan jangan menutup
+   dengan tawaran bantuan. Langsung ke isinya.
+7. Bahasa ringkasan mengikuti bahasa dokumen (Indonesia bila dokumennya Indonesia).
+
+"""
+    + UNTRUSTED_NOTICE
+)
+
+SUMMARY_PROMPT_EN = (
+    """You write an official summary of an organizational knowledge document.
+
+Rules:
+1. Use ONLY the provided context. Do not add outside knowledge.
+2. Do not invent numbers, dates, names, or policies. If something is not in the context,
+   leave it out.
+3. Write a dense, self-contained summary: a reader who only reads the summary must understand
+   the document's substance.
+4. Preserve terms, column names, table names, and figures exactly as written.
+5. If the document contains a list (tables, steps, requirements), name the main items -
+   do not just say "it contains a list".
+6. Do not address the reader, do not open with "based on the document", and do not close with
+   an offer of help. Go straight to the content.
+7. Write the summary in the document's language.
+
+"""
+    + UNTRUSTED_NOTICE
+)
+
 
 @dataclass
 class LLMUsage:
@@ -311,6 +354,56 @@ class Generator:
         if limit and usage.output_tokens >= limit and not text.strip():
             return True
         return False
+
+    # ------------------------------------------------------------------ #
+    def summarize(
+        self,
+        *,
+        context: BuiltContext,
+        document_name: str = "",
+        language: str = "",
+        max_tokens: Optional[int] = None,
+    ) -> GeneratedAnswer:
+        """Ringkas isi satu dokumen dari potongan yang sudah terkumpul.
+
+        Dipakai untuk membuat knowledge turunan: ringkasan disimpan sebagai dokumen tersendiri,
+        sehingga pertanyaan "ringkas dokumen X" bisa dijawab dari ringkasannya (satu potongan
+        padat) alih-alih menyeret seluruh isi dokumen ke konteks.
+
+        Ringkasan dibuat dari potongan yang BENAR-BENAR ada di indeks (pemanggilnya mengambil
+        lewat jalur yang sama dengan konteks tanya-jawab), jadi tidak ada isi yang dikarang dan
+        batas tenant tetap dihormati.
+        """
+        if not context.used:
+            return GeneratedAnswer(answer="", grounded=False, usage=LLMUsage(model=self.model))
+
+        instruction = SUMMARY_PROMPT_ID if (language or self._settings.answer_language) == "id" else SUMMARY_PROMPT_EN
+        user_prompt = (
+            f"{context.text}\n\n"
+            f"Nama dokumen: {document_name or '(tanpa nama)'}\n\n"
+            "Buat ringkasan dokumen di atas."
+        )
+        messages = [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": user_prompt},
+        ]
+        text, usage = self._client.chat(messages, max_tokens=max_tokens)
+        truncated = self._looks_truncated(text, usage)
+        if truncated:
+            logger.warning(
+                "ringkasan terpotong (finish_reason=%r, output_tokens=%s) untuk %s",
+                usage.finish_reason,
+                usage.output_tokens,
+                document_name,
+            )
+        return GeneratedAnswer(
+            answer=(text or "").strip(),
+            grounded=bool(text and text.strip()) and not truncated,
+            usage=usage,
+            raw=text or "",
+            citations_used=extract_citation_numbers(text or ""),
+            truncated=truncated,
+        )
 
     # ------------------------------------------------------------------ #
     def extract(

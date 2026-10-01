@@ -100,6 +100,7 @@ def search_dense(
     top_k: int,
     extra_must: Optional[Sequence[Any]] = None,
     document_ids: Optional[Sequence[str]] = None,
+    include_summary: bool = False,
 ) -> List[Dict[str, Any]]:
     """Tenant-filtered vector search. The filter is built here, never by callers."""
 
@@ -107,13 +108,18 @@ def search_dense(
         return []
     query_filter = tenant_filter(organization_id, knowledge_base_id)
     must = list(query_filter.must or [])
+    must_not = list(query_filter.must_not or [])
     scope_condition = document_scope_condition(document_ids)
     if scope_condition is not None:
         must.append(scope_condition)
     if extra_must:
         must.extend(extra_must)
-    if must != list(query_filter.must or []):
-        query_filter = qmodels.Filter(must=must)
+    summary_condition = summary_filter(include=include_summary)
+    if summary_condition is not None:
+        # Ringkasan tidak ikut pencarian biasa: ia bisa mendesak potongan isi keluar dari top_k.
+        must_not.append(summary_condition)
+    if must != list(query_filter.must or []) or must_not != list(query_filter.must_not or []):
+        query_filter = qmodels.Filter(must=must, must_not=must_not or None)
     client = get_client(settings)
     try:
         response = client.query_points(
@@ -175,7 +181,18 @@ def delete_document(settings: Settings, *, organization_id: str, document_id: st
     return before
 
 
-def count_document(settings: Settings, *, organization_id: str, document_id: str) -> int:
+def count_document(
+    settings: Settings,
+    *,
+    organization_id: str,
+    document_id: str,
+    include_summary: bool = True,
+) -> int:
+    """Jumlah vektor satu dokumen. ``include_summary=False`` menghitung isi saja.
+
+    Potongan ringkasan hidup di dokumen yang sama (supaya ikut terhapus dan tetap tersaring
+    tenant), tetapi ia bukan "isi" - jadi laporan kelengkapan isi harus menghitungnya terpisah.
+    """
     if not collection_exists_guard(settings):
         return 0
     client = get_client(settings)
@@ -185,7 +202,7 @@ def count_document(settings: Settings, *, organization_id: str, document_id: str
         while True:
             records, offset = client.scroll(
                 collection_name=settings.qdrant_collection,
-                scroll_filter=_document_filter(organization_id, document_id),
+                scroll_filter=_document_filter(organization_id, document_id, include_summary=include_summary),
                 limit=256,
                 offset=offset,
                 with_payload=False,
@@ -204,14 +221,73 @@ def count_document(settings: Settings, *, organization_id: str, document_id: str
     return found
 
 
-def _document_filter(organization_id: str, document_id: str):
+def _document_filter(organization_id: str, document_id: str, *, include_summary: bool = True):
 
-    return qmodels.Filter(
-        must=[
-            qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
-            qmodels.FieldCondition(key="document_id", match=qmodels.MatchValue(value=document_id)),
-        ]
-    )
+    must = [
+        qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
+        qmodels.FieldCondition(key="document_id", match=qmodels.MatchValue(value=document_id)),
+    ]
+    if not include_summary:
+        # ``must_not`` (bukan ``must`` dengan nilai False) supaya potongan lama yang belum
+        # punya field ini tetap ikut terhitung.
+        return qmodels.Filter(
+            must=must,
+            must_not=[qmodels.FieldCondition(key="is_summary", match=qmodels.MatchValue(value=True))],
+        )
+    return qmodels.Filter(must=must)
+
+
+def summary_filter(include: bool = False):
+    """Kondisi ``is_summary`` untuk menyaring potongan ringkasan dari pencarian biasa.
+
+    Ringkasan bukan bagian isi dokumen, jadi ia **tidak** ikut bersaing pada pencarian biasa:
+    kalau ikut, ia bisa mendesak potongan isi keluar dari ``top_k`` dan jawaban faktual akan
+    datang dari teks yang sudah dipadatkan (kehilangan detail tanpa jejak). Ringkasan diambil
+    hanya ketika pertanyaannya memang meminta ringkasan.
+    """
+    if include:
+        return None
+    return qmodels.FieldCondition(key="is_summary", match=qmodels.MatchValue(value=True))
+
+
+def get_summary_chunk(
+    settings: Settings,
+    *,
+    organization_id: str,
+    document_id: str,
+    knowledge_base_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Potongan ringkasan satu dokumen (``None`` bila dokumen itu belum diringkas)."""
+    if not collection_exists_guard(settings) or not document_id:
+        return None
+    conditions = [
+        qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
+        qmodels.FieldCondition(key="document_id", match=qmodels.MatchValue(value=document_id)),
+        qmodels.FieldCondition(key="is_summary", match=qmodels.MatchValue(value=True)),
+    ]
+    if knowledge_base_id:
+        conditions.append(
+            qmodels.FieldCondition(key="knowledge_base_id", match=qmodels.MatchValue(value=knowledge_base_id))
+        )
+    client = get_client(settings)
+    try:
+        records, _ = client.scroll(
+            collection_name=settings.qdrant_collection,
+            scroll_filter=qmodels.Filter(must=conditions),
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception as exc:  # noqa: BLE001 - ringkasan pelengkap
+        logger.warning("gagal mengambil ringkasan dokumen %s: %s", document_id, exc)
+        return None
+    for record in records or []:
+        payload = dict(record.payload or {})
+        if payload.get("organization_id") != organization_id:
+            logger.error("tenant mismatch while reading summary of %s", document_id)
+            continue
+        return payload
+    return None
 
 
 def get_chunks_by_ids(
@@ -282,13 +358,18 @@ def list_document_chunks(
     organization_id: str,
     document_id: str,
     knowledge_base_id: Optional[str] = None,
+    include_summary: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Semua potongan satu dokumen, urut sesuai dokumen aslinya, di dalam batas tenant.
+    """Semua potongan ISI satu dokumen, urut sesuai dokumen aslinya, di dalam batas tenant.
 
     Dipakai saat konteks perlu dilengkapi menjadi dokumen utuh: pencarian kemiripan selalu
     mengembalikan sebagian (potongan paling mirip), sedangkan pertanyaan "isi lengkap dokumen
     ini" hanya bisa dijawab benar kalau seluruh bagiannya ikut dikirim ke model. Payload di
     sini melewati filter tenant yang sama seperti pencarian - tidak ada jalan pintas.
+
+    ``include_summary`` bawaannya **False**: potongan ringkasan bukan bagian dari isi, dan
+    menyertakannya akan membuat laporan kelengkapan isi ("21 dari 21 bagian") salah hitung.
+    Ringkasan tetap bisa ditemukan lewat pencarian biasa, yang memang tujuannya.
     """
     if not collection_exists_guard(settings) or not document_id:
         return []
@@ -301,7 +382,13 @@ def list_document_chunks(
         conditions.append(
             qmodels.FieldCondition(key="knowledge_base_id", match=qmodels.MatchValue(value=knowledge_base_id))
         )
-    query_filter = qmodels.Filter(must=conditions)
+    if include_summary:
+        query_filter = qmodels.Filter(must=conditions)
+    else:
+        query_filter = qmodels.Filter(
+            must=conditions,
+            must_not=[qmodels.FieldCondition(key="is_summary", match=qmodels.MatchValue(value=True))],
+        )
 
     client = get_client(settings)
     out: List[Dict[str, Any]] = []

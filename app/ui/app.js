@@ -10,7 +10,7 @@
 const KEY = "rag.console.v3";
 const SESSION_KEY = "rag.session.v1";
 const DEFAULT_KB = "kb_chat";
-const PANELS = ["conn", "access", "keys", "llm", "jev", "fmt", "retr", "web"];
+const PANELS = ["conn", "access", "keys", "llm", "jev", "fmt", "retr", "web", "summary"];
 
 const state = {
   base: "",
@@ -23,6 +23,7 @@ const state = {
   kb: DEFAULT_KB,
   mode: "answer",
   picked: new Set(),
+  docs: [],
   opts: { top_k: 12, threshold: 0.35, strict: true, hybrid: true, reranker: false, route: "" },
   limits: { max_mb: null, allowed: [], allowed_ext: [] },
   catalog: [],
@@ -382,7 +383,8 @@ async function loadDocs() {
   if (!credential()) return;
   try {
     const data = await api("GET", "/knowledge?limit=200&knowledge_base_id=" + encodeURIComponent(state.kb));
-    renderDocs(data.documents || []);
+    state.docs = data.documents || [];
+    renderDocs(state.docs);
   } catch (err) {
     if (err.code !== "AUTH_INVALID") note("upload-status", "err", escapeHtml(err.message || "gagal memuat dokumen"));
   }
@@ -409,6 +411,11 @@ function renderDocs(documents) {
       "<span>" + escapeHtml(doc.chunks) + " chunk, " + escapeHtml(doc.tokens) + " token</span>" +
       (doc.tables ? "<span class=\"doc-tables\">" + escapeHtml(doc.tables) + " tabel</span>" : "") +
       (doc.web_pages ? "<span class=\"doc-tables\">" + escapeHtml(doc.web_pages) + " halaman web</span>" : "") +
+      (doc.summary
+        ? "<span class=\"doc-summary\" title=\"" + escapeHtml((doc.summary || "").slice(0, 600)) + "\">" +
+          "<button type=\"button\" class=\"linkish\" data-summary=\"" + escapeHtml(doc.document_id) + "\">" +
+          "ringkasan " + escapeHtml(doc.summary_tokens || 0) + " token</button></span>"
+        : (doc.summary_error ? "<span class=\"doc-summary muted\" title=\"" + escapeHtml(doc.summary_error) + "\">tanpa ringkasan</span>" : "")) +
       (when ? "<span>" + escapeHtml(when) + "</span>" : "") +
       (doc.source_url
         ? "<span><a href=\"" + escapeHtml(doc.source_url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
@@ -431,7 +438,26 @@ function renderDocs(documents) {
   list.querySelectorAll("[data-del]").forEach((button) => {
     button.addEventListener("click", () => removeDoc(button.dataset.del));
   });
+  list.querySelectorAll("[data-summary]").forEach((button) => {
+    button.addEventListener("click", () => showSummary(button.dataset.summary));
+  });
   renderScope();
+}
+
+async function showSummary(documentId) {
+  const doc = (state.docs || []).find((item) => item.document_id === documentId);
+  const name = doc ? doc.document_name || doc.document_id : documentId;
+  const body = doc && doc.summary ? doc.summary : "(ringkasan tidak tersedia)";
+  const noteText = doc && doc.summary_error ? "\n\nCatatan: " + doc.summary_error : "";
+  const box = $("dlg-summary");
+  if (!box) {
+    // Tanpa dialog (mis. halaman lama): tampilkan seadanya, jangan diam-diam gagal.
+    note("upload-status", "info", escapeHtml(name) + ": " + escapeHtml(body.slice(0, 400)));
+    return;
+  }
+  $("summary-title").textContent = "Ringkasan: " + name;
+  $("summary-body").textContent = body + noteText;
+  box.showModal();
 }
 
 function renderScope() {
@@ -773,6 +799,7 @@ async function loadSettings() {
     }
     if (data.sections.retrieval) renderRetrievalService(data.sections.retrieval);
     if (data.sections.web) renderWebService(data.sections.web);
+    if (data.sections.summary) renderSummaryService(data.sections.summary);
   } catch (err) {
     const forbidden = err.code === "AUTH_FORBIDDEN";
     const message = forbidden
@@ -1038,6 +1065,37 @@ async function saveWebService() {
       ? "Setelan layanan hanya bisa diubah dengan kunci berizin <strong>admin</strong>."
       : escapeHtml(err.message || "gagal menyimpan") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>";
     note("web-svc-status", forbidden ? "warn" : "err", message);
+  }
+}
+
+function renderSummaryService(summary) {
+  if (!summary) return;
+  $("s-summary-enabled").checked = summary.enabled !== false;
+  if (summary.window_tokens != null) $("s-summary-window").value = summary.window_tokens;
+  if (summary.max_tokens != null) $("s-summary-maxtok").value = summary.max_tokens;
+  if (summary.max_documents != null) $("s-summary-maxdocs").value = summary.max_documents;
+}
+
+async function saveSummaryService() {
+  const payload = {
+    summary: {
+      enabled: $("s-summary-enabled").checked,
+      window_tokens: Number($("s-summary-window").value) || 12000,
+      max_tokens: Number($("s-summary-maxtok").value) || 2048,
+      max_documents: Number($("s-summary-maxdocs").value) || 3,
+    },
+  };
+  note("summary-svc-status", "info", "Menyimpan setelan ringkasan...");
+  try {
+    const data = await api("PUT", "/settings", payload);
+    note("summary-svc-status", "ok", "Tersimpan: <span class=\"mono\">" + escapeHtml((data.applied || []).join(", ")) + "</span>");
+    if (data.sections && data.sections.summary) renderSummaryService(data.sections.summary);
+  } catch (err) {
+    const forbidden = err.code === "AUTH_FORBIDDEN";
+    const message = forbidden
+      ? "Setelan layanan hanya bisa diubah dengan kunci berizin <strong>admin</strong>."
+      : escapeHtml(err.message || "gagal menyimpan") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>";
+    note("summary-svc-status", forbidden ? "warn" : "err", message);
   }
 }
 
@@ -1477,6 +1535,7 @@ function wire() {
   $("btn-save-retr").addEventListener("click", saveRetrieval);
   $("btn-save-retr-svc").addEventListener("click", saveRetrievalService);
   $("btn-save-web-svc").addEventListener("click", saveWebService);
+  $("btn-save-summary-svc").addEventListener("click", saveSummaryService);
   $("gate-form").addEventListener("submit", login);
   $("btn-logout").addEventListener("click", logout);
   $("btn-save-access").addEventListener("click", saveAccess);

@@ -24,6 +24,11 @@ UNTRUSTED_NOTICE = (
     "answering the user."
 )
 
+# Porsi anggaran konteks yang boleh dipakai ringkasan dokumen (knowledge turunan). Sisanya
+# untuk isi asli: ringkasan berguna, tetapi isi yang menentukan jawaban faktual.
+SUMMARY_BUDGET_RATIO = 0.25
+SUMMARY_MAX_TOKENS_HARD_CAP = 4000
+
 
 @dataclass
 class DocumentCoverage:
@@ -35,6 +40,9 @@ class DocumentCoverage:
     total: int
     complete: bool = False
     ordered: bool = False
+    # True bila dokumen ini hadir lewat RINGKASANnya (bukan seluruh isinya). Laporan tetap
+    # jujur: "lengkap lewat ringkasan" berbeda dari "lengkap isinya".
+    via_summary: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -44,10 +52,13 @@ class DocumentCoverage:
             "total": self.total,
             "complete": self.complete,
             "ordered": self.ordered,
+            "via_summary": self.via_summary,
         }
 
     def line(self) -> str:
-        if self.complete and self.ordered:
+        if self.via_summary:
+            status = "lengkap lewat ringkasan"
+        elif self.complete and self.ordered:
             status = "lengkap (seluruh bagian, urut)"
         elif self.complete:
             status = "lengkap"
@@ -89,18 +100,16 @@ def build_context(
     blocks: List[str] = []
     used: List[Candidate] = []
     flags: List[str] = []
-    total = 0
     dropped = 0
 
-    for index, candidate in enumerate(candidates):
-        if len(used) >= max_chunks:
-            dropped += 1
-            continue
+    for candidate in candidates:
         for marker in scan_injection(candidate.content):
             # Reported, never obeyed: the text stays inert evidence (PRD 34/35).
             if marker not in flags:
                 flags.append(marker)
-        block = f"[{index + 1}]\n" + fence_document(
+
+    def render(candidate: Candidate) -> str:
+        block = fence_document(
             candidate.chunk_id,
             candidate.document_name or candidate.document_id,
             candidate.page,
@@ -112,13 +121,70 @@ def build_context(
             # Bagian pelengkap dokumen: tandai sebagai urutan dokumen, bukan hasil pencarian
             # lain, supaya model membacanya sebagai satu dokumen utuh.
             block += f"\n[DOCUMENT_PART]\nbagian {candidate.document_order}"
-        block_tokens = estimate_tokens(block)
-        if total + block_tokens > max_tokens and used:
+        if candidate.is_summary:
+            block += "\n[SUMMARY]\nringkasan dokumen"
+        return block
+
+    # Isi dokumen dan ringkasan diperlakukan berbeda saat anggaran mepet.
+    #
+    # Ringkasan adalah teks padat yang bisa panjang. Kalau ia ikut berebut anggaran yang sama,
+    # ia bisa menghabiskan jatah token dan mendorong seluruh isi asli keluar dari konteks -
+    # kebalikan dari yang diinginkan, karena isi yang menentukan jawaban faktual. Jadi:
+    # **isi didahulukan**, ringkasan hanya mengisi sisa (dengan batas porsinya sendiri).
+    content_items = [item for item in candidates if not item.is_summary]
+    summary_items = [item for item in candidates if item.is_summary]
+
+    admitted: Dict[int, str] = {}  # posisi di ``candidates`` -> blok teks
+    content_total = 0
+    content_count = 0
+    for position, candidate in enumerate(candidates):
+        if candidate.is_summary:
+            continue
+        if content_count >= max_chunks:
             dropped += 1
             continue
-        blocks.append(block)
-        used.append(candidate)
-        total += block_tokens
+        block = render(candidate)
+        tokens = estimate_tokens(block)
+        if content_total + tokens > max_tokens and content_count:
+            dropped += 1
+            continue
+        admitted[position] = block
+        content_total += tokens
+        content_count += 1
+
+    summary_budget = 0
+    if summary_items:
+        summary_budget = max(
+            400, min(int(max_tokens * SUMMARY_BUDGET_RATIO), SUMMARY_MAX_TOKENS_HARD_CAP)
+        )
+    summary_total = 0
+    for position, candidate in enumerate(candidates):
+        if not candidate.is_summary:
+            continue
+        block = render(candidate)
+        tokens = estimate_tokens(block)
+        if summary_total + tokens > summary_budget:
+            # Ringkasan kelebihan porsi: dilewati, isi dokumen tidak dikorbankan.
+            dropped += 1
+            continue
+        if content_total + summary_total + tokens > max_tokens and admitted:
+            dropped += 1
+            continue
+        admitted[position] = block
+        summary_total += tokens
+
+    if not admitted:
+        return BuiltContext(text="", used=[], dropped=dropped, tokens=0, injection_flags=flags)
+
+    # Urutan tampil mengikuti urutan yang diminta pemanggil (ringkasan di depan bila
+    # pertanyaannya minta ringkasan), lalu dinomori ulang sesuai urutan itu supaya nomor
+    # sitasi ``[n]`` cocok dengan teks yang dibaca model.
+    ordered = sorted(admitted.items())
+    total = 0
+    for number, (position, block) in enumerate(ordered, start=1):
+        blocks.append(f"[{number}]\n{block}")
+        used.append(candidates[position])
+        total += estimate_tokens(block)
 
     if not blocks:
         return BuiltContext(text="", used=[], dropped=dropped, tokens=0, injection_flags=flags)

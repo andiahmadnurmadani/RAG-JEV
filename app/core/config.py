@@ -208,6 +208,20 @@ class Settings(BaseSettings):
     # Agen pengguna saat mengambil halaman web (disebut jujur, bukan menyamar).
     web_user_agent: str = "RAG-Service/1.0 (+knowledge-fetcher)"
 
+    # ---- ringkasan knowledge turunan -------------------------------------
+    # Saat dokumen diindeks, isinya diringkas dan ringkasannya diindeks sebagai potongan
+    # tersendiri (document_id sama). Pertanyaan "ringkas dokumen ini" lalu dijawab dari satu
+    # potongan padat, bukan dari sebagian potongan hasil pencarian kemiripan.
+    document_summary_enabled: bool = True
+    # Jendela token per kelompok saat meringkas dokumen besar (map-reduce).
+    summary_window_tokens: int = 12000
+    # Batas panjang ringkasan yang diminta dari model (jawaban panjang butuh ruang).
+    summary_max_tokens: int = 2048
+    # Dokumen dengan potongan lebih dari ini hanya diringkas sebagian (dilaporkan apa adanya).
+    summary_max_parts: int = 400
+    # Berapa dokumen yang ringkasannya boleh ikut saat pertanyaannya minta ringkasan.
+    summary_max_documents: int = 3
+
     # Ekstensi yang boleh jadi knowledge (lihat app/parsing/formats.py).
     # Kosong = pakai daftar default katalog, dikurangi format yang belum tersedia di mesin ini.
     upload_extensions: str = ""

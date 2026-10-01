@@ -23,6 +23,7 @@ from app.jev.router import JevRouter
 from app.parsing.tables import scope_note as table_scope_note
 from app.qdrant import repository
 from app.rag.chunker import estimate_tokens
+from app.rag.constants import SUMMARY_CHUNK_ID
 from app.rag.context import BuiltContext, DocumentCoverage, build_context, merge_expanded
 from app.rag.generator import NO_ANSWER_EN, NO_ANSWER_ID, Generator
 from app.rag.retriever import Candidate, RetrievalResult, Retriever
@@ -114,6 +115,74 @@ class RagPipeline:
         return result
 
     # ------------------------------------------------------------------ #
+    def _attach_summaries(
+        self,
+        candidates: Sequence[Candidate],
+        *,
+        context: TrustedContext,
+        knowledge_base_id: Optional[str],
+        document_ids: Optional[Sequence[str]],
+        decision,
+    ) -> List[Candidate]:
+        """Tambahkan potongan ringkasan dokumen yang relevan, di depan, saat niatnya minta ringkasan.
+
+        Ringkasan sengaja **tidak** ikut pencarian biasa (lihat ``summary_filter``): ia teks
+        yang sudah dipadatkan, dan kalau ikut bersaing ia bisa mendesak potongan isi keluar dari
+        ``top_k`` - jawaban faktual lalu datang dari ringkasan, kehilangan detail tanpa jejak.
+        Jadi ringkasan diambil di sini, hanya ketika pertanyaannya memang meminta ringkasan,
+        dari dokumen yang sudah muncul di hasil pencarian.
+        """
+        if getattr(decision, "capability", "") != "knowledge_summary":
+            return list(candidates)
+
+        allowed = {str(item) for item in (document_ids or []) if item}
+        wanted: List[str] = []
+        for candidate in candidates:
+            if allowed and candidate.document_id not in allowed:
+                continue
+            if candidate.document_id and candidate.document_id not in wanted:
+                wanted.append(candidate.document_id)
+        if not wanted:
+            return list(candidates)
+
+        limit = max(1, int(getattr(self._settings, "summary_max_documents", 3)))
+        added: List[Candidate] = []
+        for document_id in wanted[:limit]:
+            try:
+                payload = repository.get_summary_chunk(
+                    self._settings,
+                    organization_id=context.organization_id,
+                    document_id=document_id,
+                    knowledge_base_id=knowledge_base_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - ringkasan pelengkap
+                logger.warning("gagal mengambil ringkasan %s: %s", document_id, exc)
+                continue
+            if not payload:
+                continue
+            content = str(payload.get("content") or "").strip()
+            if not content:
+                continue
+            added.append(
+                Candidate(
+                    chunk_id=str(payload.get("chunk_id") or SUMMARY_CHUNK_ID),
+                    document_id=document_id,
+                    content=content,
+                    document_name=str(payload.get("document_name") or ""),
+                    page=payload.get("page"),
+                    section=str(payload.get("section") or "Ringkasan dokumen"),
+                    source_url=str(payload.get("source_url") or ""),
+                    language=str(payload.get("language") or ""),
+                    score=1.0,
+                    is_summary=True,
+                )
+            )
+        if not added:
+            return list(candidates)
+        return added + list(candidates)
+
+    # ------------------------------------------------------------------ #
+    # ------------------------------------------------------------------ #
     def answer(
         self,
         *,
@@ -180,6 +249,15 @@ class RagPipeline:
             document_ids=document_ids,
             budget_tokens=budget,
         )
+        # Ringkasan dokumen (knowledge turunan) hanya diambil saat pertanyaannya memang minta
+        # ringkasan; pada pertanyaan biasa ia tidak ikut agar isi asli yang menjawab.
+        candidates = self._attach_summaries(
+            candidates,
+            context=context,
+            knowledge_base_id=knowledge_base_id,
+            document_ids=document_ids,
+            decision=decision,
+        )
         result.document_coverage = [item.to_dict() for item in coverage]
         built = build_context(
             candidates,
@@ -211,7 +289,10 @@ class RagPipeline:
             "reranker": retrieval.reranker_used,
             "rerank_ms": retrieval.rerank_ms,
             "context_tokens": built.tokens,
-            "context_chunks": len(built.used),
+            # Potongan ISI yang sampai ke model (ringkasan dihitung terpisah supaya laporan
+            # kelengkapan dokumen tetap berarti "berapa bagian isi yang dibaca").
+            "context_chunks": sum(1 for candidate in built.used if not candidate.is_summary),
+            "context_summary_chunks": sum(1 for candidate in built.used if candidate.is_summary),
             "context_expanded_chunks": sum(1 for candidate in built.used if candidate.expanded),
             "document_coverage": [item.to_dict() for item in coverage],
             "input_tokens": generated.usage.input_tokens,
@@ -300,6 +381,10 @@ class RagPipeline:
             if allowed and candidate.document_id not in allowed:
                 # Lingkup dokumen yang diminta klien tetap mengikat di jalur pelengkap.
                 continue
+            if candidate.is_summary:
+                # Potongan ringkasan bukan bagian isi: melengkapinya dengan seluruh isi
+                # dokumen hanya membuang anggaran token - pertanyaannya minta ringkasan.
+                continue
             if candidate.document_id not in [item.document_id for item in top_documents]:
                 top_documents.append(candidate)
 
@@ -363,6 +448,11 @@ class RagPipeline:
         settings = self._settings
         tally: Dict[str, Dict[str, Any]] = {}
         for candidate in candidates:
+            if candidate.is_summary:
+                # Ringkasan bukan bagian isi; ia tidak boleh membuat laporan "x dari y bagian"
+                # jadi salah. Ringkasan tetap tampil sebagai sumber jawaban, dan dokumen yang
+                # HANYA hadir lewat ringkasannya dilaporkan terpisah di bawah.
+                continue
             entry = tally.setdefault(candidate.document_id, {"name": candidate.document_name, "included": 0})
             entry["included"] += 1
         for document_id, parts in extras:
@@ -375,8 +465,12 @@ class RagPipeline:
         coverage: List[DocumentCoverage] = []
         for document_id, entry in tally.items():
             try:
+                # Ringkasan tidak dihitung: yang dilaporkan adalah kelengkapan ISI dokumen.
                 total = repository.count_document(
-                    settings, organization_id=context.organization_id, document_id=document_id
+                    settings,
+                    organization_id=context.organization_id,
+                    document_id=document_id,
+                    include_summary=False,
                 )
             except Exception as exc:  # noqa: BLE001 - pelengkap
                 logger.warning("gagal menghitung dokumen %s: %s", document_id, exc)
@@ -393,6 +487,24 @@ class RagPipeline:
                     total=int(total),
                     complete=entry["included"] >= int(total),
                     ordered=any(document_id == doc for doc, _ in extras),
+                )
+            )
+
+        # Dokumen yang HANYA hadir lewat ringkasannya: jangan dihitung sebagai "isi sebagian",
+        # dan jangan pula menghilang dari laporan. Dilaporkan sebagai "lengkap lewat ringkasan".
+        reported = {item.document_id for item in coverage}
+        for candidate in candidates:
+            if not candidate.is_summary or candidate.document_id in reported:
+                continue
+            coverage.append(
+                DocumentCoverage(
+                    document_id=candidate.document_id,
+                    document_name=candidate.document_name or candidate.document_id,
+                    included=1,
+                    total=1,
+                    complete=True,
+                    ordered=False,
+                    via_summary=True,
                 )
             )
         coverage.sort(key=lambda item: (not item.complete, -item.included))

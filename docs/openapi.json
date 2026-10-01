@@ -2742,6 +2742,18 @@
               }
             ],
             "title": "Web"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
           }
         },
         "additionalProperties": false,

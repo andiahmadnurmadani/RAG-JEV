@@ -663,3 +663,36 @@ Dua bug nyata ketahuan justru oleh uji ini, bukan oleh pemeriksaan mata:
 
 Keduanya hanya muncul saat dokumennya punya beberapa halaman ber-alamat berbeda - yaitu tepat
 kasus yang fitur ini ada untuk melayani.
+
+## 13. Ringkasan dokumen: diukur dengan model nyata
+
+Fitur ini menambah satu panggilan model saat pengindeksan, jadi buktinya harus berupa angka dari
+layanan hidup - bukan klaim bahwa "ringkasan dibuat". Diuji lewat
+`scripts/verify_document_summary_live.py` (unggah -> tanya ringkasan -> tanya fakta).
+
+| Yang diuji | Hasil |
+|---|---|
+| ringkasan dibuat saat unggah | ya - `summary_tokens=183`, isinya menyebut bagian-bagian dokumen |
+| jumlah potongan isi | tetap 1 potongan (ringkasan tidak menambah "isi") |
+| minta ringkasan lewat `/query` | `context_summary_chunks=1`, sumber memuat `chunk_summary` |
+| isi tetap ikut saat minta ringkasan | `context_chunks=1` |
+| pertanyaan faktual ("retensi arsip kepegawaian") | `context_summary_chunks=0` - dijawab dari isi, bukan ringkasan |
+| hapus dokumen | 2 chunk terhapus (isi + ringkasan) |
+
+Catatan penting dari pengukuran ini: percobaan pertama **gagal** karena gateway LLM menolak
+permintaan `max_tokens=8192` dengan `insufficient credits`, sedangkan `2048` berhasil. Kegagalan
+itu dilaporkan apa adanya di `summary_error` (bukan disamarkan sebagai "sudah diringkas"), dan isi
+dokumen tetap terindeks. Itulah perilaku yang diinginkan: ringkasan opsional, isi wajib.
+
+Uji otomatis:
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/integration/test_document_summary.py -q   # 8 uji
+.venv/Scripts/python.exe -m pytest tests/integration/test_summary_settings.py -q   # 3 uji
+```
+
+Satu cacat nyata ketahuan oleh uji ini, bukan oleh pemeriksaan mata: versi pertama menaruh
+ringkasan di depan dan ia menghabiskan anggaran token sampai **seluruh isi dokumen terdorong keluar
+dari konteks** pada anggaran kecil - persis kebalikan dari tujuan fiturnya. Perbaikannya: isi
+dihitung lebih dulu, ringkasan hanya mengisi sisa dengan porsi sendiri
+(`test_the_content_is_never_dropped_in_favour_of_the_summary`).

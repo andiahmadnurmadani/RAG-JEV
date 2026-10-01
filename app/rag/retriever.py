@@ -48,6 +48,9 @@ class Candidate:
     # kelengkapan, bukan untuk mengubah skor.
     expanded: bool = False
     document_order: int = 0
+    # Potongan ringkasan dokumen (knowledge turunan). Bukan bagian isi: dipakai menjawab
+    # pertanyaan "ringkas dokumen ini", dan tidak dihitung sebagai bagian isi dokumen.
+    is_summary: bool = False
 
     def to_source(self) -> Dict[str, Any]:
         return {
@@ -201,6 +204,7 @@ class Retriever:
                     dense_score=dense_score,
                     sparse_score=sparse_score,
                     fused_score=fused_score,
+                    is_summary=bool(payload.get("is_summary")),
                 )
             )
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
 from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 
 from app.api.deps import services_from_request
 from app.api.middleware.auth import TrustedContext, trusted_context
@@ -11,9 +12,9 @@ from app.api.middleware.ratelimit import SlidingWindowLimiter
 from app.api.middleware.tenant import assert_tenant_match
 from app.api.schemas import DocumentStatusOut, IndexDataOut, KnowledgeIndexRequest, KnowledgeUpdateRequest
 from app.core.errors import AppError, ok
+from app.core.logging import get_logger
 from app.core.security import validate_display_label, validate_payload_size
 from app.core.urlguard import UrlRejected, assert_public_url
-from app.core.logging import get_logger
 from app.qdrant import repository
 from app.workers.indexing import STATUS_DELETED
 
@@ -147,6 +148,9 @@ def list_knowledge(
             ),
             tables=record.tables,
             source_url=record.source_url or "",
+            summary=record.summary or "",
+            summary_tokens=record.summary_tokens,
+            summary_error=record.summary_error or "",
         ).model_dump()
         for record in records
     ]
@@ -269,5 +273,8 @@ def knowledge_status(
         vectors_in_store=vectors,
         tables=record.tables,
         source_url=record.source_url or "",
+        summary=record.summary or "",
+        summary_tokens=record.summary_tokens,
+        summary_error=record.summary_error or "",
     )
     return ok(payload.model_dump())

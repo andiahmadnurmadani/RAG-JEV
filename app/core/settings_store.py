@@ -64,6 +64,14 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "reranker_enabled": ("reranker_enabled", "bool"),
         "strict_grounding": ("strict_grounding", "bool"),
     },
+    # Ringkasan dokumen (knowledge turunan). Global seperti setelan lain: satu tenant yang
+    # menyalakannya memakai kuota model bersama, dan ringkasannya tersimpan di indeks bersama.
+    "summary": {
+        "enabled": ("document_summary_enabled", "bool"),
+        "window_tokens": ("summary_window_tokens", "int"),
+        "max_tokens": ("summary_max_tokens", "int"),
+        "max_documents": ("summary_max_documents", "int"),
+    },
     # Sumber dari web. Global karena crawl membebani jaringan keluar dan situs orang lain -
     # satu tenant yang menaikkannya akan memakai kuota bersama.
     "web": {

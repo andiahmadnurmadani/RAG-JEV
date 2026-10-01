@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261002b">
+<link rel="stylesheet" href="style.css?v=20261002c">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -153,6 +153,7 @@
         <button type="button" data-panel="fmt" aria-selected="false">Format berkas</button>
         <button type="button" data-panel="retr" aria-selected="false">Retrieval</button>
         <button type="button" data-panel="web" aria-selected="false">Sumber web</button>
+        <button type="button" data-panel="summary" aria-selected="false">Ringkasan</button>
       </nav>
       <div class="sheet-panels" id="settings-panels">
       <section class="group" data-panel="conn">
@@ -441,6 +442,38 @@
         </div>
       </section>
 
+      <section class="group" data-panel="summary" hidden>
+        <div class="group-head">
+          <h2>Ringkasan dokumen</h2>
+          <p>Saat dokumen diunggah, isinya diringkas sekali dan ringkasannya ikut disimpan sebagai knowledge. Pertanyaan yang meminta ringkasan lalu dijawab dari ringkasan itu - bukan dari sebagian potongan hasil pencarian.</p>
+        </div>
+        <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
+          <label class="switch" for="s-summary-enabled"><input type="checkbox" id="s-summary-enabled" checked><span class="track"></span><span>Buat ringkasan setiap dokumen</span></label>
+        </div>
+        <div class="grid-3">
+          <div class="field">
+            <label for="s-summary-window">Jendela per tahap (token)</label>
+            <input type="number" id="s-summary-window" min="1000" max="200000" step="1000" value="12000">
+            <span class="help">Dokumen besar diringkas bertahap; ini ukuran tiap tahapnya.</span>
+          </div>
+          <div class="field">
+            <label for="s-summary-maxtok">Panjang ringkasan (token)</label>
+            <input type="number" id="s-summary-maxtok" min="256" max="32000" step="256" value="2048">
+            <span class="help">Ruang menulis ringkasan. Terlalu kecil = ringkasan terpotong.</span>
+          </div>
+          <div class="field">
+            <label for="s-summary-maxdocs">Maks dokumen per pertanyaan</label>
+            <input type="number" id="s-summary-maxdocs" min="1" max="20" step="1" value="3">
+            <span class="help">Berapa ringkasan dokumen boleh ikut saat user minta ringkasan.</span>
+          </div>
+        </div>
+        <p class="help" style="margin:0">Isi dokumen <strong>tidak pernah</strong> dikorbankan demi ringkasan: pada anggaran konteks yang mepet, isi asli yang didahulukan dan ringkasan hanya mengisi sisa. Ringkasan juga tidak ikut bersaing di pencarian biasa, supaya jawaban faktual tetap datang dari isi aslinya.</p>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-summary-svc" type="button">Simpan setelan ringkasan</button>
+          <span id="summary-svc-status"></span>
+        </div>
+      </section>
+
       <section class="group" data-panel="keys" hidden>
         <div class="group-head">
           <h2>Kunci API</h2>
@@ -558,6 +591,16 @@
   </form>
 </dialog>
 
-<script src="app.js?v=20261002b"></script>
+<dialog id="dlg-summary">
+  <form method="dialog" class="field" style="gap:12px;min-width:min(640px,88vw)">
+    <h3 id="summary-title" style="margin:0">Ringkasan</h3>
+    <pre id="summary-body" class="mono" style="white-space:pre-wrap;max-height:60vh;overflow:auto;margin:0"></pre>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn primary" value="ok" type="submit">Tutup</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js?v=20261002c"></script>
 </body>
 </html>

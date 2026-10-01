@@ -167,3 +167,22 @@ punya cara mengetahuinya.
 Kedua jalur melewati pengaman URL yang sama (`app/core/urlguard.py`): hanya `http`/`https`, tanpa
 kredensial di URL, semua alamat hasil DNS harus publik, dan pemeriksaan diulang di setiap
 pengalihan. Rinciannya di `docs/web-sources.md`.
+
+## 9. Ringkasan dokumen sebagai knowledge turunan
+
+Saat dokumen diindeks, isinya diringkas sekali dan ringkasannya diindeks sebagai potongan
+tersendiri dengan `document_id` yang sama (`is_summary: true`, `chunk_id: chunk_summary`).
+Pertanyaan yang meminta ringkasan lalu dijawab dari potongan itu, bukan dari sebagian potongan
+hasil pencarian kemiripan.
+
+Dua keputusan yang menentukan perilakunya:
+
+- **Ringkasan tidak ikut pencarian biasa.** Ia teks yang sudah dipadatkan; kalau ikut bersaing, ia
+  bisa mendesak potongan isi keluar dari `top_k` dan jawaban faktual kehilangan detail tanpa jejak.
+  Jadi pencarian menyaringnya, dan ringkasan diambil hanya saat niat pertanyaannya
+  `knowledge_summary`.
+- **Isi tidak pernah dikorbankan.** Pada anggaran konteks mepet, isi dihitung lebih dulu; ringkasan
+  hanya mengisi sisa dengan porsi sendiri. `usage.context_chunks` tetap berarti "berapa bagian isi
+  yang dibaca", dan `usage.context_summary_chunks` memisahkan hitungan ringkasan.
+
+Dokumen besar diringkas bertahap (map-reduce). Rinciannya di `docs/document-summary.md`.

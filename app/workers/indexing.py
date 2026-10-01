@@ -36,6 +36,7 @@ from app.parsing.parser import ParsedDocument, ParsedPage, parse_document
 from app.qdrant import repository
 from app.rag.chunker import chunk_document, estimate_tokens
 from app.rag.embedder import EmbedderService
+from app.rag.constants import SUMMARY_CHUNK_ID
 from app.parsing.tables import extract_tables, supports_tables
 from app.rag.sparse import SparseIndex
 from app.tables.store import TableStore
@@ -72,6 +73,13 @@ class JobRecord:
     updated_at: str = field(default_factory=_now)
     duration_ms: Optional[float] = None
     source_url: str = ""
+    # Ringkasan dokumen: dibuat sekali saat pengindeksan, disimpan bersama job, dan diindeks
+    # sebagai potongan tersendiri supaya pertanyaan "ringkas dokumen ini" bisa dijawab dari
+    # ringkasannya. Kosong = belum/tidak diringkas (mis. LLM dimatikan).
+    summary: str = ""
+    summary_tokens: int = 0
+    summary_of: str = ""
+    summary_error: str = ""
 
     def public(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -205,12 +213,16 @@ class IndexingPipeline:
         sparse: SparseIndex,
         jobs: JobStore,
         tables: Optional[TableStore] = None,
+        generator=None,
     ) -> None:
         self._settings = settings
         self._embedder = embedder
         self._sparse = sparse
         self._jobs = jobs
         self._tables = tables
+        # Dipakai untuk membuat ringkasan knowledge turunan saat dokumen diindeks. Boleh None
+        # (mis. pada uji unit): ringkasan dilewati dan alasannya dilaporkan apa adanya.
+        self._generator = generator
 
     # ------------------------------------------------------------------ #
     def run(
@@ -309,8 +321,33 @@ class IndexingPipeline:
             if not chunks:
                 raise AppError("INDEXING_FAILED", "no extractable text found in document")
 
+            # Ringkasan dokumen (knowledge turunan): dibuat dari potongan yang baru saja
+            # dibentuk, lalu diindeks sebagai potongan tersendiri dengan document_id yang sama.
+            summary_text, summary_tokens, summary_error, summary_passes = self._summarize(
+                chunks,
+                document_id=document_id,
+                document_name=document_name or parsed.document_name,
+                organization_id=organization_id,
+                knowledge_base_id=knowledge_base_id,
+                language=language or parsed.language,
+                source_url=file_url,
+                metadata=metadata,
+            )
+
             self._jobs.update(job_id, stage="embedding")
             vectors = self._encode(chunks, organization_id, knowledge_base_id, document_id, document_name, parsed, file_url, language, metadata)
+            summary_points: List[Dict[str, Any]] = []
+            if summary_text:
+                summary_points = self._summary_points(
+                    summary_text,
+                    organization_id=organization_id,
+                    knowledge_base_id=knowledge_base_id,
+                    document_id=document_id,
+                    document_name=document_name or parsed.document_name,
+                    language=language or parsed.language,
+                    source_url=file_url,
+                    metadata=metadata,
+                )
 
             self._jobs.update(job_id, stage="upserting")
             if replace:
@@ -321,15 +358,22 @@ class IndexingPipeline:
                 if self._tables is not None and not supports_tables(parse_name):
                     self._tables.delete_document(organization_id=organization_id, document_id=document_id)
             written = repository.upsert_chunks(self._settings, dim=self._embedder.dim, points=vectors)
+            if summary_points:
+                # Ringkasan diindeks terpisah supaya jumlah "isi" dokumen tidak ikut berubah:
+                # kelengkapan isi tetap dihitung dari potongan aslinya saja.
+                repository.upsert_chunks(self._settings, dim=self._embedder.dim, points=summary_points)
             self._sparse.upsert(
                 organization_id,
                 knowledge_base_id,
-                [(chunk.chunk_id, document_id, chunk.content) for chunk in chunks],
+                [(chunk.chunk_id, document_id, chunk.content) for chunk in chunks]
+                + ([(SUMMARY_CHUNK_ID, document_id, summary_text)] if summary_text else []),
             )
 
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             metric_observe("embedding_latency", duration_ms / 1000.0)
             metric_incr("chunks_created", len(chunks))
+            if summary_text:
+                metric_incr("summaries_created")
             record = self._jobs.update(
                 job_id,
                 status=STATUS_COMPLETED,
@@ -338,6 +382,10 @@ class IndexingPipeline:
                 tables=tables_saved,
                 tokens=sum(chunk.token_count for chunk in chunks),
                 duration_ms=duration_ms,
+                summary=summary_text,
+                summary_tokens=summary_tokens,
+                summary_of=document_id,
+                summary_error=summary_error,
             )
             logger.info(
                 "indexed document %s (%d chunks) for org %s", document_id, written, organization_id
@@ -477,6 +525,92 @@ class IndexingPipeline:
             organization_id,
         )
         return record
+
+    # ------------------------------------------------------------------ #
+    def _summarize(
+        self,
+        chunks,
+        *,
+        document_id: str,
+        document_name: str,
+        organization_id: str,
+        knowledge_base_id: str,
+        language: str,
+        source_url: str,
+        metadata: Optional[Dict[str, Any]],
+    ) -> tuple[str, int, str, int]:
+        """Buat ringkasan dokumen dari potongannya. Gagal = dilaporkan, bukan menggagalkan indeks."""
+        from app.rag.summary import summarize_document
+
+        if self._generator is None:
+            return "", 0, "ringkasan tidak dibuat: generator LLM tidak tersedia di jalur indeks", 0
+
+        try:
+            parts = [
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "document_id": document_id,
+                    "content": chunk.content,
+                    "document_name": document_name,
+                    "page": chunk.page,
+                    "section": chunk.section,
+                    "source_url": getattr(chunk, "source_url", "") or source_url,
+                }
+                for chunk in chunks
+            ]
+            result = summarize_document(
+                generator=self._generator,
+                settings=self._settings,
+                document_id=document_id,
+                document_name=document_name,
+                organization_id=organization_id,
+                knowledge_base_id=knowledge_base_id,
+                language=language,
+                parts=parts,
+            )
+        except Exception as exc:  # noqa: BLE001 - ringkasan opsional, isi dokumen tetap masuk
+            logger.warning("ringkasan dokumen %s gagal: %s", document_id, exc)
+            return "", 0, f"ringkasan gagal: {exc}"[:300], 0
+        if result.error:
+            logger.info("ringkasan dokumen %s tidak dibuat: %s", document_id, result.error)
+        else:
+            logger.info(
+                "ringkasan dokumen %s: %d token, %d bagian, %d langkah",
+                document_id,
+                result.tokens,
+                result.parts,
+                result.passes,
+            )
+        return result.text, result.tokens, result.error, result.passes
+
+    def _summary_points(
+        self,
+        summary: str,
+        *,
+        organization_id: str,
+        knowledge_base_id: str,
+        document_id: str,
+        document_name: str,
+        language: str,
+        source_url: str,
+        metadata: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Titik vektor untuk potongan ringkasan (document_id sama dengan dokumen asalnya)."""
+        from app.rag.summary import summary_chunk_payload
+
+        payload = summary_chunk_payload(
+            summary=summary,
+            document_id=document_id,
+            document_name=document_name,
+            organization_id=organization_id,
+            knowledge_base_id=knowledge_base_id,
+            language=language,
+            source_url=source_url,
+            metadata=metadata,
+        )
+        payload["created_at"] = _now()
+        vector = self._embedder.encode([_contextual_text_from_payload(payload)])[0]
+        return [{"chunk_id": payload["chunk_id"], "vector": vector, "payload": payload}]
 
     # ------------------------------------------------------------------ #
     def _encode(
@@ -625,6 +759,14 @@ def _contextual_text(chunk) -> str:
     """Index with a contextual header so isolated chunks stay interpretable."""
     header = " | ".join(part for part in [chunk.section, f"page {chunk.page}"] if part)
     return f"{header}\n{chunk.content}" if header else chunk.content
+
+
+def _contextual_text_from_payload(payload: Dict[str, Any]) -> str:
+    """Sama seperti ``_contextual_text``, untuk payload yang belum jadi objek ``Chunk``."""
+    section = str(payload.get("section") or "")
+    header = " | ".join(part for part in [section] if part)
+    content = str(payload.get("content") or "")
+    return f"{header}\n{content}" if header else content
 
 
 class IndexingWorker:

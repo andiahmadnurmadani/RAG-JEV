@@ -482,6 +482,7 @@ Skema: `SettingsUpdateRequest`
 | `uploads` | object | null | — |  |
 | `retrieval` | object | null | — |  |
 | `web` | object | null | — |  |
+| `summary` | object | null | — |  |
 
 | Kode | Arti |
 |---|---|
@@ -896,6 +897,7 @@ Tag: query
 | `uploads` | object | null | — |  |
 | `retrieval` | object | null | — |  |
 | `web` | object | null | — |  |
+| `summary` | object | null | — |  |
 
 ### `ValidationError`
 

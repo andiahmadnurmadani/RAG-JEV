@@ -52,6 +52,7 @@ class SettingsUpdateRequest(BaseModel):
     uploads: Optional[Dict[str, Any]] = None
     retrieval: Optional[Dict[str, Any]] = None
     web: Optional[Dict[str, Any]] = None
+    summary: Optional[Dict[str, Any]] = None
 
 
 class ModelsProbeRequest(BaseModel):
@@ -256,6 +257,26 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
                 details={f"web.{field}": value},
             )
         web[field] = value
+
+    summary = updates.get("summary") or {}
+    for field, low, high in (
+        ("window_tokens", 1000, 200_000),
+        ("max_tokens", 256, 32_000),
+        ("max_documents", 1, 20),
+    ):
+        if field not in summary:
+            continue
+        try:
+            value = int(summary[field])
+        except (TypeError, ValueError) as exc:
+            raise AppError("VALIDATION_ERROR", f"summary.{field} harus berupa angka bulat") from exc
+        if not low <= value <= high:
+            raise AppError(
+                "VALIDATION_ERROR",
+                f"summary.{field} harus antara {low} dan {high}",
+                details={f"summary.{field}": value},
+            )
+        summary[field] = value
 
 
 # --------------------------------------------------------------------------- #

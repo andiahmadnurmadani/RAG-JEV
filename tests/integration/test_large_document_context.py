@@ -128,9 +128,13 @@ def test_a_document_larger_than_the_budget_is_reported_as_partial(settings, clie
     assert f"sebagian ({item['included']} dari {item['total']} bagian)" in result.context.text
     assert "bukan daftar seluruh basis pengetahuan" in result.context.text
 
-    # Potongan paling awal tetap di depan: pelengkap tidak membalik urutan.
+    # Potongan paling awal tetap di depan: pelengkap tidak membalik urutan. Untuk pertanyaan
+    # yang minta ringkasan, potongan ringkasan sengaja didahulukan - jadi yang diperiksa adalah
+    # urutan potongan ISInya.
     assert result.context.used
-    assert result.context.used[0].chunk_id == "chunk_0001"
+    content_used = [item for item in result.context.used if not item.is_summary]
+    assert content_used, "isi dokumen harus tetap ikut walau ringkasannya ada"
+    assert content_used[0].chunk_id == "chunk_0001"
 
 
 def test_expansion_can_be_switched_off(settings, client):

@@ -272,6 +272,7 @@ dengan navigasi kiri; hanya satu panel tampil sekaligus supaya tidak perlu mengg
 | **Koneksi** | base URL (dari alamat halaman), API key layanan (opsional bila sudah masuk dengan kode akses), knowledge base, tombol Uji koneksi | disimpan di `localStorage` browser |
 | **Akses & Sesi** | status kode akses (potongan tersamar, waktu, pengubah), pemasangan/penggantian kode, dan daftar sesi aktif (perangkat, dibuat, kedaluwarsa, terakhir dipakai, *Ingat saya*, tombol **Keluarkan** per sesi, plus *Keluarkan semua*) | `GET/PUT/DELETE /api/v1/settings/access`, **wajib izin `admin`** |
 | **Kunci API** | daftar semua kunci yang berlaku (termasuk yang dari `API_KEYS_JSON`, ditandai *dari env*), plus pembuatan kunci baru: label, izin (`read` selalu ikut, `write`, `admin`), masa berlaku opsional, dan tenant opsional (hanya untuk kunci berizin `*`). Kunci baru tampil **sekali** dengan tombol Salin; baris kunci punya tombol **Cabut** | `GET/POST/DELETE /api/v1/settings/api-keys`, **wajib izin `admin`** |
+| **Ringkasan** | ringkasan dokumen sebagai knowledge turunan: nyala/mati, jendela per tahap, panjang ringkasan, maks dokumen per pertanyaan | `PUT /api/v1/settings`, **wajib izin `admin`** |
 | **Sumber web** | knowledge dari halaman/situs web & berkas publik: izinkan/matikan, maks halaman, kedalaman tautan, host sama, ambil berkas tertaut, hormati robots.txt, izinkan alamat privat | `PUT /api/v1/settings`, **wajib izin `admin`** |
 | **Model AI** | provider, base URL, API key, model, **batas token jawaban** (`max_tokens`, bawaan 8192 - jawaban panjang seperti daftar tabel terpotong bila terlalu kecil) + tombol **Muat daftar model** (daftar diambil langsung dari `GET {base_url}/models`, 400+ entri pada gateway uji) dengan saringan dan pemilihan klik | `PUT /api/v1/settings`, **wajib izin `admin`** |
 | **Jev** | saklar aktif, transport (`systemone` \| `mcp`), endpoint, model, API key, tombol Uji Jev (mengirim satu pertanyaan `noul` sungguhan dan menampilkan latensinya) | idem |
@@ -409,6 +410,9 @@ Semua perilaku model/provider dipilih lewat env var (`.env.example` memuat semua
 | `JEV_ENABLED`, `JEV_MCP_URL`, `JEV_API_KEY` | orkestrasi Jev; jika gagal → fallback heuristik, bukan error |
 | `SETTINGS_OVERRIDE_PATH` | berkas override setelan LLM/Jev/**format berkas** dari layar Pengaturan (default `data/settings.json`) |
 | `UPLOAD_EXTENSIONS`, `MAX_UPLOAD_MB` | titik awal kebijakan format berkas; kosong = seluruh katalog yang didukung mesin ini (dipersempit kapan saja lewat Pengaturan) |
+| `DOCUMENT_SUMMARY_ENABLED` | `true` | Buat ringkasan setiap dokumen saat diindeks (knowledge turunan). |
+| `SUMMARY_MAX_TOKENS` | `2048` | Panjang ringkasan yang diminta dari model. |
+| `SUMMARY_MAX_DOCUMENTS` | `3` | Berapa ringkasan dokumen boleh ikut saat user minta ringkasan. |
 | `WEB_CRAWL_MAX_PAGES` | `20` | Batas halaman per crawl (1-200). |
 | `WEB_CRAWL_MAX_DEPTH` | `2` | Kedalaman tautan yang diikuti (0-5). |
 | `WEB_CRAWL_RESPECT_ROBOTS` | `true` | Hormati robots.txt. |
