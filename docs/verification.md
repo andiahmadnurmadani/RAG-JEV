@@ -729,3 +729,21 @@ menahan unggahan berikutnya, status tidak dilaporkan selesai sebelum ringkasan s
 Uji hidup `scripts/verify_summary_queue_live.py`: unggah dokumen besar, lalu berkas kecil tanpa
 menunggu -> **berkas kecil selesai 2,7 detik** sementara dokumen besar masih `processing`
 tahap `summarizing`, dan isi berkas kecil itu sudah bisa ditemukan lewat pencarian.
+
+### 14b. Dibuktikan ulang di produksi `ragjev.kii.lat`
+
+Setelah deploy (sumber aplikasi di Dokploy diubah dari integrasi GitHub ke Git URL publik karena
+token GitHub-nya kedaluwarsa - repo memang publik), uji yang sama dijalankan di dalam container:
+
+```
+worker  : {'workers': 1, 'summary_workers': 2, 'queued': 0, 'summary_queued': 0}
+== 1. unggah dokumen BESAR ==
+  tahap terlihat : summarizing | status: processing | chunk: 6
+== 2. unggah berkas KECIL tanpa menunggu, lalu ukur ==
+  berkas kecil selesai dalam 5.9s | status=completed | chunk=1 | ringkasan=11 token
+  dokumen besar saat itu: status=processing stage=summarizing
+  KESIMPULAN: unggahan kecil TIDAK menunggu ringkasan dokumen besar
+```
+
+Skrip: `scripts/verify_summary_queue_production.py` (dijalankan di dalam container; kunci dibaca
+dari registry di `/data` dan tidak pernah dicetak).
