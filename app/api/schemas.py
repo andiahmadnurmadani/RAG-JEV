@@ -127,6 +127,9 @@ class QueryUsageOut(BaseModel):
     document_coverage: List[DocumentCoverageOut] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    # Alasan model berhenti menurut penyedia ("stop", "length", ...). "length" berarti jawaban
+    # terpotong batas token keluaran - naikkan max_tokens, bukan menambah knowledge.
+    finish_reason: str = ""
     retrieval_ms: float = 0.0
     rerank_ms: float = 0.0
     generation_ms: float = 0.0

@@ -115,6 +115,12 @@ satu konteks (`complete: true`). Rinciannya di `docs/large-documents.md`.
 | best score < threshold | `below_threshold`, LLM tidak dipanggil |
 | konteks kosong setelah budget | `context_empty` |
 | LLM bilang konteks kurang & `strict_grounding=true` | `strict_grounding`, `sources=[]` |
+| jawaban kena batas token keluaran (`finish_reason=length`) | `answer_truncated`, potongan jawaban tetap ditampilkan, `sources` diisi |
+
+Beda `strict_grounding` dan `answer_truncated` penting saat membaca hasil: yang pertama berarti
+konteksnya memang dinilai kurang, yang kedua berarti konteksnya cukup panjang tetapi model kehabisan
+ruang menulis. Yang kedua diperbaiki dengan menaikkan `LLM_MAX_TOKENS` (panel **Model AI**), bukan
+menambah dokumen.
 
 Sitasi hanya memuat chunk yang benar-benar ditampilkan ke model (`BuiltContext.used`),
 sehingga `sources` tidak bisa memuat dokumen yang tidak dipakai menjawab.

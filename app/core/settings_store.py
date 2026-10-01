@@ -34,6 +34,8 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "base_url": ("llm_base_url", "str"),
         "model": ("llm_model", "str"),
         "api_key": ("llm_api_key", "secret"),
+        # Batas token keluaran: yang menentukan jawaban panjang selesai atau terpotong.
+        "max_tokens": ("llm_max_tokens", "int"),
     },
     "jev": {
         "enabled": ("jev_enabled", "bool"),

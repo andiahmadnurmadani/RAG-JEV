@@ -120,7 +120,11 @@ class Settings(BaseSettings):
     # yang disediakan endpoint OpenAI-compatible.
     llm_model: str = "Qwen/Qwen3-4B"
     llm_timeout: float = 120.0
-    llm_max_tokens: int = 1024
+    # Batas token keluaran. 1024 terlalu kecil untuk pertanyaan yang menyangkut dokumen besar:
+    # model berhenti di tengah jalan dan jawabannya kosong - yang lalu terbaca seolah datanya
+    # tidak ada. Diukur pada dokumen KMS Telin asli: daftar seluruh tabel + kolomnya menuntut
+    # 5.941 token keluaran, jadi 4096 pun masih terpotong; 8192 menyelesaikannya (finish_reason=stop).
+    llm_max_tokens: int = 8192
     llm_temperature: float = 0.1
     llm_context_chars: int = 96000
 

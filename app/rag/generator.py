@@ -75,6 +75,10 @@ class LLMUsage:
     output_tokens: int = 0
     latency_ms: float = 0.0
     model: str = ""
+    # Alasan berhentinya model menurut penyedia: "stop" (selesai), "length" (kena batas token
+    # keluaran), "content_filter", dsb. Dipakai supaya jawaban yang TERPOTONG tidak dilaporkan
+    # sebagai "informasi tidak ditemukan" - dua hal yang sangat berbeda bagi pemakainya.
+    finish_reason: str = ""
 
 
 @dataclass
@@ -84,6 +88,8 @@ class GeneratedAnswer:
     usage: LLMUsage = field(default_factory=LLMUsage)
     raw: str = ""
     citations_used: List[int] = field(default_factory=list)
+    # True bila model berhenti karena batas token keluaran, bukan karena selesai menjawab.
+    truncated: bool = False
 
 
 class MockLLMClient:
@@ -201,7 +207,8 @@ class LLMClient:
 
         latency_ms = (time.perf_counter() - started) * 1000
         try:
-            text = payload["choices"][0]["message"]["content"] or ""
+            choice = payload["choices"][0]
+            text = choice["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
             raise AppError("LLM_FAILED", "LLM response did not contain a completion") from exc
 
@@ -211,6 +218,7 @@ class LLMClient:
             output_tokens=int(usage_block.get("completion_tokens") or 0),
             latency_ms=round(latency_ms, 2),
             model=payload.get("model") or self.model,
+            finish_reason=str(choice.get("finish_reason") or ""),
         )
         return text.strip(), usage
 
@@ -269,8 +277,16 @@ class Generator:
             {"role": "user", "content": user_prompt},
         ]
         text, usage = self._client.chat(messages)
-        grounded = not self._looks_like_refusal(text)
-        if strict_grounding and not grounded:
+        truncated = self._looks_truncated(text, usage)
+        grounded = not truncated and not self._looks_like_refusal(text)
+        if truncated:
+            logger.warning(
+                "jawaban model terpotong (finish_reason=%r, output_tokens=%s, batas=%s)",
+                usage.finish_reason,
+                usage.output_tokens,
+                self._settings.llm_max_tokens,
+            )
+        elif strict_grounding and not grounded:
             logger.info("strict grounding: model reported insufficient context (%s)", no_candidate_reason or "low_relevance")
         return GeneratedAnswer(
             answer=text,
@@ -278,7 +294,23 @@ class Generator:
             usage=usage,
             raw=text,
             citations_used=extract_citation_numbers(text),
+            truncated=truncated,
         )
+
+    def _looks_truncated(self, text: str, usage: LLMUsage) -> bool:
+        """True bila model berhenti karena batas token keluaran.
+
+        Tanpa pemeriksaan ini, jawaban yang terpotong (atau kosong karena seluruh jatah token
+        habis) terbaca sebagai "informasi tidak ditemukan" - padahal datanya ada di konteks dan
+        yang perlu dinaikkan hanyalah batas token keluaran.
+        """
+
+        if usage.finish_reason == "length":
+            return True
+        limit = int(self._settings.llm_max_tokens or 0)
+        if limit and usage.output_tokens >= limit and not text.strip():
+            return True
+        return False
 
     # ------------------------------------------------------------------ #
     def extract(

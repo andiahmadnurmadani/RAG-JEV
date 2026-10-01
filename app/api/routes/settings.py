@@ -198,7 +198,7 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
 
     section = updates.get("retrieval")
     if not section:
-        return
+        section = None
     limits = {
         "context_max_tokens": (2000, 200_000),
         "final_top_k": (1, 50),
@@ -208,7 +208,7 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
         "context_expand_documents": None,
     }
     for field, bounds in limits.items():
-        if field not in section or bounds is None:
+        if not section or field not in section or bounds is None:
             continue
         low, high = bounds
         try:
@@ -222,6 +222,20 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
                 details={field: value},
             )
         section[field] = value
+
+    llm = updates.get("llm") or {}
+    if "max_tokens" in llm:
+        try:
+            value = int(llm["max_tokens"])
+        except (TypeError, ValueError) as exc:
+            raise AppError("VALIDATION_ERROR", "max_tokens harus berupa angka bulat") from exc
+        if not 64 <= value <= 64_000:
+            raise AppError(
+                "VALIDATION_ERROR",
+                "max_tokens harus antara 64 dan 64000",
+                details={"max_tokens": value},
+            )
+        llm["max_tokens"] = value
 
 
 # --------------------------------------------------------------------------- #

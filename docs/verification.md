@@ -586,3 +586,35 @@ kalau berkas PDF-nya tidak ada di mesin ini. `test_large_document_context.py` me
 konteks: dokumen 40 bagian harus masuk konteks **seluruhnya** saat `top_k` kecil, dilaporkan
 sebagian saat anggarannya memang kecil, tetap di dalam batas tenant, dan berhenti menambah
 potongan ketika saklar pelengkap dimatikan.
+
+### 11.1 Uji hidup dengan model nyata (sebab kedua ketahuan di sini)
+
+Pengukuran di atas memakai parser + pemotong + konteks, bukan model. Setelah dijalankan
+end-to-end lewat layanan (`scripts/verify_large_document_live.py`, berkas asli diunggah lalu
+ditanya dua kali dengan LLM sungguhan), ketahuan satu sebab yang **tidak** terlihat dari angka
+konteks: konteksnya sudah utuh, tetapi jawabannya kosong.
+
+| Temuan | Bukti | Perbaikan |
+|---|---|---|
+| `LLM_MAX_TOKENS=1024` memotong jawaban panjang; `finish_reason=length` | jawaban kosong padahal 21 potongan (19.038 token) masuk konteks | panel **Model AI → Batas token jawaban** |
+| `4096` pun belum cukup untuk daftar seluruh tabel | `output_tokens=5941` dituntut pertanyaan pertama; dengan 4096 jawabannya berhenti (`length`) | bawaan **`LLM_MAX_TOKENS=8192`** |
+| Jawaban kosong dilaporkan sebagai *"tidak ditemukan"* | pemakai menyimpulkan datanya hilang | alasan baru `answer_truncated`, potongan jawaban yang sempat terbentuk tetap ditampilkan |
+| Sebab tidak terlihat dari luar | hanya kelihatan di log | `usage.finish_reason` ikut di respons API |
+
+Angka pengukuran keluaran pada berkas asli (pertanyaan 1: struktur lengkap + daftar kolom;
+pertanyaan 2: tabel knowledge/helpdesk):
+
+| `LLM_MAX_TOKENS` | `output_tokens` | `finish_reason` | Hasil |
+|---|---|---|---|
+| 1024 | 1024 | `length` | jawaban kosong, dilaporkan "tidak ditemukan" |
+| 4096 | 4096 | `length` | jawaban terpotong di tengah daftar tabel → `answer_truncated` |
+| **8192** | 5.941 (tanya 1) / 1.923 (tanya 2) | **`stop`** | jawaban utuh, `no_answer_reason=None` |
+
+Sesudah perbaikan, dua pertanyaan yang sama dijawab utuh dari berkas asli: pertanyaan daftar
+tabel menyebut seluruh tabel yang ada di dokumen (termasuk kolom-kolom tabel `knowledge`), dan
+pertanyaan kelengkapan menjawab `{included: 21, total: 21, complete: true, ordered: true}` —
+tanpa satu pun kalimat "informasi tidak ditemukan".
+
+Uji yang mengunci perilaku ini: `tests/integration/test_truncated_answer.py` (jawaban terpotong
+harus dilaporkan `answer_truncated` + `finish_reason=length`, potongan jawabannya tetap tampil,
+dan jawaban wajar `finish_reason=stop` tidak boleh ditandai terpotong).

@@ -205,17 +205,7 @@ class RagPipeline:
         result.answer = generated.answer
         result.grounded = generated.grounded
         result.model = generated.usage.model or self._generator.model
-        if not generated.grounded:
-            incr("no_answer_total")
-            result.no_answer_reason = "model_reported_insufficient_context"
-            if strict:
-                return self._with_table_hint(
-                    self._no_answer(result, "strict_grounding", retrieval, keep_candidates=True), table_reason
-                )
-        if include_sources:
-            # Only chunks the model was actually shown are citable (PRD 40).
-            result.sources = built.citations()
-        result.usage = {
+        usage = {
             "retrieved_chunks": retrieval.count,
             "reranked_chunks": retrieval.count if retrieval.reranked else 0,
             "reranker": retrieval.reranker_used,
@@ -226,9 +216,58 @@ class RagPipeline:
             "document_coverage": [item.to_dict() for item in coverage],
             "input_tokens": generated.usage.input_tokens,
             "output_tokens": generated.usage.output_tokens,
+            "finish_reason": generated.usage.finish_reason,
             "retrieval_ms": retrieval.elapsed_ms,
             "generation_ms": generation_ms,
         }
+        if generated.truncated:
+            # Batas token keluaran, bukan "datanya tidak ada". Dua hal ini berbeda bagi pemakai,
+            # jadi dilaporkan sebagai alasan tersendiri beserta bagian yang sempat terjawab.
+            limit = settings.llm_max_tokens
+            # Saran harus lebih besar dari nilai sekarang - menyebut nilai yang sedang gagal
+            # membuat pesannya tidak masuk akal bagi yang membacanya.
+            suggest = min(max(limit * 2, 8192), 64000)
+            hint = (
+                f"Jawaban model terpotong oleh batas token keluaran (LLM_MAX_TOKENS={limit}). "
+                f"Naikkan nilainya di panel Model AI (mis. {suggest}) lalu ajukan pertanyaan yang sama. "
+                "Bagian jawaban yang sempat terbentuk tetap ditampilkan di bawah ini."
+                if settings.answer_language == "id"
+                else f"The model's answer was cut off by the output token limit (LLM_MAX_TOKENS={limit}). "
+                f"Raise it in the Model AI panel (e.g. {suggest}) and ask again. "
+                "The part that was produced is kept below."
+            )
+            partial = (generated.answer or "").strip()
+            text = f"{hint}\n\n{partial}" if partial else hint
+            return self._with_table_hint(
+                self._no_answer(
+                    result,
+                    "answer_truncated",
+                    retrieval,
+                    keep_candidates=True,
+                    answer=text,
+                    usage=usage,
+                    sources=built.citations(),
+                ),
+                table_reason,
+            )
+        if not generated.grounded:
+            incr("no_answer_total")
+            result.no_answer_reason = "model_reported_insufficient_context"
+            if strict:
+                return self._with_table_hint(
+                    self._no_answer(
+                        result,
+                        "strict_grounding",
+                        retrieval,
+                        keep_candidates=True,
+                        usage=usage,
+                    ),
+                    table_reason,
+                )
+        if include_sources:
+            # Only chunks the model was actually shown are citable (PRD 40).
+            result.sources = built.citations()
+        result.usage = usage
         if table_reason:
             # Perhitungan tabel diminta tetapi ditolak: klien harus tahu alasannya.
             result.table_note = table_reason
@@ -555,15 +594,20 @@ class RagPipeline:
         retrieval: RetrievalResult,
         *,
         keep_candidates: bool = False,
+        answer: Optional[str] = None,
+        usage: Optional[Dict[str, Any]] = None,
+        sources: Optional[List[Dict[str, Any]]] = None,
     ) -> PipelineResult:
         incr("no_answer_total")
-        result.answer = NO_ANSWER_ID if self._settings.answer_language == "id" else NO_ANSWER_EN
+        result.answer = answer or (NO_ANSWER_ID if self._settings.answer_language == "id" else NO_ANSWER_EN)
         result.grounded = False
-        result.sources = []
+        result.sources = list(sources or [])
         result.no_answer_reason = reason
         if not keep_candidates:
             result.candidates = []
-        result.usage = {
+        # Penolakan SETELAH konteks dibangun tetap melaporkan berapa bagian dokumen yang tadi
+        # dikirim: kalau tidak, pengguna melihat "0 potongan" dan menyimpulkan datanya tidak ada.
+        result.usage = usage or {
             "retrieved_chunks": retrieval.count,
             "reranked_chunks": retrieval.count if retrieval.reranked else 0,
             "reranker": retrieval.reranker_used,

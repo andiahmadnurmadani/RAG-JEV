@@ -50,7 +50,22 @@ context_tokens      : 19038
 kelengkapan         : {included: 21, total: 21, complete: true, ordered: true}
 ```
 
-## 3. Menyetel dari panel (tanpa redeploy)
+## 3. Dua sebab "jawaban tidak lengkap" yang mudah tertukar
+
+Perbaikan di atas membuat seluruh dokumen sampai ke model. Setelah itu masih ada satu sebab
+lain yang gejalanya hampir sama - dan ini ketahuan dari uji dengan model nyata:
+
+- Model menerima 21 potongan (19.038 token) tetapi berhenti di tengah jawaban karena
+  `LLM_MAX_TOKENS` (dahulu **1024**, lalu sempat 4096 - masih terpotong): `finish_reason="length"`, isi jawaban kosong, dan pipeline
+  lama melaporkannya sebagai *"Informasi tersebut tidak ditemukan dalam knowledge base"*.
+  Pemakainya lalu menambah dokumen yang sebenarnya sudah terbaca penuh.
+- Sekarang kasus itu punya alasan sendiri, **`answer_truncated`**, dengan pesan yang menyebut
+  batas tokennya, dan bagian jawaban yang sempat terbentuk tetap ditampilkan. Bawaannya
+  `LLM_MAX_TOKENS=8192` (bisa diubah dari panel **Model AI → Batas token jawaban**, tanpa redeploy).
+- `usage.finish_reason` ikut dilaporkan (`stop` = selesai, `length` = kena batas), jadi terlihat
+  dari respons API tanpa perlu membaca log.
+
+## 4. Menyetel dari panel (tanpa redeploy)
 
 Panel **Ambil → Dokumen besar**:
 
@@ -60,6 +75,11 @@ Panel **Ambil → Dokumen besar**:
 | top_k bawaan | jumlah potongan pencarian sebelum dokumen dilengkapi |
 | Maks. potongan per dokumen | batas potongan satu dokumen di tahap pencarian |
 | lengkapi dokumen sampai utuh | `context_expand_documents` |
+
+Panel **Model AI → Batas token jawaban** (`llm.max_tokens`) menentukan panjang jawaban yang
+ditampilkan: pada dokumen KMS Telin asli, menjawab daftar seluruh tabel beserta kolomnya
+menuntut 5.941 token keluaran - 4096 masih terpotong, 8192 selesai (`finish_reason=stop`). Terlalu kecil = jawaban
+terpotong di tengah, dan itu dilaporkan sebagai `answer_truncated`, bukan "tidak ditemukan".
 
 Nilainya global (semua tenant) dan butuh izin `admin`. Endpoint: `GET /api/v1/settings`,
 `PUT /api/v1/settings` dengan isi `{"retrieval": {...}}`. Batas kewajaran dijaga: anggaran
@@ -74,7 +94,7 @@ Lewat lingkungan: `CONTEXT_MAX_TOKENS`, `FINAL_TOP_K`, `MAX_CHUNKS_PER_DOCUMENT`
     lebih buruk daripada jawaban sebagian. Kalau modelnya hanya 16k token, turunkan anggaran
     (mis. 12000) dan biarkan pelengkap dokumen mengisi sisanya sesuai sisa ruang.
 
-## 4. Batas yang jujur
+## 5. Batas yang jujur
 
 - Kalau dokumennya benar-benar lebih besar daripada anggaran, konteksnya **tidak** dipotong di
   tengah baris — potongan dari awal dokumen yang masuk, sisanya dilaporkan sebagai

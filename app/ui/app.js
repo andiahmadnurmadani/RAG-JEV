@@ -725,6 +725,7 @@ async function loadSettings() {
     $("llm-key-help").textContent = llm.api_key_set
       ? "Kunci tersimpan " + (llm.api_key_hint || "") + ". Biarkan kosong untuk memakainya."
       : "Belum ada kunci tersimpan. Isi bila endpoint memerlukannya.";
+    $("llm-max-tokens").value = llm.max_tokens != null ? llm.max_tokens : 8192;
     $("jev-enabled").checked = !!jev.enabled;
     $("jev-provider").value = jev.provider || "systemone";
     $("jev-url").value = jev.systemone_url || "";
@@ -766,7 +767,12 @@ async function saveConnection() {
 }
 
 async function saveLlm() {
-  const payload = { provider: $("llm-provider").value, base_url: $("llm-base").value.trim(), model: $("llm-model").value.trim() };
+  const payload = {
+    provider: $("llm-provider").value,
+    base_url: $("llm-base").value.trim(),
+    model: $("llm-model").value.trim(),
+    max_tokens: Number($("llm-max-tokens").value) || 8192,
+  };
   const key = $("llm-key").value;
   if (key) payload.api_key = key;
   if (!payload.model) {

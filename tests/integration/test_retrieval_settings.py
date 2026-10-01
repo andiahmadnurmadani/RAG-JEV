@@ -155,6 +155,36 @@ def test_an_unknown_retrieval_field_is_rejected_not_ignored(client):
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+def test_the_answer_token_limit_is_editable_and_bounded(client, settings):
+    """Batas token jawaban menentukan jawaban panjang selesai atau terpotong."""
+
+    assert settings.llm_max_tokens == 8192
+    response = client.put(
+        "/api/v1/settings",
+        json={"llm": {"max_tokens": 8000}},
+        headers=auth(TENANT_A_KEY),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["sections"]["llm"]["max_tokens"] == 8000
+    assert settings.llm_max_tokens == 8000
+
+    before = settings.llm_max_tokens
+    too_small = client.put(
+        "/api/v1/settings",
+        json={"llm": {"max_tokens": 4}},
+        headers=auth(TENANT_A_KEY),
+    )
+    assert too_small.status_code == 422
+    assert too_small.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert settings.llm_max_tokens == before
+
+
+def test_the_browser_console_exposes_the_answer_token_limit(client):
+    script = client.get("/ui/app.js").text
+    page = client.get("/ui/").text
+    assert "llm-max-tokens" in script and "llm-max-tokens" in page
+
+
 def test_the_browser_console_exposes_the_context_controls(client):
     script = client.get("/ui/app.js").text
     page = client.get("/ui/").text
