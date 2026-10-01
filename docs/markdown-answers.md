@@ -80,3 +80,28 @@ Perbaikannya: `stop()` kini membatalkan pekerjaan yang masih menunggu di antrian
 **menunggu** (`wait=True`) pekerjaan yang sedang berjalan benar-benar selesai sebelum kembali.
 Dikunci uji `test_stopping_the_worker_waits_for_a_running_summary` (dibuktikan menangkap bug:
 dengan `wait=False` dikembalikan, ujinya gagal "stop() tidak menunggu ringkasan selesai").
+
+## Dibuktikan di produksi (`rag.aiones.app`)
+
+Skrip `scripts/verify_markdown_production.py` (dijalankan di dalam container; kunci dibaca dari
+registry `/data`, tidak pernah dicetak) mengunggah dokumen berstruktur, lalu meminta jawaban yang
+wajar berbentuk tabel:
+
+```
+== 2. tanya (jawaban wajar berbentuk daftar/tabel) ==
+  panjang jawaban: 463 karakter
+  finish_reason: stop
+  penanda Markdown: {"judul": 2, "butir": 0, "bernomor": 0, "tabel": 5, "tebal": 0, "kode": 3}
+
+  | ## Tabel jatah cuti
+  | | Jenis | Jatah | Catatan |
+  | | --- | --- | --- |
+  | | Cuti tahunan | 12 hari | hangus akhir tahun |
+  | | Cuti sakit | 14 hari | perlu surat dokter di atas 2 hari |
+  | | Cuti melahirkan | 90 hari | berlaku untuk pegawai perempuan |
+  | ## Kolom wajib di pengajuan
+  | `employee_id`, `jenis_cuti`, `tanggal_mulai` [1].
+```
+
+Model mengeluarkan judul, tabel, dan kode inline persis seperti yang diminta - bukan teks polos.
+Dokumen uji dihapus setelah verifikasi.
