@@ -64,6 +64,17 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "reranker_enabled": ("reranker_enabled", "bool"),
         "strict_grounding": ("strict_grounding", "bool"),
     },
+    # Sumber dari web. Global karena crawl membebani jaringan keluar dan situs orang lain -
+    # satu tenant yang menaikkannya akan memakai kuota bersama.
+    "web": {
+        "enabled": ("web_crawl_enabled", "bool"),
+        "max_pages": ("web_crawl_max_pages", "int"),
+        "max_depth": ("web_crawl_max_depth", "int"),
+        "same_host": ("web_crawl_same_host", "bool"),
+        "follow_files": ("web_crawl_follow_files", "bool"),
+        "respect_robots": ("web_crawl_respect_robots", "bool"),
+        "allow_private_urls": ("allow_private_urls", "bool"),
+    },
 }
 
 def mask_secret(value: str) -> Optional[str]:

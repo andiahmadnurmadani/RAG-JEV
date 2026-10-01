@@ -96,6 +96,10 @@ class Chunk:
     char_end: int
     token_count: int
     is_table: bool = False
+    # Alamat halaman web asal potongan ini (kosong untuk dokumen berkas). Dipakai untuk
+    # sitasi yang bisa diklik dan untuk mengambil gambar/lampiran pada halaman itu.
+    source_url: str = ""
+    title: str = ""
 
 
 def _blocks_for_page(page: ParsedPage) -> List[Block]:
@@ -261,6 +265,11 @@ def chunk_document(
     pending_tokens = 0
     pending_page = 1
     counter = 0
+    # Alamat halaman yang sedang ditampung. Potongan TIDAK boleh menggabung dua halaman web
+    # yang berbeda: kalau digabung, sitasinya cuma bisa menunjuk salah satu alamat, dan
+    # pertanyaan tentang halaman lain jadi menyesatkan.
+    pending_source: List[str] = [""]
+    pending_title: List[str] = [""]
 
     def current_section() -> str:
         return " / ".join(title for _, title in heading_stack)
@@ -270,6 +279,8 @@ def chunk_document(
         nonlocal pending_page
         if not pending:
             pending_page = block_page[0]
+            pending_source[0] = block_source[0]
+            pending_title[0] = block_title[0]
         pending.append(block)
 
     def flush() -> None:
@@ -279,10 +290,12 @@ def chunk_document(
         content = "\n\n".join(block.text for block in pending)
         tokens = estimate_tokens(content)
         has_heading = any(block.kind == "heading" for block in pending)
+        same_origin = bool(chunks) and chunks[-1].source_url == pending_source[0]
         mergeable = (
             tokens < min_chunk_tokens
             and chunks
             and not has_heading
+            and same_origin
             and estimate_tokens(chunks[-1].content) + tokens <= int(chunk_size * 1.5)
         )
         if mergeable:
@@ -300,6 +313,8 @@ def chunk_document(
                 char_end=pending[-1].end,
                 token_count=estimate_tokens(merged),
                 is_table=previous.is_table or any(b.kind == "table" for b in pending),
+                source_url=previous.source_url,
+                title=previous.title,
             )
         else:
             counter += 1
@@ -314,14 +329,26 @@ def chunk_document(
                     char_end=pending[-1].end,
                     token_count=tokens,
                     is_table=any(b.kind == "table" for b in pending),
+                    source_url=pending_source[0],
+                    title=pending_title[0],
                 )
             )
         pending = []
         pending_tokens = 0
 
     block_page: List[int] = [1]
+    # Alamat + judul halaman yang sedang diproses; ikut ke setiap potongan supaya sitasi
+    # menunjuk halaman web yang benar.
+    block_source: List[str] = [""]
+    block_title: List[str] = [""]
     for page in parsed.pages:
+        # Halaman web berbeda alamat = dokumen berbeda bagi pembacanya: tutup potongan
+        # sebelumnya dulu supaya tidak ada potongan yang mencampur dua halaman.
+        if pending and block_source[0] and (page.source_url or "") != block_source[0]:
+            flush()
         block_page[0] = page.page
+        block_source[0] = page.source_url or ""
+        block_title[0] = page.title or ""
         for block in _blocks_for_page(page):
             if block.kind == "heading":
                 flush()
@@ -356,13 +383,20 @@ def _apply_overlap(chunks: Sequence[Chunk], overlap_tokens: int) -> List[Chunk]:
 
     Untuk chunk tabel, baris kepala tetap di baris pertama: potongan ekor dari chunk sebelumnya
     ditaruh SETELAH baris kepala, supaya pembaca (dan pengambil konteks) selalu tahu nama kolomnya.
+
+    Antar halaman web yang berbeda alamat, overlap DILEWATI: menyalin ekor halaman lain membuat
+    potongan berisi dua sumber sekaligus, dan sitasinya jadi menyesatkan.
     """
     out: List[Chunk] = []
     for index, chunk in enumerate(chunks):
         if index == 0:
             out.append(chunk)
             continue
-        previous_words = chunks[index - 1].content.split()
+        previous_chunk = chunks[index - 1]
+        if previous_chunk.source_url != chunk.source_url:
+            out.append(chunk)
+            continue
+        previous_words = previous_chunk.content.split()
         tail_words = max(0, len(previous_words) - int(overlap_tokens / TOKENS_PER_WORD))
         tail = " ".join(previous_words[tail_words:]).strip()
         if tail and chunk.is_table:
@@ -381,6 +415,9 @@ def _apply_overlap(chunks: Sequence[Chunk], overlap_tokens: int) -> List[Chunk]:
                 char_end=chunk.char_end,
                 token_count=estimate_tokens(content),
                 is_table=chunk.is_table,
+                # Sumber halaman harus ikut: tanpa ini sitasi kehilangan alamatnya.
+                source_url=chunk.source_url,
+                title=chunk.title,
             )
         )
     return out

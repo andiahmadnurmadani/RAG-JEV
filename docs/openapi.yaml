@@ -1325,6 +1325,28 @@ components:
             maxLength: 2000
           - type: 'null'
           title: File Url
+        web_url:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Web Url
+        web_max_pages:
+          type: integer
+          maximum: 200.0
+          minimum: 0.0
+          title: Web Max Pages
+          default: 0
+        web_max_depth:
+          type: integer
+          maximum: 5.0
+          minimum: -1.0
+          title: Web Max Depth
+          default: -1
+        web_follow_files:
+          type: boolean
+          title: Web Follow Files
+          default: true
         content_base64:
           anyOf:
           - type: string
@@ -1385,6 +1407,28 @@ components:
             maxLength: 2000
           - type: 'null'
           title: File Url
+        web_url:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Web Url
+        web_max_pages:
+          type: integer
+          maximum: 200.0
+          minimum: 0.0
+          title: Web Max Pages
+          default: 0
+        web_max_depth:
+          type: integer
+          maximum: 5.0
+          minimum: -1.0
+          title: Web Max Depth
+          default: -1
+        web_follow_files:
+          type: boolean
+          title: Web Follow Files
+          default: true
         content_base64:
           anyOf:
           - type: string
@@ -1576,6 +1620,12 @@ components:
             type: object
           - type: 'null'
           title: Retrieval
+        web:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Web
       additionalProperties: false
       type: object
       title: SettingsUpdateRequest

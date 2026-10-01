@@ -146,3 +146,24 @@ POST /knowledge/index -> job (queued) -> asyncio.Queue -> worker thread
 `http_requests_total`, `http_errors_total`; latensi `retrieval_latency`, `generation_latency`,
 `embedding_latency`, `http_request_latency` (avg/p95/p99/max); plus status worker, jumlah
 entri lexikal per scope, info koleksi Qdrant.
+
+## 8. Sumber dari luar: berkas publik dan web
+
+Selain unggahan berkas, knowledge bisa datang dari **berkas publik** (`file_url`) dan **halaman
+atau situs web** (`web_url`). Keduanya masuk lewat jalur indeks yang sama, jadi hasilnya berperilaku
+sama: bisa dicari, bisa dikutip, dan bisa dilengkapi sampai dokumennya utuh.
+
+Bedanya satu hal, dan itu yang menentukan bentuk datanya:
+
+- `file_url` mengambil **satu berkas** - diparse seperti unggahan biasa.
+- `web_url` **menjelajahi tautan** dan menjadikan setiap halaman sebagai bagian dokumen dengan
+  `source_url` sendiri. Jadi sitasi menunjuk halaman yang benar, bukan alamat akar situs.
+
+Karena itu chunker memperlakukan batas halaman web sebagai batas potongan: potongan tidak pernah
+menggabung dua halaman berbeda, dan tumpang tindih potongan dimatikan antar halaman. Tanpa aturan
+ini, pertanyaan tentang halaman A bisa dijawab dengan kutipan dari halaman B - dan pembacanya tidak
+punya cara mengetahuinya.
+
+Kedua jalur melewati pengaman URL yang sama (`app/core/urlguard.py`): hanya `http`/`https`, tanpa
+kredensial di URL, semua alamat hasil DNS harus publik, dan pemeriksaan diulang di setiap
+pengalihan. Rinciannya di `docs/web-sources.md`.

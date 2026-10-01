@@ -618,3 +618,48 @@ tanpa satu pun kalimat "informasi tidak ditemukan".
 Uji yang mengunci perilaku ini: `tests/integration/test_truncated_answer.py` (jawaban terpotong
 harus dilaporkan `answer_truncated` + `finish_reason=length`, potongan jawabannya tetap tampil,
 dan jawaban wajar `finish_reason=stop` tidak boleh ditandai terpotong).
+
+## 12. Knowledge dari web: diukur dengan situs nyata, bukan klaim
+
+Fitur ini membuat server mengeluarkan permintaan HTTP, jadi buktinya harus berupa pengambilan
+nyata. Situs uji disajikan server HTTP lokal (4 halaman + robots.txt) supaya bisa diulang, lalu
+dijalankan lewat layanan hidup dengan model sungguhan (`scripts/verify_web_knowledge_live.py`).
+
+| Yang diuji | Hasil |
+|---|---|
+| satu halaman (`web_max_pages=1`) | `completed`, 1 halaman, 1 chunk, `source_url` = halaman itu |
+| crawl kedalaman 2 | `completed`, **4 halaman** (beranda, /panduan, /lain, /dalam), 4 chunk |
+| sitasi per halaman | pertanyaan tentang /panduan → sumber `/panduan`; /dalam → `/dalam`; /lain → `/lain` |
+| halaman terlarang robots.txt | tidak terindeks (0 hasil dari `/internal/`) |
+| jawaban berisi isi halaman | ya, dengan sitasi `[1]` ke halaman yang benar |
+| berkas publik (RFC 2606 di internet) | `completed`, `source_url` = URL berkasnya |
+
+Angka keluaran pada uji hidup (model nyata):
+
+```
+TANYA : Apa kode pada formulir lampiran?
+angka : konteks=5 token=173 keluar=406 finish='stop'
+sumber: ['http://127.0.0.1:63426/sop/cuti/lampiran', ...]
+jawab : Berdasarkan dokumen yang tersedia, formulir lampiran memakai kode **lampirancuti** [1].
+```
+
+Uji otomatis yang mengunci perilaku ini:
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/unit/test_urlguard.py -q                  # 28 uji pengaman URL
+.venv/Scripts/python.exe -m pytest tests/integration/test_web_knowledge.py -q      # 12 uji web
+.venv/Scripts/python.exe -m pytest tests/integration/test_web_settings.py -q       # 5 uji setelan
+```
+
+Dua bug nyata ketahuan justru oleh uji ini, bukan oleh pemeriksaan mata:
+
+1. **Potongan menggabung dua halaman web.** Halaman kecil digabung oleh `min_chunk_tokens` dan
+   tumpang tindih, sehingga `source_url` hanya menyimpan satu alamat - sitasi jadi menunjuk
+   halaman yang salah. Perbaikan: batas halaman menutup potongan, dan tumpang tindih dilewati
+   antar halaman berbeda.
+2. **`source_url` hilang di hampir semua potongan.** `_apply_overlap` membangun ulang objek
+   `Chunk` tanpa membawa `source_url`/`title`, jadi hanya potongan pertama yang punya alamat.
+   Perbaikan: kedua field itu ikut disalin.
+
+Keduanya hanya muncul saat dokumennya punya beberapa halaman ber-alamat berbeda - yaitu tepat
+kasus yang fitur ini ada untuk melayani.

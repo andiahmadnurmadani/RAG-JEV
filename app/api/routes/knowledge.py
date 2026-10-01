@@ -12,6 +12,7 @@ from app.api.middleware.tenant import assert_tenant_match
 from app.api.schemas import DocumentStatusOut, IndexDataOut, KnowledgeIndexRequest, KnowledgeUpdateRequest
 from app.core.errors import AppError, ok
 from app.core.security import validate_display_label, validate_payload_size
+from app.core.urlguard import UrlRejected, assert_public_url
 from app.core.logging import get_logger
 from app.qdrant import repository
 from app.workers.indexing import STATUS_DELETED
@@ -32,6 +33,28 @@ def _rate_limit(request: Request) -> None:
     _limiter.check(key)
 
 
+def validate_source_urls(payload, settings) -> None:
+    """Tolak URL yang bukan alamat publik SEBELUM pekerjaan dibuat.
+
+    Pemeriksaan ini diulang di worker (dan di setiap pengalihan), tetapi menolak lebih awal
+    membuat kesalahannya jelas bagi pemanggil: 422, bukan pekerjaan yang lalu gagal diam-diam.
+    """
+    allow_private = bool(getattr(settings, "allow_private_urls", False))
+    for label, value in (("file_url", getattr(payload, "file_url", "")), ("web_url", getattr(payload, "web_url", ""))):
+        if not value:
+            continue
+        try:
+            assert_public_url(value, allow_private=allow_private)
+        except UrlRejected as exc:
+            raise AppError(
+                "VALIDATION_ERROR",
+                f"{label} ditolak: {exc}",
+                details={label: value[:200]},
+            ) from exc
+    if getattr(payload, "web_url", "") and not getattr(settings, "web_crawl_enabled", True):
+        raise AppError("VALIDATION_ERROR", "crawl web sedang dimatikan di setelan layanan (WEB_CRAWL_ENABLED=false)")
+
+
 @router.post("/knowledge/index", status_code=status.HTTP_202_ACCEPTED)
 def index_knowledge(
     payload: KnowledgeIndexRequest,
@@ -50,6 +73,7 @@ def index_knowledge(
     services = services_from_request(request)
     validate_display_label(payload.document_name or "", services.settings)
     validate_payload_size(services.settings, payload.content_base64, payload.text)
+    validate_source_urls(payload, services.settings)
     job = services.worker.submit(
         {
             "document_id": payload.document_id,
@@ -57,6 +81,10 @@ def index_knowledge(
             "knowledge_base_id": payload.knowledge_base_id,
             "document_name": payload.document_name or "",
             "file_url": payload.file_url or "",
+            "web_url": payload.web_url or "",
+            "web_max_pages": payload.web_max_pages,
+            "web_max_depth": payload.web_max_depth,
+            "web_follow_files": payload.web_follow_files,
             "content_base64": payload.content_base64 or "",
             "text": payload.text or "",
             "metadata": payload.metadata,
@@ -118,6 +146,7 @@ def list_knowledge(
                 document_id=record.document_id,
             ),
             tables=record.tables,
+            source_url=record.source_url or "",
         ).model_dump()
         for record in records
     ]
@@ -145,6 +174,7 @@ def update_knowledge(
     organization_id = assert_tenant_match(context, payload.organization_id, where="/knowledge/{id}")
 
     services = services_from_request(request)
+    validate_source_urls(payload, services.settings)
     job = services.worker.submit(
         {
             "document_id": document_id,
@@ -152,6 +182,10 @@ def update_knowledge(
             "knowledge_base_id": payload.knowledge_base_id,
             "document_name": payload.document_name or "",
             "file_url": payload.file_url or "",
+            "web_url": payload.web_url or "",
+            "web_max_pages": payload.web_max_pages,
+            "web_max_depth": payload.web_max_depth,
+            "web_follow_files": payload.web_follow_files,
             "content_base64": payload.content_base64 or "",
             "text": payload.text or "",
             "metadata": payload.metadata,
@@ -234,5 +268,6 @@ def knowledge_status(
         duration_ms=record.duration_ms,
         vectors_in_store=vectors,
         tables=record.tables,
+        source_url=record.source_url or "",
     )
     return ok(payload.model_dump())

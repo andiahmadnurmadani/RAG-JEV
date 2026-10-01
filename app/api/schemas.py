@@ -17,7 +17,15 @@ class KnowledgeIndexRequest(BaseModel):
     knowledge_base_id: str = Field(min_length=1, max_length=200)
     organization_id: Optional[str] = Field(default=None, max_length=200)
     document_name: Optional[str] = Field(default=None, max_length=300)
+    # Berkas publik (http/https) - diambil server lalu diindeks seperti unggahan biasa.
     file_url: Optional[str] = Field(default=None, max_length=2000)
+    # Halaman/situs web: satu URL menjelajah menjadi satu dokumen. Berbeda dari ``file_url``
+    # yang mengambil SATU berkas, ``web_url`` mengikuti tautan di dalamnya.
+    web_url: Optional[str] = Field(default=None, max_length=2000)
+    # Batas crawl khusus permintaan ini (0/-1 = pakai setelan layanan).
+    web_max_pages: int = Field(default=0, ge=0, le=200)
+    web_max_depth: int = Field(default=-1, ge=-1, le=5)
+    web_follow_files: bool = True
     content_base64: Optional[str] = None
     text: Optional[str] = None
     language: Optional[str] = Field(default=None, max_length=16)
@@ -26,8 +34,16 @@ class KnowledgeIndexRequest(BaseModel):
 
     @model_validator(mode="after")
     def _require_source(self) -> "KnowledgeIndexRequest":
-        if not (self.file_url or self.content_base64 or self.text):
-            raise ValueError("one of file_url, content_base64 or text is required")
+        if not (self.file_url or self.web_url or self.content_base64 or self.text):
+            raise ValueError("one of file_url, web_url, content_base64 or text is required")
+        return self
+
+    @model_validator(mode="after")
+    def _single_source(self) -> "KnowledgeIndexRequest":
+        """Satu sumber per permintaan: mencampur web_url dengan berkas membuat hasilnya tak terduga."""
+        chosen = [bool(self.file_url), bool(self.web_url), bool(self.content_base64), bool(self.text)]
+        if sum(chosen) > 1:
+            raise ValueError("choose exactly one source: file_url, web_url, content_base64 or text")
         return self
 
 
@@ -222,6 +238,11 @@ class DocumentStatusOut(BaseModel):
     # menghitung setelah penghapusan); ditampilkan sebagai "tidak diketahui", bukan 0 palsu.
     vectors_in_store: int = 0
     tables: int = 0
+    # Alamat asal dokumen (berkas publik / web). Berguna untuk menampilkan asalnya di daftar.
+    source_url: str = ""
+    # Untuk dokumen hasil crawl web: berapa halaman yang masuk, berapa yang dilewati.
+    web_pages: int = 0
+    web_skipped: int = 0
 
 
 class HealthOut(BaseModel):

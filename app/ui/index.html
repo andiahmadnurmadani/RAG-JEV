@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261001b">
+<link rel="stylesheet" href="style.css?v=20261002b">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -152,6 +152,7 @@
         <button type="button" data-panel="jev" aria-selected="false">Jev</button>
         <button type="button" data-panel="fmt" aria-selected="false">Format berkas</button>
         <button type="button" data-panel="retr" aria-selected="false">Retrieval</button>
+        <button type="button" data-panel="web" aria-selected="false">Sumber web</button>
       </nav>
       <div class="sheet-panels" id="settings-panels">
       <section class="group" data-panel="conn">
@@ -409,6 +410,37 @@
         </div>
       </section>
 
+      <section class="group" data-panel="web" hidden>
+        <div class="group-head">
+          <h2>Sumber web</h2>
+          <p>Knowledge bisa diambil dari halaman web atau berkas publik. Panel ini mengatur batas penjelajahannya; berlaku untuk semua tenant.</p>
+        </div>
+        <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
+          <label class="switch" for="s-web-enabled"><input type="checkbox" id="s-web-enabled" checked><span class="track"></span><span>Izinkan knowledge dari web</span></label>
+          <label class="switch" for="s-web-samehost"><input type="checkbox" id="s-web-samehost" checked><span class="track"></span><span>Hanya tautan pada alamat yang sama</span></label>
+          <label class="switch" for="s-web-followfiles"><input type="checkbox" id="s-web-followfiles" checked><span class="track"></span><span>Ikut ambil berkas yang ditautkan (PDF/DOCX)</span></label>
+          <label class="switch" for="s-web-robots"><input type="checkbox" id="s-web-robots" checked><span class="track"></span><span>Hormati robots.txt</span></label>
+          <label class="switch" for="s-web-private"><input type="checkbox" id="s-web-private"><span class="track"></span><span>Izinkan alamat privat/intranet</span></label>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="s-web-pages">Maks halaman per crawl</label>
+            <input type="number" id="s-web-pages" min="1" max="200" step="1" value="20">
+            <span class="help">Batas berapa halaman diambil dari satu alamat web.</span>
+          </div>
+          <div class="field">
+            <label for="s-web-depth">Kedalaman tautan</label>
+            <input type="number" id="s-web-depth" min="0" max="5" step="1" value="2">
+            <span class="help">0 = hanya halaman yang diberikan.</span>
+          </div>
+        </div>
+        <p class="help" style="margin:0">Alamat metadata mesin (169.254.169.254, *.internal) selalu ditolak, termasuk saat alamat privat diizinkan. Bawaannya alamat privat <strong>mati</strong> supaya server ini tidak bisa disuruh membaca jaringan dalam.</p>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-web-svc" type="button">Simpan setelan web</button>
+          <span id="web-svc-status"></span>
+        </div>
+      </section>
+
       <section class="group" data-panel="keys" hidden>
         <div class="group-head">
           <h2>Kunci API</h2>
@@ -494,11 +526,31 @@
 </dialog>
 
 <dialog id="dlg-url">
-  <form method="dialog" class="field" style="gap:12px;min-width:min(520px,86vw)">
-    <label for="url-value">URL berkas</label>
-    <input type="text" id="url-value" spellcheck="false" placeholder="https://contoh.id/dokumen.pdf">
+  <form method="dialog" class="field" style="gap:12px;min-width:min(560px,86vw)">
+    <label for="url-value">URL berkas publik atau halaman web</label>
+    <input type="text" id="url-value" spellcheck="false" placeholder="https://contoh.id/dokumen.pdf atau https://contoh.id/panduan">
+    <div class="row" style="gap:16px;align-items:center">
+      <label class="switch" for="url-crawl" style="flex:1">
+        <input type="checkbox" id="url-crawl">
+        <span class="track"></span>
+        <span>Jelajahi tautan di halaman ini (jadi satu dokumen berisi banyak halaman)</span>
+      </label>
+    </div>
+    <div id="url-crawl-opts" hidden>
+      <div class="row" style="gap:12px">
+        <div class="field" style="flex:1">
+          <label for="url-max-pages">Maks halaman</label>
+          <input type="number" id="url-max-pages" min="1" max="200" value="20">
+        </div>
+        <div class="field" style="flex:1">
+          <label for="url-max-depth">Kedalaman tautan</label>
+          <input type="number" id="url-max-depth" min="0" max="5" value="2">
+        </div>
+      </div>
+      <span class="help">Hanya tautan pada alamat yang sama yang diikuti, dan robots.txt dihormati.</span>
+    </div>
     <label for="url-name">Nama dokumen (opsional)</label>
-    <input type="text" id="url-name" placeholder="diambil dari nama berkas bila kosong">
+    <input type="text" id="url-name" placeholder="diambil dari nama berkas / judul halaman bila kosong">
     <div class="row" style="justify-content:flex-end">
       <button class="btn" value="cancel" type="submit">Batal</button>
       <button class="btn primary" id="url-confirm" value="ok" type="submit">Indeks</button>
@@ -506,6 +558,6 @@
   </form>
 </dialog>
 
-<script src="app.js?v=20261001b"></script>
+<script src="app.js?v=20261002b"></script>
 </body>
 </html>

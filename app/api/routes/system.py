@@ -10,6 +10,7 @@ from app.api.deps import services_from_request
 from app.core.errors import ok
 from app.core.metrics import snapshot
 from app.parsing.formats import enabled_extensions
+from app.parsing.web import describe_settings
 from app.qdrant import client as qdrant_client
 from app.qdrant import collections as qdrant_collections
 
@@ -54,6 +55,8 @@ def ready(request: Request, response: Response) -> Dict[str, Any]:
         "max_upload_mb": settings.max_upload_mb,
         "allowed_mime": settings.allowed_mime_list,
         "allowed_extensions": enabled_extensions(settings),
+        # Kebijakan sumber web, supaya klien tahu apa yang akan diterima server ini.
+        "web": describe_settings(settings),
     }
 
     critical = ("qdrant", "embedding")

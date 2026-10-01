@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -31,7 +32,7 @@ from app.core.logging import get_logger
 from app.core.metrics import incr as metric_incr
 from app.core.metrics import observe as metric_observe
 from app.core.security import sanitize_filename, validate_display_label, validate_upload
-from app.parsing.parser import ParsedDocument, parse_document
+from app.parsing.parser import ParsedDocument, ParsedPage, parse_document
 from app.qdrant import repository
 from app.rag.chunker import chunk_document, estimate_tokens
 from app.rag.embedder import EmbedderService
@@ -226,6 +227,10 @@ class IndexingPipeline:
         metadata: Optional[Dict[str, Any]] = None,
         language: str = "",
         replace: bool = True,
+        web_url: str = "",
+        web_max_pages: int = 0,
+        web_max_depth: int = -1,
+        web_follow_files: bool = True,
     ) -> JobRecord:
         started = time.perf_counter()
         record = self._jobs.update(job_id, status=STATUS_PROCESSING, stage="parsing", attempts=(self._jobs.get(job_id).attempts + 1 if self._jobs.get(job_id) else 1))
@@ -233,6 +238,26 @@ class IndexingPipeline:
             raise AppError("INTERNAL_ERROR", f"unknown job {job_id}")
 
         try:
+            # Sumber dari web: satu situs/halaman menjelajah menjadi SATU dokumen, dengan
+            # setiap halaman menyimpan alamatnya sendiri sehingga sitasi menunjuk halaman
+            # yang benar (bukan sekadar nomor halaman).
+            if web_url:
+                return self._run_web(
+                    started,
+                    job_id=job_id,
+                    document_id=document_id,
+                    organization_id=organization_id,
+                    knowledge_base_id=knowledge_base_id,
+                    document_name=document_name,
+                    web_url=web_url,
+                    max_pages=web_max_pages,
+                    max_depth=web_max_depth,
+                    follow_files=web_follow_files,
+                    language=language,
+                    metadata=metadata,
+                    replace=replace,
+                )
+
             raw, parse_name, display_name = self._load_source(
                 file_url=file_url, content_base64=content_base64, text=text, document_name=document_name
             )
@@ -242,6 +267,10 @@ class IndexingPipeline:
             validate_display_label(display_name, self._settings)
             validate_upload(self._settings, parse_name, raw)
             parsed = parse_document(raw, parse_name)
+            # Nama tampilan yang benar-benar dipakai (mis. diambil dari nama berkas URL) ikut
+            # disimpan, supaya daftar dokumen tidak menampilkan baris tanpa nama.
+            if display_name:
+                self._jobs.update(job_id, document_name=display_name, source_url=file_url or "")
             self._jobs.update(job_id, stage="chunking", pages=len(parsed.pages))
             metric_incr("documents_indexed")
 
@@ -328,6 +357,128 @@ class IndexingPipeline:
             )
 
     # ------------------------------------------------------------------ #
+    def _run_web(
+        self,
+        started: float,
+        *,
+        job_id: str,
+        document_id: str,
+        organization_id: str,
+        knowledge_base_id: str,
+        document_name: str,
+        web_url: str,
+        max_pages: int,
+        max_depth: int,
+        follow_files: bool,
+        language: str,
+        metadata: Optional[Dict[str, Any]],
+        replace: bool,
+    ) -> JobRecord:
+        """Indeks satu situs/halaman web sebagai satu dokumen berhalaman-URL.
+
+        Setiap halaman web menjadi satu "halaman" dokumen dengan ``source_url`` sendiri, jadi
+        sitasi menunjuk alamat yang benar dan halaman yang sama tidak terhitung dua kali.
+        """
+        from app.parsing.web import WebFetchError, crawl
+
+        self._jobs.update(job_id, stage="fetching")
+        try:
+            result = crawl(
+                web_url,
+                self._settings,
+                max_pages=max_pages or None,
+                max_depth=(max_depth if max_depth >= 0 else None),
+                follow_files=follow_files,
+            )
+        except WebFetchError as exc:
+            raise AppError("DOCUMENT_NOT_FOUND", f"gagal mengambil {web_url}: {exc}") from exc
+
+        if not result.pages:
+            detail = "; ".join(f"{item['url']}: {item['reason']}" for item in result.skipped[:5])
+            raise AppError(
+                "INDEXING_FAILED",
+                f"tidak ada teks yang bisa diambil dari {web_url}" + (f" ({detail})" if detail else ""),
+            )
+
+        root = urlparse(web_url)
+        host_label = root.hostname or "web"
+        display_name = document_name or f"{host_label} ({len(result.pages)} halaman)"
+        # Simpan nama yang benar-benar dipakai supaya daftar dokumen tidak tampil kosong.
+        self._jobs.update(job_id, document_name=display_name, source_url=web_url)
+        pages: List[ParsedPage] = []
+        for index, page in enumerate(result.pages, start=1):
+            pages.append(
+                ParsedPage(
+                    page=index,
+                    text=page.text,
+                    source_url=page.url,
+                    title=page.title,
+                )
+            )
+        parsed = ParsedDocument(document_name=display_name, pages=pages, language=language or "id", parser="web")
+
+        self._jobs.update(job_id, stage="chunking", pages=len(pages))
+        metric_incr("documents_indexed")
+        metric_incr("web_pages_fetched", len(pages))
+
+        chunks = chunk_document(
+            parsed,
+            document_id=document_id,
+            chunk_size=self._settings.chunk_size,
+            chunk_overlap=self._settings.chunk_overlap,
+            min_chunk_tokens=self._settings.min_chunk_tokens,
+        )
+        if not chunks:
+            raise AppError("INDEXING_FAILED", f"tidak ada teks yang bisa diindeks dari {web_url}")
+
+        page_urls = [page.url for page in result.pages]
+        enriched = dict(metadata or {})
+        enriched.setdefault("source", "web")
+        enriched.setdefault("source_url", web_url)
+        enriched["web_pages"] = len(page_urls)
+        enriched["web_urls"] = page_urls[:200]
+        if result.skipped:
+            enriched["web_skipped"] = len(result.skipped)
+
+        self._jobs.update(job_id, stage="embedding")
+        vectors = self._encode(
+            chunks, organization_id, knowledge_base_id, document_id, display_name, parsed, web_url, language, enriched
+        )
+
+        self._jobs.update(job_id, stage="upserting")
+        if replace:
+            repository.delete_document(self._settings, organization_id=organization_id, document_id=document_id)
+            self._sparse.remove_document(organization_id, knowledge_base_id, document_id)
+        written = repository.upsert_chunks(self._settings, dim=self._embedder.dim, points=vectors)
+        self._sparse.upsert(
+            organization_id,
+            knowledge_base_id,
+            [(chunk.chunk_id, document_id, chunk.content) for chunk in chunks],
+        )
+
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        metric_observe("embedding_latency", duration_ms / 1000.0)
+        metric_incr("chunks_created", len(chunks))
+        record = self._jobs.update(
+            job_id,
+            status=STATUS_COMPLETED,
+            stage="completed",
+            chunks=written,
+            tables=0,
+            tokens=sum(chunk.token_count for chunk in chunks),
+            duration_ms=duration_ms,
+        )
+        logger.info(
+            "indexed web %s: %d halaman, %d chunk, %d dilewati, org %s",
+            web_url,
+            len(page_urls),
+            written,
+            len(result.skipped),
+            organization_id,
+        )
+        return record
+
+    # ------------------------------------------------------------------ #
     def _encode(
         self,
         chunks,
@@ -362,7 +513,10 @@ class IndexingPipeline:
                             "document_name": document_name or parsed.document_name,
                             "page": chunk.page,
                             "section": chunk.section,
-                            "source_url": source_url,
+                            # Alamat halaman web potongan ini bila ada; kalau tidak, alamat
+                            # dokumennya (mis. berkas publik). Dipakai sitasi + ambil gambar.
+                            "source_url": getattr(chunk, "source_url", "") or source_url,
+                            "page_title": getattr(chunk, "title", ""),
                             "language": language or parsed.language,
                             "chunk_index": int(chunk.chunk_id.rsplit("_", 1)[-1]),
                             "token_count": chunk.token_count,
@@ -421,11 +575,37 @@ class IndexingPipeline:
                 raise AppError("PAYLOAD_TOO_LARGE", "document exceeds MAX_UPLOAD_MB")
             return path.read_bytes(), path.name, name
 
+        # Berkas publik diambil lewat pengaman URL yang sama dengan crawl web: tanpa ini,
+        # satu baris payload bisa menyuruh server membaca jaringan dalam (SSRF).
+        from app.core.urlguard import UrlRejected, assert_public_url
+
+        try:
+            assert_public_url(
+                file_url, allow_private=bool(getattr(self._settings, "allow_private_urls", False))
+            )
+        except UrlRejected as exc:
+            raise AppError("VALIDATION_ERROR", f"file_url ditolak: {exc}") from exc
+
         import httpx
 
         try:
-            with httpx.stream("GET", file_url, timeout=self._settings.file_fetch_timeout, follow_redirects=True) as response:
+            with httpx.stream(
+                "GET",
+                file_url,
+                timeout=self._settings.file_fetch_timeout,
+                follow_redirects=True,
+                headers={"User-Agent": getattr(self._settings, "web_user_agent", "RAG-Service/1.0")},
+            ) as response:
                 response.raise_for_status()
+                # Pengalihan sudah diikuti httpx; periksa tujuan akhirnya juga, karena itulah
+                # jalur klasik untuk lolos dari pemeriksaan URL awal.
+                try:
+                    assert_public_url(
+                        str(response.url),
+                        allow_private=bool(getattr(self._settings, "allow_private_urls", False)),
+                    )
+                except UrlRejected as exc:
+                    raise AppError("VALIDATION_ERROR", f"pengalihan file_url ditolak: {exc}") from exc
                 declared = int(response.headers.get("content-length") or 0)
                 if declared and declared > self._settings.max_upload_bytes:
                     raise AppError("PAYLOAD_TOO_LARGE", "document exceeds MAX_UPLOAD_MB")
@@ -494,7 +674,10 @@ class IndexingWorker:
 
     def submit(self, payload: Dict[str, Any]) -> JobRecord:
         record = self._jobs.create(**{key: payload[key] for key in _JOB_FIELDS if key in payload})
-        self._jobs.update(record.job_id, source_url=payload.get("file_url", ""))
+        self._jobs.update(
+            record.job_id,
+            source_url=payload.get("web_url") or payload.get("file_url", ""),
+        )
         if not self._running or self._queue is None or self._loop is None:
             logger.warning("worker not running; running job %s inline", record.job_id)
             self._pipeline.run(job_id=record.job_id, **payload)

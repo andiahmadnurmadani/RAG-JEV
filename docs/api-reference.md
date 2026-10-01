@@ -249,6 +249,10 @@ Skema: `KnowledgeIndexRequest`
 | `organization_id` | string | null | — |  |
 | `document_name` | string | null | — |  |
 | `file_url` | string | null | — |  |
+| `web_url` | string | null | — |  |
+| `web_max_pages` | integer | — | (default: `0`) |
+| `web_max_depth` | integer | — | (default: `-1`) |
+| `web_follow_files` | boolean | — | (default: `True`) |
 | `content_base64` | string | null | — |  |
 | `text` | string | null | — |  |
 | `language` | string | null | — |  |
@@ -328,6 +332,10 @@ Skema: `KnowledgeUpdateRequest`
 | `organization_id` | string | null | — |  |
 | `document_name` | string | null | — |  |
 | `file_url` | string | null | — |  |
+| `web_url` | string | null | — |  |
+| `web_max_pages` | integer | — | (default: `0`) |
+| `web_max_depth` | integer | — | (default: `-1`) |
+| `web_follow_files` | boolean | — | (default: `True`) |
 | `content_base64` | string | null | — |  |
 | `text` | string | null | — |  |
 | `language` | string | null | — |  |
@@ -473,6 +481,7 @@ Skema: `SettingsUpdateRequest`
 | `jev` | object | null | — |  |
 | `uploads` | object | null | — |  |
 | `retrieval` | object | null | — |  |
+| `web` | object | null | — |  |
 
 | Kode | Arti |
 |---|---|
@@ -804,6 +813,10 @@ Tag: query
 | `organization_id` | string | null | — |  |
 | `document_name` | string | null | — |  |
 | `file_url` | string | null | — |  |
+| `web_url` | string | null | — |  |
+| `web_max_pages` | integer | — | (default: `0`) |
+| `web_max_depth` | integer | — | (default: `-1`) |
+| `web_follow_files` | boolean | — | (default: `True`) |
 | `content_base64` | string | null | — |  |
 | `text` | string | null | — |  |
 | `language` | string | null | — |  |
@@ -819,6 +832,10 @@ Tag: query
 | `organization_id` | string | null | — |  |
 | `document_name` | string | null | — |  |
 | `file_url` | string | null | — |  |
+| `web_url` | string | null | — |  |
+| `web_max_pages` | integer | — | (default: `0`) |
+| `web_max_depth` | integer | — | (default: `-1`) |
+| `web_follow_files` | boolean | — | (default: `True`) |
 | `content_base64` | string | null | — |  |
 | `text` | string | null | — |  |
 | `language` | string | null | — |  |
@@ -878,6 +895,7 @@ Tag: query
 | `jev` | object | null | — |  |
 | `uploads` | object | null | — |  |
 | `retrieval` | object | null | — |  |
+| `web` | object | null | — |  |
 
 ### `ValidationError`
 

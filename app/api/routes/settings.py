@@ -51,6 +51,7 @@ class SettingsUpdateRequest(BaseModel):
     jev: Optional[Dict[str, Any]] = None
     uploads: Optional[Dict[str, Any]] = None
     retrieval: Optional[Dict[str, Any]] = None
+    web: Optional[Dict[str, Any]] = None
 
 
 class ModelsProbeRequest(BaseModel):
@@ -236,6 +237,25 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
                 details={"max_tokens": value},
             )
         llm["max_tokens"] = value
+
+    web = updates.get("web") or {}
+    for field, low, high in (
+        ("max_pages", 1, 200),
+        ("max_depth", 0, 5),
+    ):
+        if field not in web:
+            continue
+        try:
+            value = int(web[field])
+        except (TypeError, ValueError) as exc:
+            raise AppError("VALIDATION_ERROR", f"web.{field} harus berupa angka bulat") from exc
+        if not low <= value <= high:
+            raise AppError(
+                "VALIDATION_ERROR",
+                f"web.{field} harus antara {low} dan {high}",
+                details={f"web.{field}": value},
+            )
+        web[field] = value
 
 
 # --------------------------------------------------------------------------- #

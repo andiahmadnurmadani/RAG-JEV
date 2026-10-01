@@ -10,7 +10,7 @@
 const KEY = "rag.console.v3";
 const SESSION_KEY = "rag.session.v1";
 const DEFAULT_KB = "kb_chat";
-const PANELS = ["conn", "access", "keys", "llm", "jev", "fmt", "retr"];
+const PANELS = ["conn", "access", "keys", "llm", "jev", "fmt", "retr", "web"];
 
 const state = {
   base: "",
@@ -43,6 +43,17 @@ function escapeHtml(value) {
 
 function mb(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function shortUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    const text = parsed.hostname + path + (parsed.search || "");
+    return text.length > 58 ? text.slice(0, 55) + "..." : text;
+  } catch (err) {
+    return String(url || "").slice(0, 58);
+  }
 }
 
 function uploadLimitBytes() {
@@ -397,7 +408,13 @@ function renderDocs(documents) {
       "<span" + tone + ">" + escapeHtml(doc.status) + "</span>" +
       "<span>" + escapeHtml(doc.chunks) + " chunk, " + escapeHtml(doc.tokens) + " token</span>" +
       (doc.tables ? "<span class=\"doc-tables\">" + escapeHtml(doc.tables) + " tabel</span>" : "") +
-      (when ? "<span>" + escapeHtml(when) + "</span>" : "") + "</div></div>" +
+      (doc.web_pages ? "<span class=\"doc-tables\">" + escapeHtml(doc.web_pages) + " halaman web</span>" : "") +
+      (when ? "<span>" + escapeHtml(when) + "</span>" : "") +
+      (doc.source_url
+        ? "<span><a href=\"" + escapeHtml(doc.source_url) + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
+          escapeHtml(shortUrl(doc.source_url)) + "</a></span>"
+        : "") +
+      "</div></div>" +
       '<div class="doc-actions"><button type="button" data-del="' + escapeHtml(doc.document_id) + '" title="Hapus" aria-label="Hapus"><svg><use href="#i-trash"/></svg></button></div>' +
       "</li>";
   }).join("");
@@ -511,13 +528,24 @@ async function indexText(name, text) {
   }, name || "teks tempel");
 }
 
-async function indexUrl(url, name) {
-  await submitIndex({
+async function indexUrl(url, name, options) {
+  const opts = options || {};
+  const payload = {
     document_id: slug(name || url, "tautan"),
     knowledge_base_id: state.kb,
     document_name: name || url.split("/").pop() || url,
     file_url: url,
-  }, name || url);
+  };
+  if (opts.crawl) {
+    // Satu halaman/situs menjelajah jadi satu dokumen; setiap halaman menyimpan URL-nya
+    // sendiri sehingga sitasi menunjuk halaman yang benar.
+    payload.web_url = url;
+    payload.file_url = "";
+    payload.web_max_pages = opts.maxPages || 20;
+    payload.web_max_depth = opts.maxDepth == null ? 2 : opts.maxDepth;
+    payload.document_name = name || url;
+  }
+  await submitIndex(payload, name || url);
 }
 
 async function removeDoc(documentId) {
@@ -600,7 +628,12 @@ function renderAnswer(node, data) {
       const label = source.document_name || source.document_id;
       const page = source.page ? " hal. " + escapeHtml(source.page) : "";
       const score = typeof source.score === "number" ? '<span class="score">' + source.score.toFixed(2) + "</span>" : "";
-      return '<span class="cite"><b>[' + (index + 1) + "]</b>" + escapeHtml(label) + page + " " + score + "</span>";
+      // Sumber dari web: tautkan ke halamannya supaya bisa dibuka langsung.
+      const link = source.source_url
+        ? ' <a class="cite-link" href="' + escapeHtml(source.source_url) + '" target="_blank" rel="noopener noreferrer" title="' +
+          escapeHtml(source.source_url) + '">buka</a>'
+        : "";
+      return '<span class="cite"><b>[' + (index + 1) + "]</b>" + escapeHtml(label) + page + link + " " + score + "</span>";
     }).join("");
     node.appendChild(cites);
   }
@@ -739,6 +772,7 @@ async function loadSettings() {
       clearNote("fmt-note");
     }
     if (data.sections.retrieval) renderRetrievalService(data.sections.retrieval);
+    if (data.sections.web) renderWebService(data.sections.web);
   } catch (err) {
     const forbidden = err.code === "AUTH_FORBIDDEN";
     const message = forbidden
@@ -967,6 +1001,43 @@ async function saveRetrievalService() {
       ? "Setelan layanan hanya bisa diubah dengan kunci berizin <strong>admin</strong>."
       : escapeHtml(err.message || "gagal menyimpan") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>";
     note("retr-svc-status", forbidden ? "warn" : "err", message);
+  }
+}
+
+function renderWebService(web) {
+  if (!web) return;
+  $("s-web-enabled").checked = web.enabled !== false;
+  $("s-web-samehost").checked = web.same_host !== false;
+  $("s-web-followfiles").checked = web.follow_files !== false;
+  $("s-web-robots").checked = web.respect_robots !== false;
+  $("s-web-private").checked = web.allow_private_urls === true;
+  if (web.max_pages != null) $("s-web-pages").value = web.max_pages;
+  if (web.max_depth != null) $("s-web-depth").value = web.max_depth;
+}
+
+async function saveWebService() {
+  const payload = {
+    web: {
+      enabled: $("s-web-enabled").checked,
+      same_host: $("s-web-samehost").checked,
+      follow_files: $("s-web-followfiles").checked,
+      respect_robots: $("s-web-robots").checked,
+      allow_private_urls: $("s-web-private").checked,
+      max_pages: Number($("s-web-pages").value) || 20,
+      max_depth: Number($("s-web-depth").value),
+    },
+  };
+  note("web-svc-status", "info", "Menyimpan setelan web...");
+  try {
+    const data = await api("PUT", "/settings", payload);
+    note("web-svc-status", "ok", "Tersimpan: <span class=\"mono\">" + escapeHtml((data.applied || []).join(", ")) + "</span>");
+    if (data.sections && data.sections.web) renderWebService(data.sections.web);
+  } catch (err) {
+    const forbidden = err.code === "AUTH_FORBIDDEN";
+    const message = forbidden
+      ? "Setelan layanan hanya bisa diubah dengan kunci berizin <strong>admin</strong>."
+      : escapeHtml(err.message || "gagal menyimpan") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>";
+    note("web-svc-status", forbidden ? "warn" : "err", message);
   }
 }
 
@@ -1338,7 +1409,13 @@ function wire() {
     $("paste-name").value = "";
   });
 
-  $("btn-url").addEventListener("click", () => $("dlg-url").showModal());
+  $("btn-url").addEventListener("click", () => {
+    $("dlg-url").showModal();
+  });
+  $("url-crawl").addEventListener("change", () => {
+    $("url-crawl-opts").hidden = !$("url-crawl").checked;
+    $("url-confirm").textContent = $("url-crawl").checked ? "Jelajahi & indeks" : "Indeks";
+  });
   $("dlg-url").addEventListener("close", () => {
     if ($("dlg-url").returnValue !== "ok") return;
     const url = $("url-value").value.trim();
@@ -1346,8 +1423,16 @@ function wire() {
       note("upload-status", "err", "URL masih kosong.");
       return;
     }
-    indexUrl(url, $("url-name").value.trim());
+    const crawl = $("url-crawl").checked;
+    indexUrl(url, $("url-name").value.trim(), {
+      crawl: crawl,
+      maxPages: Number($("url-max-pages").value) || 20,
+      maxDepth: Number($("url-max-depth").value),
+    });
     $("url-name").value = "";
+    if (crawl) {
+      note("upload-status", "info", "Menjelajahi " + escapeHtml(url) + " - halaman yang diambil akan muncul di daftar setelah selesai.");
+    }
   });
 
   $("btn-select-none").addEventListener("click", () => {
@@ -1391,6 +1476,7 @@ function wire() {
   });
   $("btn-save-retr").addEventListener("click", saveRetrieval);
   $("btn-save-retr-svc").addEventListener("click", saveRetrievalService);
+  $("btn-save-web-svc").addEventListener("click", saveWebService);
   $("gate-form").addEventListener("submit", login);
   $("btn-logout").addEventListener("click", logout);
   $("btn-save-access").addEventListener("click", saveAccess);

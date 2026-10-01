@@ -30,6 +30,10 @@ RTF_HEADER = bytes([0x7B, 0x5C, 0x72, 0x74, 0x66])
 class ParsedPage:
     page: int
     text: str
+    # Alamat asal halaman ini bila dokumennya datang dari web (crawl). Dipakai supaya sitasi
+    # menunjuk halaman web yang tepat, bukan hanya nomor halaman.
+    source_url: str = ""
+    title: str = ""
 
 
 @dataclass

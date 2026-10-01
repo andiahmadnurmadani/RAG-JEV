@@ -187,6 +187,27 @@ class Settings(BaseSettings):
     file_fetch_timeout: float = 120.0
     job_store_path: str = str(BASE_DIR / "data" / "jobs.json")
 
+    # ---- sumber dari web (crawl) ----------------------------------------
+    # "Knowledge dari web": satu URL diambil, tautan di dalamnya diikuti sampai kedalaman
+    # tertentu, dan SETIAP halaman jadi dokumen tersendiri. Bawaannya konservatif supaya satu
+    # permintaan tidak menjelajahi seluruh situs tanpa disadari.
+    web_crawl_enabled: bool = True
+    web_crawl_max_pages: int = 20
+    web_crawl_max_depth: int = 2
+    web_crawl_same_host: bool = True
+    web_crawl_timeout: float = 20.0
+    web_crawl_max_page_bytes: int = 5 * 1024 * 1024
+    # Ambil juga dokumen yang ditautkan (PDF/DOCX/...) di halaman web, bukan hanya HTML.
+    web_crawl_follow_files: bool = True
+    # Hormati robots.txt? Bawaannya ya. Dimatikan hanya untuk situs milik sendiri.
+    web_crawl_respect_robots: bool = True
+    # Izinkan URL yang menunjuk alamat privat/internal. MATI secara bawaan: menyalakannya
+    # membuka SSRF (server disuruh membaca jaringan dalam). Nyalakan hanya untuk intranet
+    # yang memang tepercaya.
+    allow_private_urls: bool = False
+    # Agen pengguna saat mengambil halaman web (disebut jujur, bukan menyamar).
+    web_user_agent: str = "RAG-Service/1.0 (+knowledge-fetcher)"
+
     # Ekstensi yang boleh jadi knowledge (lihat app/parsing/formats.py).
     # Kosong = pakai daftar default katalog, dikurangi format yang belum tersedia di mesin ini.
     upload_extensions: str = ""
