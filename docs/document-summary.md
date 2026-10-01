@@ -169,3 +169,14 @@ PORT=8099 JEV_ENABLED=false bash scripts/run_live.sh
 PORT=8099 JEV_ENABLED=false bash scripts/run_live.sh
 .venv/Scripts/python.exe scripts/verify_document_summary_live.py
 ```
+
+## Menghapus dokumen di tengah ringkasan
+
+Karena ringkasan berjalan di jalur terpisah, ia bisa selesai **setelah** dokumen dihapus. Tanpa
+penjaga, penutup ringkasan akan memanggil `update(status=completed)` dan **menghidupkan kembali**
+catatan yang sudah ditandai terhapus: dokumen muncul lagi di daftar padahal isinya sudah tidak ada.
+
+Penjaganya di tingkat penyimpanan pekerjaan (`JobStore.update_unless_deleted`): semua penutup
+ringkasan memakai ini, dan bila pekerjaannya sudah terhapus, penulisan itu **diabaikan**. Dikunci
+uji `tests/integration/test_summary_delete_race.py` (diuji dengan melepas penjaganya: gagal
+"dokumen terhapus hidup kembali").

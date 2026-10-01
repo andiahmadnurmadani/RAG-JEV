@@ -191,6 +191,29 @@ class JobStore:
                 record.updated_at = _now()
                 self._persist()
 
+    def update_unless_deleted(self, job_id: str, **changes) -> Optional[JobRecord]:
+        """Perbarui pekerjaan, kecuali dokumennya sudah dihapus di tengah jalan.
+
+        Ringkasan berjalan di worker terpisah dan bisa selesai SETELAH dokumen dihapus. Tanpa
+        penjaga ini, ``update(status=completed)`` akan menghidupkan kembali catatan yang sudah
+        ditandai terhapus - dokumen yang sudah dihapus muncul lagi di daftar, padahal isinya
+        sudah tidak ada. Bila sudah terhapus, jangan sentuh apa pun.
+        """
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None or record.status == STATUS_DELETED:
+                return None
+            for key, value in changes.items():
+                setattr(record, key, value)
+            record.updated_at = _now()
+            self._persist()
+            return record
+
+    def is_deleted(self, job_id: str) -> bool:
+        with self._lock:
+            record = self._jobs.get(job_id)
+            return record is None or record.status == STATUS_DELETED
+
     def stats(self) -> Dict[str, int]:
         with self._lock:
             counts: Dict[str, int] = {}
@@ -620,7 +643,7 @@ class IndexingPipeline:
 
         if not self._settings.document_summary_enabled:
             # Fitur dimatikan: tutup pekerjaan sebagai selesai, dengan alasan yang jelas.
-            self._jobs.update(
+            self._jobs.update_unless_deleted(
                 job_id,
                 status=STATUS_COMPLETED,
                 stage="completed",
@@ -629,7 +652,7 @@ class IndexingPipeline:
             return self._jobs.get(job_id)
 
         if self._generator is None:
-            self._jobs.update(
+            self._jobs.update_unless_deleted(
                 job_id,
                 status=STATUS_COMPLETED,
                 stage="completed",
@@ -645,13 +668,13 @@ class IndexingPipeline:
                 knowledge_base_id=knowledge_base_id,
             )
         except Exception as exc:  # noqa: BLE001 - ringkasan opsional
-            self._jobs.update(
+            self._jobs.update_unless_deleted(
                 job_id, status=STATUS_COMPLETED, stage="completed",
                 summary_error=f"ringkasan gagal membaca isi: {exc}"[:300],
             )
             return self._jobs.get(job_id)
         if not parts:
-            self._jobs.update(
+            self._jobs.update_unless_deleted(
                 job_id, status=STATUS_COMPLETED, stage="completed",
                 summary_error="ringkasan dilewati: dokumen tidak punya isi",
             )
@@ -670,14 +693,14 @@ class IndexingPipeline:
             )
         except Exception as exc:  # noqa: BLE001 - ringkasan opsional
             logger.warning("ringkasan dokumen %s gagal: %s", document_id, exc)
-            self._jobs.update(
+            self._jobs.update_unless_deleted(
                 job_id, status=STATUS_COMPLETED, stage="completed",
                 summary_error=f"ringkasan gagal: {exc}"[:300],
             )
             return self._jobs.get(job_id)
 
         if not result.text.strip():
-            self._jobs.update(
+            self._jobs.update_unless_deleted(
                 job_id,
                 status=STATUS_COMPLETED,
                 stage="completed",
@@ -709,7 +732,7 @@ class IndexingPipeline:
             )
         except Exception as exc:  # noqa: BLE001 - gagal menyimpan ringkasan tidak fatal
             logger.warning("ringkasan dokumen %s gagal disimpan: %s", document_id, exc)
-            self._jobs.update(
+            self._jobs.update_unless_deleted(
                 job_id, status=STATUS_COMPLETED, stage="completed",
                 summary_error=f"ringkasan gagal disimpan: {exc}"[:300],
             )
@@ -724,7 +747,7 @@ class IndexingPipeline:
             result.passes,
             f" (sebagian: {result.partial})" if result.partial else "",
         )
-        return self._jobs.update(
+        return self._jobs.update_unless_deleted(
             job_id,
             status=STATUS_COMPLETED,
             stage="completed",
