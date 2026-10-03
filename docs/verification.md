@@ -517,6 +517,11 @@ Catatan kejujuran: `mkdocs build --strict` lulus tanpa peringatan; salinan `site
 
 ## 10. Gerbang kode akses: diuji di browser, bukan hanya di unit test
 
+> Bagian ini merekam pengujian **mode kode akses** (`CONSOLE_API_KEY_ONLY=false`), yang kini
+> **opsional** — bawaannya konsol cukup dengan API key. Lihat
+> [Konsol dengan kunci API saja](console-api-key-only.md) untuk mode bawaan dan bagian 15 untuk
+> pengujiannya.
+
 Keluhan yang melahirkan fitur ini adalah keluhan layar: menekan **Buat kunci** di konsol gagal
 dengan `AUTH_INVALID` karena konsol di peramban tidak punya API key untuk dikirim. Karena itu
 bukti yang dikumpulkan bukan hanya hasil `pytest`, melainkan percakapan peramban sungguhan
@@ -747,3 +752,39 @@ worker  : {'workers': 1, 'summary_workers': 2, 'queued': 0, 'summary_queued': 0}
 
 Skrip: `scripts/verify_summary_queue_production.py` (dijalankan di dalam container; kunci dibaca
 dari registry di `/data` dan tidak pernah dicetak).
+
+---
+
+## 15. Konsol cukup dengan API key: dibuktikan di peramban produksi
+
+Permintaan operator: *"tidak perlu kode akses, cukup masukkan API key saja, dan bisa akses
+semuanya"*. Sebelum ini, kunci biasa ditolak `403` di layar Pengaturan karena layar itu menuntut
+izin `admin`, sementara kunci yang dibuat dari konsol hanya `read,write` — jadi konsol tidak bisa
+mengelola dirinya sendiri.
+
+Bukti di `https://rag.aiones.app`:
+
+| Pemeriksaan | Hasil |
+|---|---|
+| `GET /api/v1/auth/gate` | `enabled: false`, `api_key_only: true` |
+| Buka `/ui/` di peramban | layar **kode akses tidak muncul**; langsung panel Koneksi dengan pesan *"Konsol ini tidak memakai kode akses. Tempel kunci API sekali…"* |
+| `GET /settings` (kunci izin `read,write`) | **200** |
+| `GET /settings/api-keys` | **200** |
+| `GET /settings/access` | **200** |
+| `GET /ready` | **200** |
+| `POST /search` (`kb_chat`, `kb_utama`) | **200**, ada hasil |
+| `POST /query` | **200**, jawaban berformat Markdown |
+| Panel **Akses & Sesi** di nav | disembunyikan (`hidden`) |
+| Tombol **Keluar** | disembunyikan (tidak ada sesi untuk diakhiri) |
+| Galat JS / permintaan gagal di peramban | **nol** |
+| `GET /settings` tanpa kredensial | **401** (membuka Pengaturan bukan berarti terbuka tanpa kunci) |
+
+Uji otomatis yang menyertai: `tests/integration/test_console_api_key_only.py` (4 uji) memastikan
+`/auth/gate` melaporkan mode, konsol benar-benar menyembunyikan panel Akses & Sesi dan tombol
+Keluar, serta `applyConsoleMode()` dipanggil di kedua cabang boot. Uji perilaku izin lama tetap
+ada dan dijalankan dengan `CONSOLE_API_KEY_ONLY=false` (lihat `test_settings_api.py`,
+`test_api_keys_api.py`, `test_access_gate.py`, `test_retrieval_settings.py`).
+
+**Catatan pemulihan yang menyertai:** insiden `500` pada `/ready` dan `/search` berasal dari
+klien Qdrant *embedded* yang tidak thread-safe — bukan dari kunci API. Rinciannya di
+[Pemulihan Qdrant lokal](qdrant-recovery.md).
