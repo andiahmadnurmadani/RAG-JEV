@@ -97,5 +97,6 @@ nav:
       - Konsol, kode akses & sesi: console-access.md
       - Konsol dengan kunci API saja: console-api-key-only.md
       - Verifikasi: verification.md
+      - Pemulihan Qdrant lokal: qdrant-recovery.md
       - Evaluasi: evaluation.md
   - Pakai ulang untuk aplikasi lain: reuse.md
