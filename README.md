@@ -412,6 +412,7 @@ Semua perilaku model/provider dipilih lewat env var (`.env.example` memuat semua
 | `UPLOAD_EXTENSIONS`, `MAX_UPLOAD_MB` | titik awal kebijakan format berkas; kosong = seluruh katalog yang didukung mesin ini (dipersempit kapan saja lewat Pengaturan) |
 | `SUMMARY_WORKERS` | `2` | Jalur ringkasan terpisah dari pengindeksan - panggilan LLM panjang tidak menahan antrian unggahan. |
 | `SUMMARY_BUDGET_SECONDS` | `120` | Batas waktu membuat ringkasan satu dokumen; setelah itu dihentikan dan alasannya dilaporkan. |
+| `CONSOLE_API_KEY_ONLY` | `true` | Konsol cukup dengan API key: tanpa gerbang kode akses, kunci apa pun yang sah membuka layar Pengaturan. Setel `false` untuk mode admin klasik. |
 | `DOCUMENT_SUMMARY_ENABLED` | `true` | Buat ringkasan setiap dokumen saat diindeks (knowledge turunan). |
 | `SUMMARY_MAX_TOKENS` | `2048` | Panjang ringkasan yang diminta dari model. |
 | `SUMMARY_MAX_DOCUMENTS` | `3` | Berapa ringkasan dokumen boleh ikut saat user minta ringkasan. |

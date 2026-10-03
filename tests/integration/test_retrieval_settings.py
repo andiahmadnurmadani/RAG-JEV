@@ -52,7 +52,9 @@ def test_the_retrieval_section_is_readable_with_the_defaults(client):
     assert section["context_expand_documents"] is True
 
 
-def test_only_an_admin_may_change_the_context_budget(client):
+def test_only_an_admin_may_change_the_context_budget_when_api_key_only_is_off(client, settings):
+    """Dengan gerbang/admin dihidupkan, kunci tanpa izin admin tidak boleh mengubah anggaran."""
+    settings.console_api_key_only = False
     response = client.put(
         "/api/v1/settings",
         json={"retrieval": {"context_max_tokens": 40000}},
@@ -67,8 +69,9 @@ def test_only_an_admin_may_change_the_context_budget(client):
     ).status_code == 403
 
 
-def test_a_role_without_admin_sees_no_retrieval_section_at_all(client):
-    """Tanpa izin admin, layar setelan tidak boleh membocorkan konfigurasi layanan."""
+def test_a_role_without_admin_sees_no_retrieval_section_at_all(client, settings):
+    """Tanpa izin admin (mode admin dihidupkan), layar setelan tidak membocorkan konfigurasi."""
+    settings.console_api_key_only = False
     response = client.get("/api/v1/settings", headers=auth(READ_ONLY_KEY))
     assert response.status_code == 403
 

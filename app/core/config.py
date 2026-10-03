@@ -169,6 +169,12 @@ class Settings(BaseSettings):
     ui_session_application_id: str = "rag-console"
     # Izin yang diberikan ke sesi konsol: konsol adalah alat operator, jadi bawaannya penuh.
     ui_session_permissions: str = "read,write,admin,*"
+    # Konsol tanpa gerbang kode akses: cukup API key. Saat true, layar konsol tidak meminta
+    # kode akses, dan kunci API apa pun yang sah membuka seluruh layar Pengaturan (termasuk
+    # membuat kunci, memasang kode akses, mengubah model, dan setelan lainnya). Bawaannya true
+    # karena ini pemasangan satu-operator; setel false bila konsol harus dijaga kode akses dan
+    # hanya kunci berizin 'admin' boleh membuka Pengaturan.
+    console_api_key_only: bool = True
     # Kunci admin pertama saat layanan belum punya kunci sama sekali (lihat app/core/bootstrap.py).
     # Nilainya ditulis ke berkas mode 0600, bukan ke log; cabut lewat panel Kunci API setelah
     # kode akses dipasang. Matikan dengan BOOTSTRAP_ADMIN_KEY=false.

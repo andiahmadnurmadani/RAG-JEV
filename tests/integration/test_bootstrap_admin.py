@@ -91,6 +91,10 @@ def test_a_fresh_service_gets_one_admin_key(fresh):
     headers = {"Authorization": f"Bearer {key}"}
     assert client.get("/api/v1/settings/access", headers=headers).status_code == 200
     assert client.put("/api/v1/settings/access", json={"code": "kode-bootstrap-1"}, headers=headers).status_code == 200
+    # Kode tersimpan (code_set), tetapi pada mode bawaan gerbangnya tidak dipakai - konsol
+    # dibuka dengan kunci API. Gerbangnya hidup setelah mode itu dimatikan.
+    assert client.get("/api/v1/auth/gate").json()["data"]["code_set"] is True
+    settings.console_api_key_only = False
     assert client.get("/api/v1/auth/gate").json()["data"]["enabled"] is True
 
 
