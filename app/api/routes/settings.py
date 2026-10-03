@@ -32,6 +32,7 @@ from app.core.access import (
     validate_code,
 )
 from app.core.api_keys import ALLOWED_PERMISSIONS, DEFAULT_PERMISSIONS, MAX_ACTIVE_KEYS, registry_for
+from app.core.config import Settings
 from app.core.errors import AppError, ok
 from app.core.logging import get_logger
 from app.jev.systemone import SystemOneClient
@@ -108,7 +109,16 @@ def _settings_path(services: Services) -> Path:
     return Path(services.settings.settings_override_path)
 
 
-def _require_admin(context: TrustedContext) -> None:
+def _require_admin(context: TrustedContext, settings: Settings) -> None:
+    """Layar Pengaturan hanya untuk kredensial admin.
+
+    Pengecualian yang disengaja: saat ``console_api_key_only`` menyala (bawaan), kunci API apa
+    pun yang sah dianggap operator - konsol ini dipakai satu operator, dan mengunci layar
+    Pengaturan membuat kunci biasa tidak bisa mengelola apa pun (termasuk membuat kunci baru).
+    Setel ``CONSOLE_API_KEY_ONLY=false`` untuk kembali ke pemeriksaan izin ``admin``.
+    """
+    if settings.console_api_key_only:
+        return
     context.require("admin")
 
 
@@ -286,7 +296,7 @@ def read_settings(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Masked current configuration (env + stored overrides)."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     services = services_from_request(request)
     body = settings_store.describe(services.settings, _settings_path(services))
     return ok(_decorate_uploads(body, services.settings))
@@ -299,7 +309,7 @@ def update_settings(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Persist overrides, apply them to the live process, and report what changed."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     services = services_from_request(request)
     path = _settings_path(services)
 
@@ -331,7 +341,7 @@ def list_llm_models(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Ask an OpenAI-compatible endpoint which models it serves."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     services = services_from_request(request)
     base = validate_probe_url(_effective(payload.base_url, services.settings.llm_base_url))
     key = _effective(payload.api_key, services.settings.llm_api_key)
@@ -382,7 +392,7 @@ def probe_jev(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """One cheap decision question: does this Jev endpoint answer, and how fast?"""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     services = services_from_request(request)
     settings = services.settings
     provider = _effective(payload.provider, settings.jev_provider)
@@ -482,7 +492,7 @@ def list_api_keys(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Daftar kunci yang bisa memanggil layanan ini. Nilai kunci tidak pernah ikut."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     keys = _env_key_entries(settings) + registry_for(settings).public()
     keys.sort(key=lambda item: (str(item.get("source")) != "registry", str(item.get("label") or "").lower()))
@@ -505,7 +515,7 @@ def create_api_key(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Buat kunci baru. Nilai kunci dikembalikan **sekali** di sini dan tidak disimpan apa adanya."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     tenant = _tenant_fields(payload, context)
     key, entry = registry_for(settings).create(
@@ -539,7 +549,7 @@ def revoke_api_key(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Cabut kunci dari registry. Kunci dari env ditolak di sini (dikelola lewat API_KEYS_JSON)."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     if not str(key_id or "").startswith("key_"):
         raise AppError(
@@ -587,7 +597,7 @@ def read_access(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Apakah konsol terkunci, sesi mana yang aktif, dan berapa lama sesi bertahan."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     return ok(_access_payload(settings, context))
 
@@ -599,7 +609,7 @@ def set_access_code(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Pasang atau ganti kode akses konsol. Mengganti kode langsung mematikan semua sesi lama."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     store = access_store(settings)
     already_set = bool(store.status()["enabled"])
@@ -633,7 +643,7 @@ def clear_access_code(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Matikan kode akses: konsol kembali hanya bisa dibuka dengan API key."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     store = access_store(settings)
     if not store.status()["enabled"]:
@@ -650,7 +660,7 @@ def revoke_all_sessions(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Keluarkan semua sesi konsol, termasuk yang sekarang (kecuali diminta menyisakan satu)."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     keep_current = bool(request.query_params.get("keep_current") in {"1", "true", "yes"})
     except_id = context.session_id if keep_current else ""
@@ -666,7 +676,7 @@ def revoke_one_session(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Keluarkan satu sesi tertentu (mis. perangkat yang hilang)."""
-    _require_admin(context)
+    _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     if not str(session_id or "").startswith("ses_"):
         raise AppError(

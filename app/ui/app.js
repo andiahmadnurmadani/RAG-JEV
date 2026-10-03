@@ -30,6 +30,8 @@ const state = {
   models: [],
   panel: "conn",
   keyContext: null,
+  // True bila layanan berjalan tanpa gerbang kode akses (cukup kunci API).
+  apiKeyOnly: false,
 };
 
 /* --------------------------------------------------------------- utilities */
@@ -1636,6 +1638,20 @@ async function boot() {
   if (state.session) $("btn-logout").hidden = false;
   try {
     const gate = await loadGate();
+    if (gate && gate.api_key_only) {
+      // Konsol tanpa gerbang kode akses: cukup kunci API. Arahkan operator ke panel Koneksi,
+      // dan jangan tampilkan layar kode akses yang tidak akan pernah menerima apa pun.
+      state.apiKeyOnly = true;
+      if (state.key) {
+        const connected = await checkConnection();
+        if (connected) loadDocs();
+      } else {
+        setConnection("warn", "tempel kunci API");
+        note("conn-status", "warn", "Konsol ini tidak memakai kode akses. Tempel <strong>kunci API</strong> sekali di panel <strong>Koneksi</strong> - kunci itu langsung membuka semua fitur, termasuk Pengaturan.");
+        showView("settings");
+      }
+      return;
+    }
     if (gate && gate.enabled && !state.session) {
       showGate("Konsol ini memakai kode akses. Masukkan kodenya untuk mulai.");
       return;

@@ -50,9 +50,14 @@ def read_gate(request: Request) -> Dict[str, Any]:
     status = access.access_store(settings).status()
     default = access.session_lifetime(settings, False)
     remember = access.session_lifetime(settings, True)
+    # ``api_key_only``: konsol tidak memakai gerbang kode akses - cukup tempel API key, dan
+    # kunci itu membuka seluruh layar Pengaturan. Gerbang yang tidak perlu membuat operator
+    # mengira konsol terkunci padahal tidak.
     return ok(
         {
-            "enabled": bool(status["enabled"]),
+            "enabled": bool(status["enabled"]) and not settings.console_api_key_only,
+            "code_set": bool(status["enabled"]),
+            "api_key_only": bool(settings.console_api_key_only),
             "hint": status["hint"] if status["enabled"] else None,
             "set_at": status["set_at"] if status["enabled"] else None,
             "default_lifetime": default,

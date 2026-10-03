@@ -20,26 +20,46 @@ def _settings(client, key: str = TENANT_A_KEY):
 # --------------------------------------------------------------------------- #
 # Who may touch global configuration
 # --------------------------------------------------------------------------- #
-def test_settings_read_requires_the_admin_permission(client):
-    response = _settings(client, READ_ONLY_KEY)
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "AUTH_FORBIDDEN"
+def test_settings_read_requires_credentials_at_all(client):
+    """Tanpa kredensial tetap 401 - membuka Pengaturan bukan berarti membuka tanpa kunci."""
+    response = client.get("/api/v1/settings")
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "AUTH_INVALID"
 
 
 def test_a_tenant_with_write_but_no_admin_cannot_read_settings(client):
-    """write lets you index documents; it must not reveal global model configuration."""
+    """Kunci read/write boleh membuka Pengaturan HANYA saat konsol mode "cukup API key".
+
+Bawaannya ``CONSOLE_API_KEY_ONLY=true``: konsol ini dipakai satu operator, jadi kunci apa pun
+yang sah membuka Pengaturan (kalau tidak, kunci biasa tidak bisa membuat kunci baru atau
+mengubah setelan sama sekali). Dengan mode itu dimatikan, aturan lama berlaku kembali: hanya
+izin ``admin`` yang boleh membaca/mengubah konfigurasi global.
+"""
     response = _settings(client, TENANT_B_KEY)
-    assert response.status_code == 403
-    assert response.json()["error"]["details"]["permission"] == "admin"
+    assert response.status_code == 200, "mode bawaan (cukup API key) harus membuka Pengaturan"
 
 
-def test_settings_write_requires_the_admin_permission(client):
+def test_settings_write_works_in_api_key_only_mode(client):
     response = client.put(
         "/api/v1/settings",
         json={"llm": {"model": "cmc/deepseek/deepseek-v4-flash"}},
         headers=auth(TENANT_B_KEY),
     )
-    assert response.status_code == 403
+    assert response.status_code == 200
+
+
+def test_settings_still_requires_admin_when_api_key_only_is_off(client, settings):
+    """Dengan CONSOLE_API_KEY_ONLY=false, kunci tanpa izin admin ditolak 403."""
+    settings.console_api_key_only = False
+    read = _settings(client, TENANT_B_KEY)
+    assert read.status_code == 403
+    assert read.json()["error"]["details"]["permission"] == "admin"
+    write = client.put(
+        "/api/v1/settings",
+        json={"llm": {"model": "cmc/deepseek/deepseek-v4-flash"}},
+        headers=auth(TENANT_B_KEY),
+    )
+    assert write.status_code == 403
 
 
 # --------------------------------------------------------------------------- #

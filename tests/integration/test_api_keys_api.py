@@ -35,22 +35,28 @@ def _entry_for(client, key_id: str) -> dict:
 # --------------------------------------------------------------------------- #
 # Siapa yang boleh menyentuh kunci
 # --------------------------------------------------------------------------- #
-def test_only_admin_may_list_keys(client):
+def test_any_valid_key_may_list_keys_in_api_key_only_mode(client):
+    """Bawaan: konsol satu operator, kunci apa pun yang sah boleh mengelola kunci."""
+    for key in (TENANT_B_KEY, READ_ONLY_KEY):
+        assert _list(client, key).status_code == 200
+
+
+def test_any_valid_key_may_create_and_revoke_keys_in_api_key_only_mode(client):
+    created = _create(client, TENANT_B_KEY)
+    assert created.status_code == 200, created.text
+    key_id = created.json()["data"]["entry"]["key_id"]
+    assert client.delete(f"{CREATE}/{key_id}", headers=auth(READ_ONLY_KEY)).status_code == 200
+
+
+def test_only_admin_may_manage_keys_when_api_key_only_is_off(client, settings):
+    """CONSOLE_API_KEY_ONLY=false mengembalikan aturan lama: hanya izin admin."""
+    settings.console_api_key_only = False
     for key in (TENANT_B_KEY, READ_ONLY_KEY):
         response = _list(client, key)
         assert response.status_code == 403
         assert response.json()["error"]["details"]["permission"] == "admin"
-
-
-def test_only_admin_may_create_keys(client):
-    response = _create(client, TENANT_B_KEY)
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "AUTH_FORBIDDEN"
-
-
-def test_only_admin_may_revoke_keys(client):
-    response = client.delete(f"{CREATE}/key_deadbeef", headers=auth(READ_ONLY_KEY))
-    assert response.status_code == 403
+    assert _create(client, TENANT_B_KEY).status_code == 403
+    assert client.delete(f"{CREATE}/key_deadbeef", headers=auth(READ_ONLY_KEY)).status_code == 403
 
 
 def test_missing_credentials_cannot_list_keys(client):
@@ -89,10 +95,20 @@ def test_key_hash_is_not_the_key_and_stays_out_of_every_response(client, setting
 
 
 def test_default_permissions_are_read_and_write_not_admin(client):
-    """Kunci baru tidak boleh langsung bisa mengubah konfigurasi global."""
+    """Izin yang DIBERIKAN tetap read+write (bukan admin) - hanya akses konsol yang longgar.
+
+    Bedakan dua hal: kunci baru tidak diberi izin ``admin`` (itu tidak berubah), tetapi pada
+    mode "cukup API key" kunci itu tetap boleh membuka konsol. Dengan mode dimatikan, izinnya
+    kembali menentukan: tanpa admin, Pengaturan ditolak.
+    """
     key = _create(client, label="Bot CS").json()["data"]["key"]
-    assert client.get("/api/v1/settings", headers=auth(key)).status_code == 403
     assert client.get("/api/v1/knowledge", headers=auth(key)).status_code == 200
+    entry = [item for item in _list(client).json()["data"]["keys"] if item.get("label") == "Bot CS"]
+    assert entry and sorted(entry[0]["permissions"]) == ["read", "write"], entry
+
+    settings = client.app.state.services.settings
+    settings.console_api_key_only = False
+    assert client.get("/api/v1/settings", headers=auth(key)).status_code == 403
 
 
 def test_entry_reports_the_permissions_that_were_granted(client):

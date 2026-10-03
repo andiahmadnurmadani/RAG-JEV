@@ -67,11 +67,22 @@ def test_the_gate_reports_whether_the_console_is_locked(client):
     assert body["min_code_length"] >= 6
 
 
-def test_an_admin_key_sets_the_code_and_the_gate_locks(client):
+def test_an_admin_key_sets_the_code_and_the_gate_locks(client, settings):
+    """Kode akses tetap bisa dipasang; gerbang mengunci setelah mode "cukup API key" dimatikan.
+
+    Pada mode bawaan (``CONSOLE_API_KEY_ONLY=true``) gerbangnya sengaja tidak dipakai - kode
+    akses boleh tersimpan, tetapi konsol tetap dibuka dengan kunci API. Jadi kunci gerbangnya
+    diuji dengan mode itu dimatikan.
+    """
     response = _set_code(client)
     assert response.status_code == 200, response.text
     assert CODE not in response.text
     assert response.json()["data"]["access"]["enabled"] is True
+    # Bawaan: gerbang tidak dipakai walau kode sudah dipasang.
+    assert client.get(GATE).json()["data"]["enabled"] is False
+    assert client.get(GATE).json()["data"]["code_set"] is True
+    # Dengan gerbang dihidupkan, konsol terkunci seperti sebelumnya.
+    settings.console_api_key_only = False
     assert client.get(GATE).json()["data"]["enabled"] is True
 
 
@@ -254,7 +265,15 @@ def test_clearing_the_code_returns_the_console_to_api_keys(client):
 # --------------------------------------------------------------------------- #
 # Batas izin: hanya admin
 # --------------------------------------------------------------------------- #
-def test_only_an_admin_may_read_or_change_the_code(client):
+def test_any_valid_key_may_manage_the_code_in_api_key_only_mode(client):
+    """Mode bawaan: kunci apa pun yang sah boleh mengelola kode akses (operator tunggal)."""
+    _set_code(client)
+    assert client.get(ACCESS, headers=auth(READ_ONLY_KEY)).status_code == 200
+    assert client.get(ACCESS).status_code == 401, "tanpa kredensial tetap 401"
+
+
+def test_only_an_admin_may_read_or_change_the_code_when_api_key_only_is_off(client, settings):
+    settings.console_api_key_only = False
     _set_code(client)
     assert client.get(ACCESS, headers=auth(READ_ONLY_KEY)).status_code == 403
     assert (
@@ -265,7 +284,9 @@ def test_only_an_admin_may_read_or_change_the_code(client):
     assert client.get(ACCESS).status_code == 401
 
 
-def test_a_limited_key_cannot_revoke_sessions(client):
+def test_a_limited_key_cannot_revoke_sessions_when_api_key_only_is_off(client, settings):
+    """Dengan mode dimatikan, kunci izin read saja tidak boleh mengeluarkan sesi."""
+    settings.console_api_key_only = False
     _set_code(client)
     _token(client)
     token = _token(client, remember=True)
