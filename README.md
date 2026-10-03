@@ -242,11 +242,16 @@ terbukti dari beberapa pertanyaan yang dijawab `grounded=false` sebelum LLM dipa
 Buka `http://<host>:<port>/ui/` (root `/` dialihkan ke sana). Konsol ini statis, tanpa build
 step dan tanpa CDN, dilayani service yang sama sehingga tidak ada masalah CORS.
 
-**Sekali masuk, lalu tidak perlu apa-apa lagi.** Bila operator sudah memasang **kode akses**,
-kunjungan pertama hanya menampilkan satu isian kode (dan pilihan *Ingat saya* 7 hari). Kode itu
-ditukar menjadi **sesi** yang dikirim di header yang sama dengan API key, sehingga konsol bisa
-membuat kunci API, mengubah setelan, dan mengunggah dokumen **tanpa menempel API key ke mana pun**.
-Ini sekaligus menutup kegagalan lama `AUTH_INVALID: Missing credentials` saat menekan *Buat kunci*.
+**Cukup tempel API key.** Buka konsol, tempel satu **kunci API** di panel *Koneksi* — kunci itu
+membuka seluruh fitur, termasuk layar Pengaturan. Tidak ada kode akses yang diminta, dan kunci
+yang dibuat dari konsol bisa membuka konsol itu sendiri (dulu tidak, karena layar Pengaturan
+menuntut izin `admin` sementara kunci baru hanya `read,write`).
+
+Bila Anda ingin konsol dijaga **kode akses** (opsional), setel `CONSOLE_API_KEY_ONLY=false`:
+kunjungan pertama menampilkan satu isian kode (dan pilihan *Ingat saya* 7 hari), kode itu ditukar
+menjadi **sesi** yang dikirim di header yang sama dengan API key. Lihat
+[docs/console-api-key-only.md](docs/console-api-key-only.md) dan
+[docs/console-access.md](docs/console-access.md).
 
 Ada **dua layar** dan pembagiannya sengaja tegas: halaman utama hanya untuk bekerja, semua
 konfigurasi tinggal di layar Pengaturan.
@@ -269,16 +274,18 @@ dengan navigasi kiri; hanya satu panel tampil sekaligus supaya tidak perlu mengg
 
 | Panel | Isi | Sifat |
 |---|---|---|
-| **Koneksi** | base URL (dari alamat halaman), API key layanan (opsional bila sudah masuk dengan kode akses), knowledge base, tombol Uji koneksi | disimpan di `localStorage` browser |
-| **Akses & Sesi** | status kode akses (potongan tersamar, waktu, pengubah), pemasangan/penggantian kode, dan daftar sesi aktif (perangkat, dibuat, kedaluwarsa, terakhir dipakai, *Ingat saya*, tombol **Keluarkan** per sesi, plus *Keluarkan semua*) | `GET/PUT/DELETE /api/v1/settings/access`, **wajib izin `admin`** |
-| **Kunci API** | daftar semua kunci yang berlaku (termasuk yang dari `API_KEYS_JSON`, ditandai *dari env*), plus pembuatan kunci baru: label, izin (`read` selalu ikut, `write`, `admin`), masa berlaku opsional, dan tenant opsional (hanya untuk kunci berizin `*`). Kunci baru tampil **sekali** dengan tombol Salin; baris kunci punya tombol **Cabut** | `GET/POST/DELETE /api/v1/settings/api-keys`, **wajib izin `admin`** |
-| **Ringkasan** | ringkasan dokumen sebagai knowledge turunan: nyala/mati, jendela per tahap, panjang ringkasan, maks dokumen per pertanyaan | `PUT /api/v1/settings`, **wajib izin `admin`** |
-| **Sumber web** | knowledge dari halaman/situs web & berkas publik: izinkan/matikan, maks halaman, kedalaman tautan, host sama, ambil berkas tertaut, hormati robots.txt, izinkan alamat privat | `PUT /api/v1/settings`, **wajib izin `admin`** |
-| **Model AI** | provider, base URL, API key, model, **batas token jawaban** (`max_tokens`, bawaan 8192 - jawaban panjang seperti daftar tabel terpotong bila terlalu kecil) + tombol **Muat daftar model** (daftar diambil langsung dari `GET {base_url}/models`, 400+ entri pada gateway uji) dengan saringan dan pemilihan klik | `PUT /api/v1/settings`, **wajib izin `admin`** |
+| **Koneksi** | base URL (dari alamat halaman), API key layanan, knowledge base, tombol Uji koneksi | disimpan di `localStorage` browser |
+| **Akses & Sesi** *(hanya bila `CONSOLE_API_KEY_ONLY=false`)* | status kode akses (potongan tersamar, waktu, pengubah), pemasangan/penggantian kode, dan daftar sesi aktif (perangkat, dibuat, kedaluwarsa, terakhir dipakai, *Ingat saya*, tombol **Keluarkan** per sesi, plus *Keluarkan semua*) | `GET/PUT/DELETE /api/v1/settings/access` |
+| **Kunci API** | daftar semua kunci yang berlaku (termasuk yang dari `API_KEYS_JSON`, ditandai *dari env*), plus pembuatan kunci baru: label, izin (`read` selalu ikut, `write`, `admin`), masa berlaku opsional, dan tenant opsional (hanya untuk kunci berizin `*`). Kunci baru tampil **sekali** dengan tombol Salin; baris kunci punya tombol **Cabut** | `GET/POST/DELETE /api/v1/settings/api-keys` |
+| **Ringkasan** | ringkasan dokumen sebagai knowledge turunan: nyala/mati, jendela per tahap, panjang ringkasan, maks dokumen per pertanyaan | `PUT /api/v1/settings` |
+| **Sumber web** | knowledge dari halaman/situs web & berkas publik: izinkan/matikan, maks halaman, kedalaman tautan, host sama, ambil berkas tertaut, hormati robots.txt, izinkan alamat privat | `PUT /api/v1/settings` |
+| **Model AI** | provider, base URL, API key, model, **batas token jawaban** (`max_tokens`, bawaan 8192 - jawaban panjang seperti daftar tabel terpotong bila terlalu kecil) + tombol **Muat daftar model** (daftar diambil langsung dari `GET {base_url}/models`, 400+ entri pada gateway uji) dengan saringan dan pemilihan klik | `PUT /api/v1/settings` |
 | **Jev** | saklar aktif, transport (`systemone` \| `mcp`), endpoint, model, API key, tombol Uji Jev (mengirim satu pertanyaan `noul` sungguhan dan menampilkan latensinya) | idem |
-| **Format berkas** | daftar centang jenis berkas per grup (Dokumen, Presentasi, Spreadsheet, Teks, Gambar) yang boleh jadi knowledge, plus batas ukuran berkas (MB). Format yang belum didukung mesin ini tampil nonaktif beserta alasannya (mis. `program tesseract belum terpasang`). Tombol *Pilih semua yang tersedia* dan *Simpan format* | `PUT /api/v1/settings`, **wajib izin `admin`** |
+| **Format berkas** | daftar centang jenis berkas per grup (Dokumen, Presentasi, Spreadsheet, Teks, Gambar) yang boleh jadi knowledge, plus batas ukuran berkas (MB). Format yang belum didukung mesin ini tampil nonaktif beserta alasannya (mis. `program tesseract belum terpasang`). Tombol *Pilih semua yang tersedia* dan *Simpan format* | `PUT /api/v1/settings` |
 | **Retrieval** | `top_k`, `threshold`, keputusan Jev (otomatis/`knowledge_query`/`knowledge_search`/`knowledge_summary`/`knowledge_extract`), `strict_grounding`, `hybrid`, `reranker` | pilihan per permintaan, hanya di browser |
-| **Retrieval → Dokumen besar** | anggaran konteks (token), `top_k` bawaan, maks. potongan per dokumen, saklar *lengkapi dokumen sampai utuh* | `PUT /api/v1/settings`, **wajib izin `admin`** |
+| **Retrieval → Dokumen besar** | anggaran konteks (token), `top_k` bawaan, maks. potongan per dokumen, saklar *lengkapi dokumen sampai utuh* | `PUT /api/v1/settings` |
+
+Panel di atas adalah layar **Pengaturan**. Pada mode bawaan (`CONSOLE_API_KEY_ONLY=true`) seluruh panel itu terbuka untuk kunci API apa pun yang sah; dengan mode dimatikan, endpoint setelan menuntut izin `admin`.
 
 Aturan yang berlaku di layar ini:
 
@@ -303,11 +310,19 @@ Aturan yang berlaku di layar ini:
 - URL probe divalidasi lebih dulu (`http`/`https`, tanpa kredensial di URL, tanpa alamat
   link-local/metadata, tanpa redirect) karena berasal dari operator.
 
-### Gerbang kode akses: memasang pertama kali
+### Memakai konsol
 
 ```bash
-# 1. pemasangan baru: kunci admin pertama ada di berkas ini (mode 0600, jalurnya juga di log)
+# Bawaan: cukup tempel API key di panel Koneksi. Tidak ada kode akses.
+# Pemasangan baru: kunci admin pertama ada di berkas ini (mode 0600, jalurnya juga di log)
 cat data/bootstrap_admin_key.json        # {"key": "rag_…", …}   → tempel ke panel Koneksi
+# Setelah itu seluruh layar Pengaturan terbuka; buat kunci sendiri di panel Kunci API.
+```
+
+**Opsional — gerbang kode akses** (`CONSOLE_API_KEY_ONLY=false`):
+
+```bash
+# 1. tempel kunci bootstrap di panel Koneksi
 # 2. Pengaturan → Akses & Sesi → isi "Kode akses baru" dua kali → Simpan kode
 # 3. Keluar, masuk lagi dengan kode itu (centang "Ingat saya" bila perlu)
 # 4. Pengaturan → Kunci API → cabut "kunci bootstrap", lalu hapus berkasnya di server

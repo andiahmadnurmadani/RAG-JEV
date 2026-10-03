@@ -360,6 +360,9 @@ function showView(name) {
 
 function selectPanel(name) {
   state.panel = PANELS.indexOf(name) === -1 ? "conn" : name;
+  // Panel Akses & Sesi hanya relevan bila konsol memang memakai kode akses. Pada mode
+  // "cukup API key" panelnya disembunyikan supaya tidak ada setelan mati yang membingungkan.
+  if (state.apiKeyOnly && state.panel === "access") state.panel = "conn";
   document.querySelectorAll("#settings-nav [data-panel]").forEach((button) => {
     const on = button.dataset.panel === state.panel;
     button.setAttribute("aria-selected", on ? "true" : "false");
@@ -368,6 +371,18 @@ function selectPanel(name) {
     section.hidden = section.dataset.panel !== state.panel;
   });
   if (state.panel === "access") loadAccess();
+}
+
+// Sembunyikan/tampilkan bagian yang hanya berguna saat gerbang kode akses dipakai.
+function applyConsoleMode() {
+  const apiKeyOnly = !!state.apiKeyOnly;
+  document.querySelectorAll("#settings-nav [data-panel='access']").forEach((node) => {
+    node.hidden = apiKeyOnly;
+  });
+  const accessPanel = document.querySelector("#settings-panels > [data-panel='access']");
+  if (accessPanel) accessPanel.hidden = apiKeyOnly || state.panel !== "access";
+  const logout = $("btn-logout");
+  if (logout) logout.hidden = apiKeyOnly || !state.session;
 }
 
 function currentView() {
@@ -1635,13 +1650,15 @@ async function boot() {
   restore();
   wire();
   showView(currentView());
-  if (state.session) $("btn-logout").hidden = false;
+  // Tombol Keluar hanya bermakna bila ada sesi (bukan pada mode "cukup API key");
+  // applyConsoleMode() di bawah menetapkan keadaan akhirnya setelah mode diketahui.
   try {
     const gate = await loadGate();
     if (gate && gate.api_key_only) {
       // Konsol tanpa gerbang kode akses: cukup kunci API. Arahkan operator ke panel Koneksi,
       // dan jangan tampilkan layar kode akses yang tidak akan pernah menerima apa pun.
       state.apiKeyOnly = true;
+      applyConsoleMode();
       if (state.key) {
         const connected = await checkConnection();
         if (connected) loadDocs();
@@ -1652,6 +1669,7 @@ async function boot() {
       }
       return;
     }
+    applyConsoleMode();
     if (gate && gate.enabled && !state.session) {
       showGate("Konsol ini memakai kode akses. Masukkan kodenya untuk mulai.");
       return;

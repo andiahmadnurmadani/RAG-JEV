@@ -1,11 +1,16 @@
 # Konsol, kode akses, dan sesi
 
-Konsol di `/ui/` adalah satu halaman statis di peramban. Sebelum fitur ini, halaman itu harus
-menempel **API key** ke kolom Koneksi untuk bisa memanggil layanan — dan pada pemasangan baru
-belum ada kunci apa pun, sehingga menekan **Buat kunci** gagal dengan:
+> **Bawaannya sekarang: konsol cukup dengan API key.** Lihat
+> [Konsol dengan kunci API saja](console-api-key-only.md). Pada mode itu gerbang kode akses
+> tidak dipakai, panel **Akses & Sesi** disembunyikan, dan halaman ini menjelaskan mode
+> **opsional** yang diaktifkan dengan `CONSOLE_API_KEY_ONLY=false`.
+
+Konsol di `/ui/` adalah satu halaman statis di peramban. Pada mode kode akses, halaman itu bisa
+dibuka tanpa menempel **API key** — pada pemasangan baru belum ada kunci apa pun, sehingga
+menekan **Buat kunci** gagal dengan:
 
 ```
-AUTH_INVALID: Missing credentials: send Authorization: Bearer <API key>
+AUTH_INVALID: Missing credentials (header Authorization belum dikirim)
 ```
 
 Pesan itu bukan bug di endpoint kunci, melainkan tanda konsol tidak punya kredensial untuk
@@ -19,11 +24,13 @@ konsol bisa dipakai tanpa menempel apa pun.
 1. Buka `/ui/` → muncul satu isian **Kode akses** (dan pilihan *Ingat saya*).
 2. Kode benar → layanan menerbitkan **token sesi** (`sess_…`) yang disimpan di peramban.
 3. Token itu dikirim di header yang **sama** dengan API key:
-   `Authorization: Bearer sess_…`. Semua endpoint lain tidak perlu tahu bedanya.
+   `Authorization: Bearer <token sesi>`. Semua endpoint lain tidak perlu tahu bedanya.
 4. Sesi bertahan 12 jam (`UI_SESSION_HOURS`); dengan *Ingat saya* menjadi 7 hari
    (`UI_REMEMBER_DAYS`).
-5. Kode akses dipasang/diganti di **Pengaturan → Akses & Sesi** (butuh izin `admin`).
-6. Tombol **Keluar** di header mencabut sesi yang sedang dipakai.
+5. Kode akses dipasang/diganti di **Pengaturan → Akses & Sesi** (butuh izin `admin`; panel itu
+   hanya muncul bila gerbang dipakai).
+6. Tombol **Keluar** di header mencabut sesi yang sedang dipakai (juga hanya muncul saat ada
+   sesi).
 
 ```mermaid
 sequenceDiagram
