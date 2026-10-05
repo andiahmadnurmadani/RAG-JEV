@@ -883,6 +883,10 @@ async function loadSettings() {
       ? "Kunci tersimpan " + (llm.api_key_hint || "") + ". Biarkan kosong untuk memakainya."
       : "Belum ada kunci tersimpan. Isi bila endpoint memerlukannya.";
     $("llm-max-tokens").value = llm.max_tokens != null ? llm.max_tokens : 8192;
+    $("llm-temperature").value = llm.temperature != null ? llm.temperature : 0.1;
+    $("llm-top-p").value = llm.top_p != null ? llm.top_p : 0.9;
+    $("llm-frequency-penalty").value = llm.frequency_penalty != null ? llm.frequency_penalty : 0.2;
+    $("llm-repair-attempts").value = llm.repair_attempts != null ? llm.repair_attempts : 1;
     $("jev-enabled").checked = !!jev.enabled;
     $("jev-provider").value = jev.provider || "systemone";
     $("jev-url").value = jev.systemone_url || "";
@@ -931,6 +935,10 @@ async function saveLlm() {
     base_url: $("llm-base").value.trim(),
     model: $("llm-model").value.trim(),
     max_tokens: Number($("llm-max-tokens").value) || 8192,
+    temperature: Number($("llm-temperature").value),
+    top_p: Number($("llm-top-p").value),
+    frequency_penalty: Number($("llm-frequency-penalty").value),
+    repair_attempts: Number($("llm-repair-attempts").value),
   };
   const key = $("llm-key").value;
   if (key) payload.api_key = key;
@@ -1104,6 +1112,8 @@ function renderRetrievalService(retrieval) {
   if (retrieval.final_top_k != null) $("s-topk").value = retrieval.final_top_k;
   if (retrieval.max_chunks_per_document != null) $("s-maxchunks").value = retrieval.max_chunks_per_document;
   $("s-expand").checked = retrieval.context_expand_documents !== false;
+  $("s-reranker").checked = retrieval.reranker_enabled !== false;
+  if (retrieval.reranker_provider) $("s-reranker-provider").value = retrieval.reranker_provider;
 }
 
 async function saveRetrievalService() {
@@ -1113,6 +1123,8 @@ async function saveRetrievalService() {
       final_top_k: Number($("s-topk").value) || 12,
       max_chunks_per_document: Number($("s-maxchunks").value) || 8,
       context_expand_documents: $("s-expand").checked,
+      reranker_enabled: $("s-reranker").checked,
+      reranker_provider: $("s-reranker-provider").value,
     },
   };
   note("retr-svc-status", "info", "Menyimpan setelan konteks...");

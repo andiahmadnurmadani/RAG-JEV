@@ -63,11 +63,18 @@ class Settings(BaseSettings):
     embedding_max_length: int = 1024
 
     # ---- reranker (PRD 8.3) ----------------------------------------------
-    reranker_provider: Literal["sentence_transformers", "fastembed", "none"] = "fastembed"
+    # ``lexical`` = reranker bawaan tanpa dependensi (lihat app/rag/reranker.py): skor silang
+    # berbasis IDF + bonus frasa + kedekatan kata. Ini yang dipakai bila model neural tidak
+    # terpasang - jauh lebih baik daripada ``none`` yang hanya meneruskan urutan fusi.
+    # ``none`` tetap tersedia sebagai pilihan sadar untuk mematikan reranking.
+    reranker_provider: Literal["sentence_transformers", "fastembed", "lexical", "none"] = "lexical"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     # fastembed has no ONNX port of bge-reranker-v2-m3; this is its multilingual equivalent
     reranker_fastembed_model: str = "jinaai/jina-reranker-v2-base-multilingual"
     reranker_device: str = "cpu"
+    # Bila provider neural diminta tetapi pustakanya tidak ada di image, jangan gagal: turun ke
+    # reranker leksikal dan laporkan penggantinya (agar operator tahu kualitasnya bukan neural).
+    reranker_fallback_to_lexical: bool = True
     # both        -> keep embedder + reranker resident (needs >= ~6 GB free)
     # sequential  -> load one at a time (low-RAM machines)
     model_residency: Literal["both", "sequential"] = "sequential"
@@ -126,6 +133,15 @@ class Settings(BaseSettings):
     # 5.941 token keluaran, jadi 4096 pun masih terpotong; 8192 menyelesaikannya (finish_reason=stop).
     llm_max_tokens: int = 8192
     llm_temperature: float = 0.1
+    # Sampling. Sebelumnya kedua nilai ini TIDAK pernah dikirim, jadi endpoint memakai
+    # bawaannya sendiri. top_p yang lebih rapat memangkas ekor distribusi - tempat kata aneh
+    # seperti "pemb.cgiian" / "praktikumaccording" (campur bahasa, kata terpotong) berasal.
+    # 0 = jangan kirim (biarkan endpoint memutuskan).
+    llm_top_p: float = 0.9
+    llm_frequency_penalty: float = 0.2
+    llm_presence_penalty: float = 0.0
+    # Perbaikan jawaban yang terdeteksi rusak (kata tercampur/terpotong). 0 = matikan.
+    llm_repair_attempts: int = 1
     llm_context_chars: int = 96000
 
     # ---- Jev orchestration (PRD 18, 19) ----------------------------------

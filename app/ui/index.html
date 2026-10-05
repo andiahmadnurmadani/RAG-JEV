@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261003a">
+<link rel="stylesheet" href="style.css?v=20261003b">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -265,6 +265,26 @@
             <input type="number" id="llm-max-tokens" min="64" max="64000" step="128" value="8192">
             <span class="help">Jawaban panjang (daftar tabel/kolom) butuh ruang lebih. Terlalu kecil = jawaban terpotong di tengah.</span>
           </div>
+          <div class="field">
+            <label for="llm-temperature">Temperature</label>
+            <input type="number" id="llm-temperature" min="0" max="2" step="0.05" value="0.1">
+            <span class="help">Rendah = jawaban patuh pada konteks. Naikkan hanya bila jawaban terasa terlalu kaku.</span>
+          </div>
+          <div class="field">
+            <label for="llm-top-p">top_p</label>
+            <input type="number" id="llm-top-p" min="0" max="1" step="0.05" value="0.9">
+            <span class="help">Membatasi pilihan kata model. Lebih rendah = lebih sedikit kata aneh/tercampur. 0 = serahkan ke endpoint.</span>
+          </div>
+          <div class="field">
+            <label for="llm-frequency-penalty">frequency_penalty</label>
+            <input type="number" id="llm-frequency-penalty" min="-2" max="2" step="0.1" value="0.2">
+            <span class="help">Menekan kata yang terulang terus. 0 = tidak dipakai.</span>
+          </div>
+          <div class="field">
+            <label for="llm-repair-attempts">Perbaikan teks rusak</label>
+            <input type="number" id="llm-repair-attempts" min="0" max="3" step="1" value="1">
+            <span class="help">Bila jawaban memuat kata terpotong/tercampur (mis. "pemb.cgiian"), model diminta menulis ulang tanpa mengubah fakta. 0 = matikan.</span>
+          </div>
         </div>
         <div class="model-picker" id="llm-picker" hidden>
           <div class="head">
@@ -404,6 +424,19 @@
         </div>
         <div class="row">
           <label class="switch" for="s-expand"><input type="checkbox" id="s-expand"><span class="track"></span><span>lengkapi dokumen sampai utuh</span></label>
+          <label class="switch" for="s-reranker"><input type="checkbox" id="s-reranker" checked><span class="track"></span><span>pakai reranker</span></label>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="s-reranker-provider">Mesin reranker</label>
+            <select id="s-reranker-provider">
+              <option value="lexical">lexical (bawaan, tanpa model - IDF + frasa)</option>
+              <option value="fastembed">fastembed (ONNX, perlu image dengan model)</option>
+              <option value="sentence_transformers">sentence_transformers (bge-reranker, perlu torch)</option>
+              <option value="none">none (matikan reranking)</option>
+            </select>
+            <span class="help">Reranker menilai ulang hasil pencarian lalu menyusunnya kembali. Bila mesin neural tidak terpasang di server, layanan otomatis memakai <span class="mono">lexical</span> dan mencatatnya di log.</span>
+          </div>
         </div>
         <div class="group-foot">
           <button class="btn primary" id="btn-save-retr-svc" type="button">Simpan setelan konteks</button>
@@ -601,7 +634,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261003a"></script>
-<script src="app.js?v=20261003a"></script>
+<script src="markdown.js?v=20261003b"></script>
+<script src="app.js?v=20261003b"></script>
 </body>
 </html>

@@ -36,6 +36,12 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "api_key": ("llm_api_key", "secret"),
         # Batas token keluaran: yang menentukan jawaban panjang selesai atau terpotong.
         "max_tokens": ("llm_max_tokens", "int"),
+        # Sampling & perbaikan teks rusak. Bisa disetel tanpa redeploy karena kualitas keluaran
+        # bergantung pada model yang dipakai - dan model dipilih dari layar ini.
+        "temperature": ("llm_temperature", "float"),
+        "top_p": ("llm_top_p", "float"),
+        "frequency_penalty": ("llm_frequency_penalty", "float"),
+        "repair_attempts": ("llm_repair_attempts", "int"),
     },
     "jev": {
         "enabled": ("jev_enabled", "bool"),
@@ -62,6 +68,7 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "max_chunks_per_document": ("max_chunks_per_document", "int"),
         "context_expand_documents": ("context_expand_documents", "bool"),
         "reranker_enabled": ("reranker_enabled", "bool"),
+        "reranker_provider": ("reranker_provider", "str"),
         "strict_grounding": ("strict_grounding", "bool"),
     },
     # Ringkasan dokumen (knowledge turunan). Global seperti setelan lain: satu tenant yang
@@ -121,6 +128,11 @@ def apply_overrides(settings: Any, overrides: Dict[str, Dict[str, Any]]) -> list
                     value = int(value)
                 except (TypeError, ValueError):
                     continue
+            elif kind == "float":
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    continue
             elif kind == "list":
                 items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
                 value = ",".join(str(item).strip().lower() for item in items if str(item).strip())
@@ -151,6 +163,11 @@ def describe(settings: Any, path: Optional[Path] = None) -> Dict[str, Any]:
             elif kind == "int":
                 try:
                     block[field] = int(value)
+                except (TypeError, ValueError):
+                    block[field] = None
+            elif kind == "float":
+                try:
+                    block[field] = float(value)
                 except (TypeError, ValueError):
                     block[field] = None
             else:

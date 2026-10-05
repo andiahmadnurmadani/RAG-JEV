@@ -62,6 +62,14 @@ Formatting:
   field names, and literal values copied from the document.
 - Do not wrap the whole answer in a code fence, and do not repeat the question.
 
+Language and spelling (important - the answer is read by people):
+- Write every word out in full. Never split a word, never join two words without a space, and
+  never insert punctuation inside a word.
+- Keep one language throughout: answer in the question's language and do not blend in words from
+  another language. Copy technical terms, column names, and proper nouns exactly as written in
+  the context.
+- If you are unsure of a spelling, use the spelling that appears in the context.
+
 {untrusted_notice}
 Cite sources with the bracketed context number, for example [1] or [2][3].
 Answer in the same language as the user's question.""".format(untrusted_notice=UNTRUSTED_NOTICE)
@@ -250,16 +258,58 @@ class LLMClient:
             "temperature": settings.llm_temperature if temperature is None else temperature,
             "max_tokens": settings.llm_max_tokens if max_tokens is None else max_tokens,
         }
+        # Sampling: sebelumnya dua nilai ini tidak pernah dikirim, jadi endpoint memakai
+        # bawaannya. top_p yang lebih rapat memangkas ekor distribusi - sumber kata aneh
+        # ("pemb.cgiian", "praktikumaccording": kata terpotong / bocor bahasa lain).
+        # Nilai 0 berarti "jangan kirim", supaya operator bisa menyerahkan ke endpoint.
+        #
+        # PENTING: sebagian gateway menolak parameter yang tidak dikenal dengan 400 (dan ada yang
+        # membalas pesan menyesatkan seperti "insufficient credits"). Karena itu parameter
+        # opsional dikirim sebagai "percobaan", dan bila ditolak kita ulangi tanpa parameter itu -
+        # bukan menggagalkan seluruh permintaan. Kegagalan permanen hanya untuk permintaan dasar.
+        optional: Dict[str, Any] = {}
+        if settings.llm_top_p and settings.llm_top_p > 0:
+            optional["top_p"] = settings.llm_top_p
+        if settings.llm_frequency_penalty:
+            optional["frequency_penalty"] = settings.llm_frequency_penalty
+        if settings.llm_presence_penalty:
+            optional["presence_penalty"] = settings.llm_presence_penalty
         if response_format:
             body["response_format"] = response_format
 
         started = time.perf_counter()
-        try:
-            response = httpx.post(url, json=body, headers=headers, timeout=timeout or settings.llm_timeout)
-            response.raise_for_status()
-            payload = response.json()
-        except Exception as exc:  # noqa: BLE001
-            raise AppError("LLM_FAILED", f"LLM request failed: {exc}") from exc
+        payload = None
+        rejected: List[str] = []
+        last_error: Optional[str] = None
+        for attempt in range(len(optional) + 1):
+            request_body = dict(body)
+            request_body.update(optional)
+            try:
+                response = httpx.post(url, json=request_body, headers=headers, timeout=timeout or settings.llm_timeout)
+                response.raise_for_status()
+                payload = response.json()
+                if rejected:
+                    logger.warning(
+                        "gateway menolak parameter sampling %s; permintaan dilanjutkan tanpanya",
+                        ", ".join(rejected),
+                    )
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = f"{exc}"
+                # 4xx/422 -> parameter opsional mungkin penyebabnya: buang satu, coba lagi.
+                # Galat jaringan/5xx langsung dilaporkan (bukan soal parameter).
+                if optional and ("400" in last_error or "422" in last_error):
+                    dropped = sorted(optional)[-1]
+                    optional.pop(dropped, None)
+                    rejected.append(dropped)
+                    continue
+                raise AppError("LLM_FAILED", f"LLM request failed: {exc}") from exc
+        if payload is None:
+            # Semua percobaan gagal: laporkan galat ASLI terakhir, jangan menyalahkan parameter.
+            raise AppError(
+                "LLM_FAILED",
+                f"LLM request failed: {last_error or 'endpoint menolak setiap permintaan'}",
+            )
 
         latency_ms = (time.perf_counter() - started) * 1000
         try:
@@ -335,6 +385,23 @@ class Generator:
         text, usage = self._client.chat(messages)
         truncated = self._looks_truncated(text, usage)
         grounded = not truncated and not self._looks_like_refusal(text)
+
+        # Perbaikan teks rusak: model gratis kadang menghasilkan kata terpotong/tercampur
+        # ("pemb.cgiian", "hanyaLEMpar", "praktikumaccording"). Faktanya benar, tapi pemakai
+        # melihat kata aneh. Bila terdeteksi, minta model menulis ulang jawaban yang SAMA -
+        # tanpa menambah/mengurangi fakta - lalu pakai hasil yang lebih bersih.
+        corrupted = self._corrupted_words(text, context.text)
+        repaired = False
+        if corrupted and not truncated and self._settings.llm_repair_attempts > 0:
+            cleaned = self._repair_text(text, corrupted)
+            if cleaned and not self._corrupted_words(cleaned, context.text):
+                logger.info(
+                    "jawaban diperbaiki: %d kata rusak (%s) -> bersih",
+                    len(corrupted),
+                    ", ".join(sorted(corrupted)[:5]),
+                )
+                text, repaired = cleaned, True
+
         if truncated:
             logger.warning(
                 "jawaban model terpotong (finish_reason=%r, output_tokens=%s, batas=%s)",
@@ -344,6 +411,12 @@ class Generator:
             )
         elif strict_grounding and not grounded:
             logger.info("strict grounding: model reported insufficient context (%s)", no_candidate_reason or "low_relevance")
+        elif corrupted and not repaired:
+            logger.warning(
+                "jawaban masih memuat %d kata rusak setelah perbaikan: %s",
+                len(corrupted),
+                ", ".join(sorted(corrupted)[:5]),
+            )
         return GeneratedAnswer(
             answer=text,
             grounded=grounded,
@@ -352,6 +425,119 @@ class Generator:
             citations_used=extract_citation_numbers(text),
             truncated=truncated,
         )
+
+    # ------------------------------------------------------------------ #
+    # Kata umum bahasa Indonesia/Inggris: boleh muncul di jawaban tanpa ada di konteks.
+    _COMMON_WORDS = frozenset(
+        """
+        yang dan atau untuk dari pada dengan ini itu tidak ada adalah akan bila jika karena
+        juga saja lebih paling dapat bisa harus oleh dalam ke di se para setiap agar supaya
+        sebagai antara tanpa setelah sebelum saat ketika namun tetapi sedangkan serta yaitu
+        bahwa hal tersebut berikut jumlah total nilai data tabel kolom baris bagian isi
+        catatan contoh berikutnya pertama kedua ketiga akhir awal semua seluruh hanya
+        the and for from with this that not are was were will can may must should have has
+        table column row data value total number note example section first second third
+        """.split()
+    )
+
+    def _corrupted_words(self, text: str, context_text: str = "") -> set:
+        """Kumpulkan kata yang tampak rusak: terpotong, tercampur, atau salah tempel.
+
+        Contoh nyata dari model gratis: ``pemb.cgiian`` (titik di tengah kata),
+        ``hanyaLEMpar`` (huruf besar di tengah kata kecil), ``praktikumaccording`` (dua kata
+        berbeda bahasa menempel). Ini bukan salah ketik pemakai - teks datang dari model.
+
+        Pemeriksaannya sengaja konservatif. Sinyal utamanya: sebuah kata yang **tidak ada di
+        konteks** (dokumen sumber) dan juga bukan kata umum - padahal jawaban seharusnya hanya
+        memakai kata dari konteks. Istilah teknis, nama kolom, dan singkatan yang sah tetap
+        lolos karena mereka memang hadir di konteks.
+        """
+        if not text:
+            return set()
+        context_lower = (context_text or "").lower()
+        context_words = set(re.findall(r"[a-z\u00C0-\u024F]{2,}", context_lower))
+        broken = set()
+
+        # (a) Kata yang mengandung titik DI TENGAH (mis. "pemb.cgiian"). Titik di akhir
+        #     kalimat tidak dihitung: kita hanya melihat "huruf.huruf" tanpa spasi di sekitarnya.
+        for token in re.findall(r"[A-Za-z\u00C0-\u024F]{2,}(?:\.[A-Za-z\u00C0-\u024F]{2,})+", text):
+            cleaned = token.replace(".", "")
+            if cleaned.lower() in self._COMMON_WORDS or cleaned.lower() in context_words:
+                continue
+            if self._looks_corrupted(cleaned):
+                broken.add(token)
+
+        # (b) Kata biasa.
+        for token in re.findall(r"[A-Za-z\u00C0-\u024F]{2,}", text):
+            lowered = token.lower()
+            if lowered in self._COMMON_WORDS or lowered in context_words:
+                continue
+            if len(lowered) < 5:
+                continue
+            if self._looks_corrupted(token):
+                broken.add(token)
+        return broken
+
+    @staticmethod
+    def _looks_corrupted(token: str) -> bool:
+        """Pola yang hampir pasti rusak (bukan sekadar kata asing yang belum dikenal)."""
+        if len(token) < 5:
+            return False
+        # 1. huruf besar di tengah kata kecil: "hanyaLEMpar", "praktikumAccording".
+        #    camelCase yang lazim ("knowledgeBase", "employeeId") dikecualikan.
+        if re.search(r"[a-z][A-Z]{2,}", token):
+            return True
+        if re.search(r"[a-z]{3,}[A-Z][a-z]", token) and not re.fullmatch(r"[a-z]+[A-Z][a-z]+", token):
+            return True
+        # 2. huruf yang sama tiga kali atau lebih: "pemb.cgiiian", "aaaan".
+        if re.search(r"([A-Za-z])\1{2,}", token):
+            return True
+        # 3. konsonan beruntun sangat panjang: "cgiian" -> "cgii", "praktikumacc" -> "ktkmcc".
+        if re.search(r"[bcdfghjklmnpqrstvwxyz]{5,}", token.lower()):
+            return True
+        # 4. dua kata bahasa berbeda menempel: "praktikumaccording" - ekor kata Inggris yang
+        #    menempel pada kata Indonesia tanpa pemisah. Dikenali dari sufiks Inggris khas.
+        if re.search(r"[a-z]{4,}(according|because|however|therefore|which|where|about|between)$", token.lower()):
+            return True
+        # 5. Pola vokal yang tidak mungkin dalam suku kata Indonesia/Inggris: "cgiian" punya
+        #    "iia" (dua vokal sama berturut lalu vokal lain). Kata sah seperti "sesuai"
+        #    ("uai": tiga vokal BERBEDA) dikecualikan - hanya vokal sama yang berulang ditandai.
+        lowered = token.lower()
+        if re.search(r"([aeiou])\1[aeiou]", lowered):
+            return True
+        return False
+
+    def _repair_text(self, text: str, corrupted: set) -> str:
+        """Minta model menulis ulang jawaban yang SAMA dengan ejaan bersih.
+
+        Aturannya ketat: jangan menambah, mengurangi, atau mengubah fakta - hanya perbaiki kata
+        yang rusak. Jawaban tetap harus dari konteks yang sama (tidak ada panggilan retrieval).
+        """
+        instruction = (
+            "Perbaiki ejaan jawaban berikut. JANGAN menambah, mengurangi, atau mengubah fakta, "
+            "angka, nama, atau urutan. Hanya betulkan kata yang terpotong atau tercampur bahasa "
+            "lain, dan pastikan setiap kata ditulis utuh dalam bahasa jawaban. "
+            "Kembalikan jawaban yang sudah diperbaiki saja, tanpa komentar.\n\n"
+            f"Kata yang tampak rusak: {', '.join(sorted(corrupted)[:20])}"
+        )
+        try:
+            cleaned, _ = self._client.chat(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"{instruction}\n\nJawaban:\n{text}"},
+                ],
+                temperature=0.0,
+            )
+        except Exception as exc:  # noqa: BLE001 - perbaikan bersifat opsional
+            logger.warning("perbaikan jawaban gagal: %s", exc)
+            return ""
+        candidate = (cleaned or "").strip()
+        # Tolak hasil yang jelas merusak: kosong, jauh lebih pendek, atau kehilangan sitasi.
+        if len(candidate) < max(40, int(len(text) * 0.6)):
+            return ""
+        if extract_citation_numbers(text) and not extract_citation_numbers(candidate):
+            return ""
+        return candidate
 
     def _looks_truncated(self, text: str, usage: LLMUsage) -> bool:
         """True bila model berhenti karena batas token keluaran.

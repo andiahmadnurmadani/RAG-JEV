@@ -219,6 +219,18 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
         "strict_grounding": None,
         "context_expand_documents": None,
     }
+    # Provider reranker dibatasi ke nilai yang dikenal: salah ketik akan membuat build_reranker
+    # diam-diam memakai 'none' (tanpa reranking sama sekali).
+    if section and "reranker_provider" in section:
+        allowed = {"sentence_transformers", "fastembed", "lexical", "none"}
+        value = str(section["reranker_provider"] or "").strip().lower()
+        if value not in allowed:
+            raise AppError(
+                "VALIDATION_ERROR",
+                "reranker_provider harus salah satu dari: " + ", ".join(sorted(allowed)),
+                details={"reranker_provider": section["reranker_provider"]},
+            )
+        section["reranker_provider"] = value
     for field, bounds in limits.items():
         if not section or field not in section or bounds is None:
             continue
@@ -248,6 +260,28 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
                 details={"max_tokens": value},
             )
         llm["max_tokens"] = value
+
+    # Sampling & perbaikan teks rusak: batasnya dijaga agar tidak ada nilai yang justru
+    # merusak keluaran (top_p 0 membuat model tanpa pilihan; temperature tinggi menambah acak).
+    for field, low, high in (
+        ("temperature", 0.0, 2.0),
+        ("top_p", 0.0, 1.0),
+        ("frequency_penalty", -2.0, 2.0),
+        ("repair_attempts", 0, 3),
+    ):
+        if field not in llm:
+            continue
+        try:
+            value = float(llm[field]) if field != "repair_attempts" else int(llm[field])
+        except (TypeError, ValueError) as exc:
+            raise AppError("VALIDATION_ERROR", f"llm.{field} harus berupa angka") from exc
+        if not low <= value <= high:
+            raise AppError(
+                "VALIDATION_ERROR",
+                f"llm.{field} harus antara {low} dan {high}",
+                details={f"llm.{field}": value},
+            )
+        llm[field] = value
 
     web = updates.get("web") or {}
     for field, low, high in (
