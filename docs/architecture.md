@@ -120,7 +120,11 @@ sehingga `chunk_0001` dari dokumen berbeda tidak saling menimpa.
    walaupun index tercemar.
 4. **Dua sumbu kegagalan independen.** `reranker_provider=none` membuat rerank menjadi
    no-op dan **melewatkan** gerbang threshold (skor pseudo tidak boleh memfilter);
-   gerbang tetap aktif ketika reranker asli dipakai.
+   gerbang tetap aktif ketika reranker asli dipakai. Bawaan sekarang `lexical` - reranker
+   lintas-encoder tanpa dependensi yang menilai ulang lewat IDF kueri, frasa utuh, kedekatan
+   kata, dan cakupan kueri, lalu menormalkan skor terbaik ke 1.0. Provider neural yang
+   pustakanya tidak terpasang turun ke `lexical` **dan mencatatnya di log**, bukan diam-diam
+   berakhir `none` (yang bukan reranker sama sekali).
 5. **Jev adalah decision layer.** Kegagalan Jev → heuristik deterministik, bukan 5xx.
    Aplikasi tetap menjawab, dan respons jujur menyebut `source="fallback"`.
 

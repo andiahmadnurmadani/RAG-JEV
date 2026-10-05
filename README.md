@@ -279,7 +279,7 @@ dengan navigasi kiri; hanya satu panel tampil sekaligus supaya tidak perlu mengg
 | **Kunci API** | daftar semua kunci yang berlaku (termasuk yang dari `API_KEYS_JSON`, ditandai *dari env*), plus pembuatan kunci baru: label, izin (`read` selalu ikut, `write`, `admin`), masa berlaku opsional, dan tenant opsional (hanya untuk kunci berizin `*`). Kunci baru tampil **sekali** dengan tombol Salin; baris kunci punya tombol **Cabut** | `GET/POST/DELETE /api/v1/settings/api-keys` |
 | **Ringkasan** | ringkasan dokumen sebagai knowledge turunan: nyala/mati, jendela per tahap, panjang ringkasan, maks dokumen per pertanyaan | `PUT /api/v1/settings` |
 | **Sumber web** | knowledge dari halaman/situs web & berkas publik: izinkan/matikan, maks halaman, kedalaman tautan, host sama, ambil berkas tertaut, hormati robots.txt, izinkan alamat privat | `PUT /api/v1/settings` |
-| **Model AI** | provider, base URL, API key, model, **batas token jawaban** (`max_tokens`, bawaan 8192 - jawaban panjang seperti daftar tabel terpotong bila terlalu kecil) + tombol **Muat daftar model** (daftar diambil langsung dari `GET {base_url}/models`, 400+ entri pada gateway uji) dengan saringan dan pemilihan klik | `PUT /api/v1/settings` |
+| **Model AI** | provider, base URL, API key, model, **batas token jawaban** (`max_tokens`, bawaan 8192 - jawaban panjang seperti daftar tabel terpotong bila terlalu kecil), **temperature**, **top_p**, **frequency_penalty**, **perbaikan teks rusak** (`repair_attempts`) + tombol **Muat daftar model** (daftar diambil langsung dari `GET {base_url}/models`, 400+ entri pada gateway uji) dengan saringan dan pemilihan klik | `PUT /api/v1/settings` |
 | **Jev** | saklar aktif, transport (`systemone` \| `mcp`), endpoint, model, API key, tombol Uji Jev (mengirim satu pertanyaan `noul` sungguhan dan menampilkan latensinya) | idem |
 | **Format berkas** | daftar centang jenis berkas per grup (Dokumen, Presentasi, Spreadsheet, Teks, Gambar) yang boleh jadi knowledge, plus batas ukuran berkas (MB). Format yang belum didukung mesin ini tampil nonaktif beserta alasannya (mis. `program tesseract belum terpasang`). Tombol *Pilih semua yang tersedia* dan *Simpan format* | `PUT /api/v1/settings` |
 | **Retrieval** | `top_k`, `threshold`, keputusan Jev (otomatis/`knowledge_query`/`knowledge_search`/`knowledge_summary`/`knowledge_extract`), `strict_grounding`, `hybrid`, `reranker` | pilihan per permintaan, hanya di browser |
@@ -419,7 +419,9 @@ Semua perilaku model/provider dipilih lewat env var (`.env.example` memuat semua
 | Variabel | Arti |
 |---|---|
 | `EMBEDDING_PROVIDER` | `sentence_transformers` (BGE-M3, PRD) / `fastembed` (ONNX int8) / `http` / `hash` |
-| `RERANKER_PROVIDER` | `sentence_transformers` (bge-reranker-v2-m3, PRD) / `fastembed` (jina-reranker-v2 multilingual) / `none` |
+| `RERANKER_PROVIDER` | `lexical` (bawaan, tanpa dependensi - IDF + frasa + kedekatan + cakupan) / `sentence_transformers` (bge-reranker-v2-m3, PRD) / `fastembed` (jina-reranker-v2 multilingual) / `none` (matikan) |
+| `LLM_TOP_P`, `LLM_FREQUENCY_PENALTY` | `0.9` / `0.2` | Pengetatan sampling keluaran. `top_p` adalah pengatur utama ekor distribusi - sumber kata terpotong/tercampur. `0` = jangan kirim (serahkan ke endpoint). |
+| `LLM_REPAIR_ATTEMPTS` | `1` | Berapa kali jawaban yang memuat kata rusak diminta ditulis ulang tanpa mengubah fakta. `0` = matikan. |
 | `LLM_PROVIDER` | `openai_compatible` / `ollama` / `mock` (tanpa model) |
 | `LLM_BASE_URL`, `LLM_MODEL` | endpoint chat-completions + model (default PRD `Qwen/Qwen3-4B`, lihat "Model LLM" di bawah) |
 | `JEV_ENABLED`, `JEV_MCP_URL`, `JEV_API_KEY` | orkestrasi Jev; jika gagal → fallback heuristik, bukan error |
