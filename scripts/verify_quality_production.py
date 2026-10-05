@@ -94,8 +94,23 @@ def main() -> int:
         print("  HTTP", status, "| finish_reason:", usage.get("finish_reason"), "| panjang:", len(answer))
         for line in answer.splitlines()[:10]:
             print("   |", line[:130])
-        rusak = KATA_RUSAK.findall(answer)
-        print("  penanda kata rusak:", rusak[:6] or "tidak ada")
+        # findall dengan grup mengembalikan '' saat alternasi pertama cocok - pakai finditer
+        # supaya kata yang benar-benar cocok terlihat, bukan daftar string kosong.
+        rusak = [m.group(0) for m in KATA_RUSAK.finditer(answer)]
+        print("  cocok regex kasar   :", rusak[:10] or "tidak ada", "(bisa positif palsu: domain/akronim)")
+        # Sekaligus pakai detektor sungguhan dari kode produksi.
+        try:
+            import sys
+            # Di image, /srv/app adalah ISI paket `app` (bukan repo root) - jadi /srv yang
+            # ditambahkan ke sys.path, bukan /srv/app.
+            if "/srv" not in sys.path:
+                sys.path.insert(0, "/srv")
+            from app.core.config import get_settings
+            from app.rag.generator import Generator
+            det = Generator(get_settings())._corrupted_words(answer, answer)
+            print("  detektor internal    :", sorted(det)[:10] or "tidak ada")
+        except Exception as exc:  # noqa: BLE001
+            print("  detektor internal    : (gagal)", type(exc).__name__)
     except Exception:  # noqa: BLE001
         print("  HTTP", status, body[:250])
     return 0
