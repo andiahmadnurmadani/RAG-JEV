@@ -39,6 +39,12 @@ KASUS_TEKS = [
     ("Mahasiswa memahami instruksi dan mengerjakan latihan dengan teliti.", False),
     ("The update and delete operations are demonstrated in class.", False),
     ("Gunakan knowledgeBase dan frontend untuk membangun antarmuka.", False),
+    # Kata menempel pada angka tahun - kasus produksi nyata ("Laporan Tahunan2025").
+    ("**Laporan Tahunan2025 — PT Bank Pembangunan Daerah**", True),
+    ("Data tahun2026 dan laporan2025 tersedia.", True),
+    # Angka tahun dengan spasi wajar, dan kode internal yang memang mengandung tahun.
+    ("Laporan Tahunan 2025 sudah diterbitkan.", False),
+    ("Dokumen PSL2025 adalah kode internal yang sah.", False),
 ]
 
 

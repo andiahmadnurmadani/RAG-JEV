@@ -49,6 +49,12 @@ KASUS = [
     ("jenis_cuti dan tanggal_mulai wajib diisi.", False),
     # Istilah teknis umum - TIDAK boleh ditandai
     ("Gunakan knowledgeBase dan frontend untuk membangun antarmuka.", False),
+    # Kata menempel pada angka tahun (kasus produksi nyata) - HARUS ditandai
+    ("**Laporan Tahunan2025 — PT Bank Pembangunan Daerah**", True),
+    ("Data tahun2026 dan laporan2025 tersedia.", True),
+    # Angka tahun yang wajar - TIDAK boleh ditandai
+    ("Laporan Tahunan 2025 sudah diterbitkan.", False),
+    ("Dokumen PSL2025 adalah kode internal yang sah.", False),
 ]
 
 print(f"{'HASIL':8s} {'HARAP':8s} KALIMAT")

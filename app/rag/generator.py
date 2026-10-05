@@ -476,6 +476,17 @@ class Generator:
                 continue
             if self._looks_corrupted(token):
                 broken.add(token)
+
+        # (c) Kata yang menempel pada angka tahun ("Laporan Tahunan2025"): huruf kecil langsung
+        #     diikuti 4 digit. Kasus nyata dari produksi. Diperiksa hanya bila bentuk itu TIDAK
+        #     ada di konteks - istilah sah seperti "SQLite3" atau "PSL2025" tetap lolos karena
+        #     memang tertulis begitu di dokumen.
+        for token in re.findall(r"[A-Za-z\u00C0-\u024F]{2,}(?:19|20)\d{2}", text):
+            if token.lower() in context_words:
+                continue
+            # Angka di akhir setelah huruf kecil = hampir pasti dua kata yang menempel.
+            if re.search(r"[a-z\u00C0-\u024F](?:19|20)\d{2}$", token):
+                broken.add(token)
         return broken
 
     @staticmethod

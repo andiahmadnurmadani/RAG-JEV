@@ -130,3 +130,18 @@ Hasil suite: **468 lulus, 1 dilewati**.
   pekerjaan tersendiri, bukan bagian dari perbaikan teks rusak.
 * **Streaming** — menambah streaming adalah pekerjaan besar (SSE + UI). Lihat catatan di
   `docs/verification.md`: jawaban saat ini muncul sekaligus, bukan token demi token.
+
+## Temuan lanjutan dari produksi
+
+Verifikasi di `rag.aiones.app` menemukan dua hal yang tidak terlihat di lingkungan uji:
+
+1. **Env produksi masih `RERANKER_PROVIDER=none`.** Kode sudah punya reranker leksikal, tetapi
+   nilai env di Dockerfile belum ikut berubah - jadi reranker tidak pernah dipakai. Sekarang
+   Dockerfile menyetel `RERANKER_PROVIDER=lexical` dan `RERANKER_ENABLED=true` sebagai bawaan
+   image; nilainya tetap bisa diubah dari Pengaturan tanpa redeploy.
+2. **Kata menempel pada angka tahun** (`Laporan Tahunan2025`). Ini pola yang berbeda dari yang
+   sudah ditangani: huruf kecil langsung diikuti empat digit. Detektornya sekarang menandai pola
+   itu **hanya bila bentuk tersebut tidak ada di konteks** - sehingga istilah sah seperti
+   `PSL2025` (tertulis begitu di dokumen) tidak ikut ditandai, sedangkan `Tahunan2025` ditandai.
+
+Detektor kini diuji dengan **17 kalimat** (5 rusak, 12 normal) dan semuanya lulus.

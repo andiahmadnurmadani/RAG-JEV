@@ -62,7 +62,9 @@ ENV QDRANT_URL="" \
     API_KEYS_PATH=/data/api_keys.json \
     ACCESS_PATH=/data/access.json \
     SESSIONS_PATH=/data/sessions.json \
-    DOCS_SITE_DIR=/srv/site
+    DOCS_SITE_DIR=/srv/site \
+    RERANKER_PROVIDER=lexical \
+    RERANKER_ENABLED=true
 
 VOLUME ["/data"]
 
