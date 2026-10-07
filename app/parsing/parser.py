@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from app.core.errors import AppError
 from app.parsing import doc_binary, ppt_binary, sheet_dates, xls_binary
 from app.parsing.formats import EXTENSION_MAP
+from app.parsing.sanitize import clean_text, looks_like_binary_garbage
 
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"[ \t\u00a0]+")
@@ -976,6 +977,25 @@ def parse_document(content: bytes, document_name: str, declared_mime: str = "") 
             f"No parser for '{document_name}' ({(declared_mime or suffix) or 'unknown type'})",
         )
     parsed = parser(content, document_name)
+    # Bersihkan setiap halaman sebelum lanjut: karakter kontrol dan spasi berlebih dari berkas
+    # lama membuat potongan tampak rusak. Dilakukan di sini supaya SEMUA jalur (unggahan,
+    # berkas publik, crawl) memakai aturan yang sama.
+    for page in parsed.pages:
+        page.text = clean_text(page.text)
+    parsed.pages = [page for page in parsed.pages if page.text.strip()]
+    if not parsed.pages:
+        raise AppError("INDEXING_FAILED", f"'{document_name}' tidak memuat teks yang bisa dibaca")
+
+    # Berkas yang isinya sebenarnya biner tetapi lolos jalur teks (mis. .txt berisi dump PDF,
+    # atau PDF yang rusak sehingga teksnya keluar sebagai byte) tidak boleh disimpan: potongan
+    # seperti itu tidak bisa dicari dan mencemari jawaban model.
+    garbage, reason = looks_like_binary_garbage(parsed.text)
+    if garbage:
+        raise AppError(
+            "INDEXING_FAILED",
+            f"'{document_name}' tampaknya bukan teks yang bisa dibaca ({reason})",
+        )
+
     parsed.language = detect_language(parsed.text)
     return parsed
 

@@ -229,6 +229,25 @@ def summarize_document(
     final = final.strip()
     if not final:
         return SummaryResult(error="ringkasan akhir kosong", passes=passes, truncated=truncated)
+
+    # Ringkasan ini akan DISIMPAN ke Qdrant sebagai knowledge turunan, jadi ia harus bersih
+    # sebelum masuk - bukan hanya dibersihkan saat ditampilkan. Aksara dari tulisan lain yang
+    # tidak ada di dokumen aslinya adalah selipan model; kalau dibiarkan, ia ikut terbawa ke
+    # jawaban pertanyaan berikutnya. Yang memang ada di dokumen tetap dipertahankan.
+    source_text = "\n".join(str(part.get("content") or "") for part in parts)
+    from app.parsing.sanitize import foreign_tokens, strip_foreign_tokens
+
+    slipped = foreign_tokens(final, allowed=[source_text])
+    if slipped:
+        logger.info(
+            "ringkasan dokumen %s memuat aksara asing dari model; dibuang: %s",
+            document_id,
+            ", ".join(slipped[:5]),
+        )
+        final = strip_foreign_tokens(final, slipped)
+        if not final.strip():
+            return SummaryResult(error="ringkasan hanya berisi aksara asing; dibuang", passes=passes)
+
     if stopped_early:
         partial_reason = partial_reason or "waktu ringkasan habis; ringkasan mencakup bagian yang sempat diproses"
     return SummaryResult(

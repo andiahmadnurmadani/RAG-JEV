@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from app.core.logging import get_logger
 from app.core.urlguard import UrlRejected, assert_public_url, normalize_for_visit
 from app.parsing.parser import _html_to_text, parse_document  # noqa: PLC2701 - satu paket
+from app.parsing.sanitize import clean_text, looks_like_binary_garbage
 
 logger = get_logger(__name__)
 
@@ -65,12 +66,51 @@ class FetchedPage:
     content: bytes
 
     @property
+    def sniffed_type(self) -> str:
+        """Tipe sebenarnya menurut ISI berkas, bukan menurut header.
+
+        Header ``content-type`` sering salah pada berkas yang disajikan server statis:
+        PDF dijawab sebagai ``text/plain``, atau tanpa header sama sekali. Bila isi dipercaya
+        begitu saja, byte mentah PDF di-decode jadi teks dan masuk ke Qdrant sebagai
+        "knowledge" - potongan yang tidak bisa dicari dan tidak bisa dibaca.
+
+        Urutannya sengaja: header yang JELAS (html/text) dihormati lebih dulu, lalu magic bytes
+        menang atas header yang menyesatkan (mis. ``text/plain`` berisi ``%PDF``).
+        """
+        head = (self.content or b"")[:1024]
+        if head[:4] == b"%PDF":
+            return "application/pdf"
+        if head[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png"
+        if head[:3] == b"\xff\xd8\xff":
+            return "image/jpeg"
+        if head[:2] == b"PK" and b"[" not in head[:200]:
+            # Arsip/OOXML: bentuknya ditentukan nama berkas, bukan di sini.
+            return "application/zip"
+        if head[:5] == b"{\\rtf":
+            return "application/rtf"
+        if head[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+            return "application/x-ole-storage"
+        return self.content_type
+
+    @property
     def is_html(self) -> bool:
-        return any(kind in self.content_type for kind in HTML_TYPES)
+        kind = self.sniffed_type
+        # PDF/arsip yang disajikan sebagai text/html tetap bukan HTML.
+        if kind in ("application/pdf", "application/zip", "image/png", "image/jpeg"):
+            return False
+        return any(part in kind for part in HTML_TYPES)
 
     @property
     def is_text(self) -> bool:
-        return any(kind in self.content_type for kind in TEXT_TYPES)
+        kind = self.sniffed_type
+        if kind in ("application/pdf", "application/zip", "image/png", "image/jpeg",
+                    "application/x-ole-storage", "application/rtf"):
+            return False
+        if any(part in kind for part in HTML_TYPES):
+            return False
+        return any(part in kind for part in TEXT_TYPES) or not kind
+
 
 
 @dataclass
@@ -243,12 +283,20 @@ def page_to_text(page: FetchedPage) -> Tuple[str, str, List[str]]:
         match = _TITLE_RE.search(html)
         title = _html_to_text(match.group(1)).strip()[:160] if match else ""
         links = extract_links(html, page.final_url)
-        return title, text, links
+        return title, clean_text(text), links
     if page.is_text:
-        return "", _decode(raw).strip(), []
+        text = clean_text(_decode(raw))
+        # Isi yang sebenarnya berkas biner (PDF/arsip yang dijawab sebagai text/plain) TIDAK
+        # boleh masuk knowledge: byte-nya tidak bisa dicari, dan potongan sampahnya lalu ikut
+        # terkirim ke model. Lebih baik dilaporkan sebagai dilewati.
+        garbage, reason = looks_like_binary_garbage(text)
+        if garbage:
+            raise WebFetchError(f"{page.final_url}: bukan teks ({reason})")
+        return "", text, []
     # Bukan HTML/teks: biarkan parser berkas yang menangani (PDF, DOCX, ...).
-    parsed = parse_document(raw, _name_from_url(page.final_url), page.content_type)
+    parsed = parse_document(raw, _name_from_url(page.final_url), page.sniffed_type)
     return parsed.document_name, parsed.text, []
+
 
 
 def _name_from_url(url: str) -> str:

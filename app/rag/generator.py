@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.parsing.sanitize import foreign_tokens, strip_foreign_tokens
 from app.rag.context import UNTRUSTED_NOTICE, BuiltContext
 
 logger = get_logger(__name__)
@@ -70,6 +71,13 @@ Language and spelling (important - the answer is read by people):
   the context.
 - If you are unsure of a spelling, use the spelling that appears in the context.
 
+Script (important):
+- Write using ONLY the letters of the answer's language (Latin letters for Indonesian and
+  English). Never insert characters from another writing system - Chinese, Japanese, Korean,
+  Arabic, Cyrillic, Thai, or any other script - even for a single word.
+- Do not translate a term into another script. If a term in the context is written in another
+  script, keep it exactly as it is in the context; otherwise leave it out.
+
 {untrusted_notice}
 Cite sources with the bracketed context number, for example [1] or [2][3].
 Answer in the same language as the user's question.""".format(untrusted_notice=UNTRUSTED_NOTICE)
@@ -105,6 +113,9 @@ Aturan:
 7. Bahasa ringkasan mengikuti bahasa dokumen (Indonesia bila dokumennya Indonesia).
 8. Tulis dalam Markdown (bukan berkas, bukan lampiran): judul `##` untuk bagian, `-` untuk
    daftar, dan tabel Markdown bila isinya memang tabel. Pakai `code` untuk nama kolom/tabel.
+9. Pakai HANYA huruf Latin. Jangan menyisipkan aksara dari tulisan lain - China, Jepang, Korea,
+   Arab, Kiril, Thai - walau hanya satu kata. Bila istilah di konteks tertulis dengan aksara
+   lain, salin apa adanya; kalau tidak, jangan ditulis.
 
 """
     + UNTRUSTED_NOTICE
@@ -127,6 +138,9 @@ Rules:
 7. Write the summary in the document's language.
 8. Write in Markdown (not a file, not an attachment): `##` headings for sections, `-` for lists,
    and a Markdown table when the content is tabular. Use `code` for column/table names.
+9. Use ONLY Latin letters. Never insert characters from another writing system - Chinese,
+   Japanese, Korean, Arabic, Cyrillic, Thai - not even for a single word. If a term in the
+   context is written in another script, copy it as is; otherwise leave it out.
 
 """
     + UNTRUSTED_NOTICE
@@ -402,6 +416,16 @@ class Generator:
                 )
                 text, repaired = cleaned, True
 
+        # Aksara asing yang model selipkan ("dokumen finals完整的"): faktanya benar, tapi pemakai
+        # melihat aksara yang tidak bisa dibaca. Hanya dibuang bila TIDAK ada di konteks - kutipan
+        # asing yang memang ada di dokumen adalah fakta dan harus utuh.
+        text, foreign = self._strip_foreign_script(text, context.text)
+        if foreign:
+            logger.info(
+                "aksara asing dibuang dari jawaban: %s",
+                ", ".join(foreign[:5]),
+            )
+
         if truncated:
             logger.warning(
                 "jawaban model terpotong (finish_reason=%r, output_tokens=%s, batas=%s)",
@@ -439,6 +463,20 @@ class Generator:
         table column row data value total number note example section first second third
         """.split()
     )
+
+    def _strip_foreign_script(self, text: str, context_text: str = "") -> tuple:
+        """Buang aksara dari tulisan lain yang TIDAK ada di konteks.
+
+        Mengembalikan ``(teks_bersih, daftar_yang_dibuang)``. Perbandingan dengan konteks itu
+        intinya: dokumen yang memang berbahasa/beraksara lain tidak boleh dirusak. Yang dibuang
+        hanya selipan model - aksara yang muncul di jawaban tetapi tidak ada di sumbernya.
+        """
+        if not text:
+            return text, []
+        tokens = foreign_tokens(text, allowed=[context_text])
+        if not tokens:
+            return text, []
+        return strip_foreign_tokens(text, tokens), tokens
 
     def _corrupted_words(self, text: str, context_text: str = "") -> set:
         """Kumpulkan kata yang tampak rusak: terpotong, tercampur, atau salah tempel.
