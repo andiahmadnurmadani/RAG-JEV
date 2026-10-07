@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     # dokumennya utuh, bukan tiga potongan paling mirip.
     max_chunks_per_document: int = 8
     answer_language: Literal["id", "en"] = "id"
+    # Buang aksara dari tulisan lain (China, Jepang, Korea, Arab, Kiril, Thai) yang DISELIPKAN
+    # model ke jawaban/ringkasan. Aksara yang memang ada di dokumen tetap utuh - perbandingan
+    # dengan konteks yang menentukan. Matikan bila knowledge memang berbahasa/beraksara lain.
+    text_strip_foreign: bool = True
 
     # ---- konteks yang dikirim ke LLM (PRD 12) ----------------------------
     # Anggaran token untuk blok RETRIEVED_CONTEXT. Ini yang menentukan berapa bagian dokumen

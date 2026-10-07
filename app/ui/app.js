@@ -887,6 +887,7 @@ async function loadSettings() {
     $("llm-top-p").value = llm.top_p != null ? llm.top_p : 0.9;
     $("llm-frequency-penalty").value = llm.frequency_penalty != null ? llm.frequency_penalty : 0.2;
     $("llm-repair-attempts").value = llm.repair_attempts != null ? llm.repair_attempts : 1;
+    $("llm-strip-foreign").checked = llm.strip_foreign_scripts !== false;
     $("jev-enabled").checked = !!jev.enabled;
     $("jev-provider").value = jev.provider || "systemone";
     $("jev-url").value = jev.systemone_url || "";
@@ -939,6 +940,7 @@ async function saveLlm() {
     top_p: Number($("llm-top-p").value),
     frequency_penalty: Number($("llm-frequency-penalty").value),
     repair_attempts: Number($("llm-repair-attempts").value),
+    strip_foreign_scripts: $("llm-strip-foreign").checked,
   };
   const key = $("llm-key").value;
   if (key) payload.api_key = key;

@@ -473,6 +473,8 @@ class Generator:
         """
         if not text:
             return text, []
+        if not getattr(self._settings, "text_strip_foreign", True):
+            return text, []
         tokens = foreign_tokens(text, allowed=[context_text])
         if not tokens:
             return text, []

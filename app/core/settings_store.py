@@ -42,6 +42,8 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "top_p": ("llm_top_p", "float"),
         "frequency_penalty": ("llm_frequency_penalty", "float"),
         "repair_attempts": ("llm_repair_attempts", "int"),
+        # Buang aksara dari tulisan lain yang diselipkan model (bukan yang ada di dokumen).
+        "strip_foreign_scripts": ("text_strip_foreign", "bool"),
     },
     "jev": {
         "enabled": ("jev_enabled", "bool"),

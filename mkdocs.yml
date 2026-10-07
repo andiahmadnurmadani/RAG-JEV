@@ -92,6 +92,7 @@ nav:
       - Ringkasan dokumen: document-summary.md
       - Jawaban Markdown: markdown-answers.md
       - Kualitas jawaban (teks bersih & reranker): answer-quality.md
+      - Teks bersih (aksara asing & sampah biner): text-hygiene.md
       - Isolasi tenant: tenant-isolation.md
   - Operasi:
       - Deploy & menjalankan: deployment.md

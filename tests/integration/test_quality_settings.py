@@ -78,3 +78,17 @@ def test_the_console_exposes_the_new_fields():
                     "s-reranker", "s-reranker-provider"):
         assert f'id="{element}"' in page, f"{element} tidak ada di index.html"
         assert f'$("{element}")' in script, f"{element} tidak dipakai app.js"
+
+
+def test_foreign_script_switch_is_editable(client, settings):
+    """Layanan yang knowledge-nya beraksara lain harus bisa mematikan filter ini."""
+    sections = client.get("/api/v1/settings", headers=auth(TENANT_A_KEY)).json()["data"]["sections"]
+    assert "strip_foreign_scripts" in sections["llm"]
+
+    response = client.put(
+        "/api/v1/settings",
+        json={"llm": {"strip_foreign_scripts": False}},
+        headers=auth(TENANT_A_KEY),
+    )
+    assert response.status_code == 200, response.text
+    assert settings.text_strip_foreign is False

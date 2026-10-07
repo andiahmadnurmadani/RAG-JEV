@@ -237,7 +237,11 @@ def summarize_document(
     source_text = "\n".join(str(part.get("content") or "") for part in parts)
     from app.parsing.sanitize import foreign_tokens, strip_foreign_tokens
 
-    slipped = foreign_tokens(final, allowed=[source_text])
+    slipped = (
+        foreign_tokens(final, allowed=[source_text])
+        if getattr(settings, "text_strip_foreign", True)
+        else []
+    )
     if slipped:
         logger.info(
             "ringkasan dokumen %s memuat aksara asing dari model; dibuang: %s",

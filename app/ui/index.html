@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261003b">
+<link rel="stylesheet" href="style.css?v=20261007a">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -284,6 +284,10 @@
             <label for="llm-repair-attempts">Perbaikan teks rusak</label>
             <input type="number" id="llm-repair-attempts" min="0" max="3" step="1" value="1">
             <span class="help">Bila jawaban memuat kata terpotong/tercampur (mis. "pemb.cgiian"), model diminta menulis ulang tanpa mengubah fakta. 0 = matikan.</span>
+          </div>
+          <div class="field">
+            <label class="switch" for="llm-strip-foreign"><input type="checkbox" id="llm-strip-foreign" checked><span class="track"></span><span>Buang aksara asing selipan model</span></label>
+            <span class="help">Model gratis kadang menyelipkan aksara China/Jepang/Arab di tengah kalimat. Saklar ini membuangnya &mdash; tetapi aksara yang <strong>memang ada di dokumen</strong> tetap dipertahankan. Matikan bila knowledge Anda memang berbahasa asing.</span>
           </div>
         </div>
         <div class="model-picker" id="llm-picker" hidden>
@@ -634,7 +638,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261003b"></script>
-<script src="app.js?v=20261003b"></script>
+<script src="markdown.js?v=20261007a"></script>
+<script src="app.js?v=20261007a"></script>
 </body>
 </html>

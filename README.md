@@ -422,6 +422,7 @@ Semua perilaku model/provider dipilih lewat env var (`.env.example` memuat semua
 | `RERANKER_PROVIDER` | `lexical` (bawaan, tanpa dependensi - IDF + frasa + kedekatan + cakupan) / `sentence_transformers` (bge-reranker-v2-m3, PRD) / `fastembed` (jina-reranker-v2 multilingual) / `none` (matikan) |
 | `LLM_TOP_P`, `LLM_FREQUENCY_PENALTY` | `0.9` / `0.2` | Pengetatan sampling keluaran. `top_p` adalah pengatur utama ekor distribusi - sumber kata terpotong/tercampur. `0` = jangan kirim (serahkan ke endpoint). |
 | `LLM_REPAIR_ATTEMPTS` | `1` | Berapa kali jawaban yang memuat kata rusak diminta ditulis ulang tanpa mengubah fakta. `0` = matikan. |
+| `TEXT_STRIP_FOREIGN` | `true` | Buang aksara dari tulisan lain (China, Jepang, Arab, Kiril, ...) yang **diselipkan model**. Aksara yang memang ada di dokumen tetap utuh. Lihat `docs/text-hygiene.md`. |
 | `LLM_PROVIDER` | `openai_compatible` / `ollama` / `mock` (tanpa model) |
 | `LLM_BASE_URL`, `LLM_MODEL` | endpoint chat-completions + model (default PRD `Qwen/Qwen3-4B`, lihat "Model LLM" di bawah) |
 | `JEV_ENABLED`, `JEV_MCP_URL`, `JEV_API_KEY` | orkestrasi Jev; jika gagal → fallback heuristik, bukan error |
