@@ -112,7 +112,30 @@ class RagPipeline:
         result.elapsed_ms = round(elapsed * 1000, 2)
         observe("retrieval_latency", elapsed)
         incr("retrieval_requests")
+
+        # Potongan sampah dari data LAMA (byte biner PDF yang dulu ikut tersimpan) masih ada di
+        # indeks. Ia tidak bisa dicari dengan baik dan mencemari jawaban, jadi dibuang di jalur
+        # baca - cara yang tidak menyentuh data produksi sama sekali. Pengindeksan baru sudah
+        # menolaknya di hulu, ini hanya jaring untuk sisa yang sudah terlanjur tersimpan.
+        result.candidates = self._drop_garbage_candidates(result.candidates)
         return result
+
+    @staticmethod
+    def _drop_garbage_candidates(candidates: Sequence[Candidate]) -> List[Candidate]:
+        """Buang kandidat yang isinya ternyata byte biner (bukan teks yang bisa dibaca)."""
+        from app.parsing.sanitize import looks_like_binary_garbage
+
+        kept: List[Candidate] = []
+        dropped = 0
+        for candidate in candidates:
+            garbage, _reason = looks_like_binary_garbage(candidate.content)
+            if garbage:
+                dropped += 1
+                continue
+            kept.append(candidate)
+        if dropped:
+            logger.warning("membuang %d potongan sampah biner dari hasil pencarian", dropped)
+        return kept
 
     # ------------------------------------------------------------------ #
     def _attach_summaries(
@@ -134,6 +157,14 @@ class RagPipeline:
         """
         if getattr(decision, "capability", "") != "knowledge_summary":
             return list(candidates)
+
+        # Teks isi dokumen yang ikut terambil. Dipakai sebagai pembanding saat membersihkan
+        # ringkasan lama: ringkasan yang tersimpan SEBELUM filter dipasang masih bisa memuat
+        # aksara selipan model, dan karena ringkasan ikut jadi konteks, filter jawaban akan
+        # menganggapnya "sah". Dibandingkan dengan isi dokumen yang nyata, selipan itu ketahuan.
+        document_text = "\n".join(
+            candidate.content for candidate in candidates if not candidate.is_summary
+        )
 
         allowed = {str(item) for item in (document_ids or []) if item}
         wanted: List[str] = []
@@ -163,6 +194,9 @@ class RagPipeline:
             content = str(payload.get("content") or "").strip()
             if not content:
                 continue
+            content = self._clean_stored_summary(content, document_text, document_id)
+            if not content:
+                continue
             added.append(
                 Candidate(
                     chunk_id=str(payload.get("chunk_id") or SUMMARY_CHUNK_ID),
@@ -180,6 +214,28 @@ class RagPipeline:
         if not added:
             return list(candidates)
         return added + list(candidates)
+
+    def _clean_stored_summary(self, content: str, document_text: str, document_id: str) -> str:
+        """Bersihkan ringkasan yang sudah tersimpan dari aksara selipan model.
+
+        Ringkasan yang dibuat SEBELUM filter dipasang masih bisa memuat aksara asing. Karena
+        ringkasan ikut menjadi konteks jawaban, membiarkannya berarti jawaban berikutnya ikut
+        membawa aksara itu. Pembandingnya isi dokumen yang benar-benar terambil: aksara yang
+        memang ada di dokumen adalah fakta, yang tidak ada adalah selipan.
+        """
+        if not content or not getattr(self._settings, "text_strip_foreign", True):
+            return content
+        from app.parsing.sanitize import foreign_tokens, strip_foreign_tokens
+
+        slipped = foreign_tokens(content, allowed=[document_text])
+        if not slipped:
+            return content
+        logger.info(
+            "ringkasan tersimpan dokumen %s memuat aksara asing; dibersihkan: %s",
+            document_id,
+            ", ".join(slipped[:5]),
+        )
+        return strip_foreign_tokens(content, slipped)
 
     # ------------------------------------------------------------------ #
     # ------------------------------------------------------------------ #

@@ -147,3 +147,37 @@ def test_a_pdf_served_as_text_is_not_stored_as_knowledge():
         assert not isinstance(exc, AssertionError)
     else:
         raise AssertionError("dump PDF tidak boleh menghasilkan teks biasa")
+
+
+# ------------------------------------------------- data lama yang sudah tersimpan
+
+def test_garbage_chunks_already_in_the_index_are_dropped_at_read_time(settings):
+    """Potongan sampah dari data LAMA dibuang di jalur baca, tanpa menyentuh produksi."""
+    from app.rag.pipeline import RagPipeline
+    from app.rag.retriever import Candidate
+
+    bersih = Candidate(chunk_id="c1", document_id="d1", content="Laporan tahunan memuat total aset.")
+    sampah = Candidate(chunk_id="c2", document_id="d1", content=PDF_DUMP)
+    hasil = RagPipeline._drop_garbage_candidates([bersih, sampah])
+    assert [c.chunk_id for c in hasil] == ["c1"], "hanya potongan sampah yang dibuang"
+
+
+def test_a_stored_summary_with_a_model_slip_is_cleaned_when_read(settings):
+    """Ringkasan lama yang memuat aksara selipan dibersihkan saat dibaca (data lama tidak diubah)."""
+    from app.rag.pipeline import RagPipeline
+
+    class FakeRetriever:
+        pass
+
+    pipeline = RagPipeline.__new__(RagPipeline)
+    pipeline._settings = settings  # type: ignore[attr-defined]
+
+    isi_dokumen = "Dokumen final perakitan memuat wiring dan firmware."
+    ringkasan_lama = "Dokumen final perakitan完整的 memuat wiring dan firmware."
+    bersih = pipeline._clean_stored_summary(ringkasan_lama, isi_dokumen, "d1")
+    assert "完" not in bersih and "整" not in bersih
+    assert "perakitan" in bersih, "kata Latin tidak boleh ikut hilang"
+
+    # Ringkasan yang memang memuat aksara dari dokumen tidak diubah.
+    ringkasan_sah = "| 地 | Shield kabel |"
+    assert pipeline._clean_stored_summary(ringkasan_sah, "| 地 | Shield |", "d1") == ringkasan_sah
