@@ -12,14 +12,18 @@ from app.rag.retriever import Candidate, RetrievalResult
 
 
 class StubRetriever:
-    def __init__(self, candidates: List[Candidate], *, reranked: bool = True) -> None:
+    """Kontrak retriever: gerbang relevansi (``relevant``) diputuskan oleh retriever sendiri."""
+
+    def __init__(self, candidates: List[Candidate], *, reranked: bool = True, minimum: float = 0.35) -> None:
         self._candidates = candidates
         self._reranked = reranked
+        self._minimum = minimum
         self.calls = 0
 
     def retrieve(self, **kwargs) -> RetrievalResult:
         self.calls += 1
         best = max((candidate.score for candidate in self._candidates), default=0.0)
+        relevant = bool(self._candidates) and (not self._reranked or best >= self._minimum)
         return RetrievalResult(
             candidates=list(self._candidates),
             dense_hits=len(self._candidates),
@@ -27,6 +31,8 @@ class StubRetriever:
             fused_count=len(self._candidates),
             reranked=self._reranked,
             best_score=best,
+            relevant=relevant,
+            gate="lexical" if relevant else "below_min_relevance",
         )
 
 
@@ -89,9 +95,8 @@ def _candidate(score: float) -> Candidate:
 
 
 def test_below_threshold_never_reaches_the_llm(settings):
-    settings.relevance_threshold = 0.5
     generator = CountingGenerator()
-    pipeline = RagPipeline(settings, StubRetriever([_candidate(0.12)]), generator, StubJev())
+    pipeline = RagPipeline(settings, StubRetriever([_candidate(0.12)], minimum=0.5), generator, StubJev())
 
     result = pipeline.answer(query="prosedur cuti", context=Tenant(), knowledge_base_id="kb_hr")
 
@@ -102,9 +107,8 @@ def test_below_threshold_never_reaches_the_llm(settings):
 
 
 def test_above_threshold_produces_a_cited_answer(settings):
-    settings.relevance_threshold = 0.3
     generator = CountingGenerator()
-    pipeline = RagPipeline(settings, StubRetriever([_candidate(0.82)]), generator, StubJev())
+    pipeline = RagPipeline(settings, StubRetriever([_candidate(0.82)], minimum=0.3), generator, StubJev())
 
     result = pipeline.answer(query="prosedur cuti", context=Tenant(), knowledge_base_id="kb_hr")
 
@@ -138,9 +142,8 @@ def test_strict_grounding_drops_a_non_committal_answer(settings):
                 usage=LLMUsage(model=self.model),
             )
 
-    settings.relevance_threshold = 0.1
     generator = RefusingGenerator()
-    pipeline = RagPipeline(settings, StubRetriever([_candidate(0.9)]), generator, StubJev())
+    pipeline = RagPipeline(settings, StubRetriever([_candidate(0.9)], minimum=0.1), generator, StubJev())
 
     result = pipeline.answer(
         query="prosedur cuti", context=Tenant(), knowledge_base_id="kb_hr", strict_grounding=True

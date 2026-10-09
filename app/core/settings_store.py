@@ -72,6 +72,13 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "reranker_enabled": ("reranker_enabled", "bool"),
         "reranker_provider": ("reranker_provider", "str"),
         "strict_grounding": ("strict_grounding", "bool"),
+        # Kualitas jawaban: gerbang "tidak ditemukan", ambang relatif, konteks di sekitar hasil.
+        "min_relevance": ("min_relevance", "float"),
+        "relevance_threshold": ("relevance_threshold", "float"),
+        "context_neighbor_chunks": ("context_neighbor_chunks", "int"),
+        "context_full_document_tokens": ("context_full_document_tokens", "int"),
+        "context_expand_max_documents": ("context_expand_max_documents", "int"),
+        "hash_dense_weight": ("hash_dense_weight", "float"),
     },
     # Ringkasan dokumen (knowledge turunan). Global seperti setelan lain: satu tenant yang
     # menyalakannya memakai kuota model bersama, dan ringkasannya tersimpan di indeks bersama.
@@ -201,6 +208,11 @@ def extract_updates(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             elif kind == "int":
                 try:
                     accepted[field] = int(value)
+                except (TypeError, ValueError):
+                    continue
+            elif kind == "float":
+                try:
+                    accepted[field] = float(value)
                 except (TypeError, ValueError):
                     continue
             elif value is None:

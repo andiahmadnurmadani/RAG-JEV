@@ -56,9 +56,8 @@ class KnowledgeUpdateRequest(KnowledgeIndexRequest):
 class QueryOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Berapa potongan yang diambil untuk konteks. Kecil = jawaban "tidak lengkap" walau datanya
-    # ada; besar = model benar-benar membaca dokumennya. Batas atas tetap 50.
-    top_k: int = Field(default=12, ge=1, le=50)
+    # Berapa potongan yang diambil untuk konteks. Kosong = ikut Pengaturan (``final_top_k``).
+    top_k: Optional[int] = Field(default=None, ge=1, le=50)
     strict_grounding: bool = True
     include_sources: bool = True
     use_hybrid: Optional[bool] = None
@@ -83,12 +82,22 @@ class QueryOptions(BaseModel):
         return sorted(set(cleaned)) or None
 
 
+class HistoryTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=8000)
+
+
 class QueryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1, max_length=8000)
     knowledge_base_id: Optional[str] = Field(default=None, max_length=200)
     options: QueryOptions = Field(default_factory=QueryOptions)
+    # Giliran percakapan sebelumnya (opsional). Pertanyaan lanjutan ("yang kedua bagaimana?")
+    # hanya bisa dijawab bila model tahu apa yang dibicarakan sebelumnya.
+    history: Optional[List[HistoryTurn]] = Field(default=None, max_length=20)
 
 
 class SearchRequest(BaseModel):
@@ -118,6 +127,9 @@ class SourceOut(BaseModel):
     section: str = ""
     source_url: str = ""
     score: float = 0.0
+    # Nomor [n] di jawaban, dan apakah sumber ini benar-benar dikutip model.
+    index: int = 0
+    cited: bool = False
 
 
 class DocumentCoverageOut(BaseModel):
@@ -154,6 +166,14 @@ class QueryUsageOut(BaseModel):
     analytics_ms: float = 0.0
     computed_rows: int = 0
     rows_skipped: int = 0
+    # Diagnosis kualitas: skor kandidat terbaik (0..1), dasar gerbang relevansinya, bobot sisi
+    # vektor yang benar-benar dipakai, nomor sumber yang dikutip, dan kueri pencarian bila
+    # pertanyaan lanjutan digabung dengan pertanyaan sebelumnya.
+    best_score: float = 0.0
+    relevance_gate: str = ""
+    dense_weight: float = 1.0
+    citations: List[int] = Field(default_factory=list)
+    search_query: Optional[str] = None
 
 
 class ComputedOut(BaseModel):
@@ -198,6 +218,10 @@ class SearchResultOut(BaseModel):
     document_name: str = ""
     section: str = ""
     source_url: str = ""
+    # Rincian skor per tahap (untuk konsol uji): vektor, BM25, reranker.
+    dense_score: Optional[float] = None
+    sparse_score: Optional[float] = None
+    rerank_score: Optional[float] = None
 
 
 class SearchDataOut(BaseModel):
@@ -207,6 +231,13 @@ class SearchDataOut(BaseModel):
     hybrid: bool = True
     reranker: str = "none"
     retrieval_ms: float = 0.0
+    # Apakah hasil terbaik cukup relevan untuk dijawab (gerbang yang sama dengan /query).
+    best_score: float = 0.0
+    relevant: bool = False
+    relevance_gate: str = ""
+    dense_weight: float = 1.0
+    dense_hits: int = 0
+    sparse_hits: int = 0
 
 
 class ExtractDataOut(BaseModel):

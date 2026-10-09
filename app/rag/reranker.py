@@ -24,27 +24,24 @@ daripada tidak sama sekali, dan ia jujur melaporkan dirinya sebagai ``lexical``.
 from __future__ import annotations
 
 import math
-import re
 import threading
 import time
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.rag.textnorm import keywords, positions, term_forms, unique
 
 logger = get_logger(__name__)
 
-TOKEN_RE = re.compile(r"[\w\-]+", re.UNICODE)
-
-# Kata yang terlalu pendek tidak menandai relevansi.
-MIN_TERM_LENGTH = 2
+IdfFunction = Callable[[str], float]
 
 
 class BaseReranker:
     name = "none"
 
-    def score(self, query: str, documents: Sequence[str]) -> List[float]:
+    def score(self, query: str, documents: Sequence[str], idf: Optional[IdfFunction] = None) -> List[float]:
         return [0.0 for _ in documents]
 
     def unload(self) -> None:
@@ -54,95 +51,115 @@ class BaseReranker:
 class NoopReranker(BaseReranker):
     name = "none"
 
-    def score(self, query: str, documents: Sequence[str]) -> List[float]:
+    def score(self, query: str, documents: Sequence[str], idf: Optional[IdfFunction] = None) -> List[float]:
         # descending pseudo-scores preserving the incoming (fusion) order
         total = len(documents)
         return [1.0 - (index / max(1, total)) for index in range(total)]
 
 
-def _tokens(text: str) -> List[str]:
-    return [token.lower() for token in TOKEN_RE.findall(text or "") if len(token) >= MIN_TERM_LENGTH]
+def _min_window(position_lists: List[List[int]]) -> int:
+    """Rentang terpendek (dalam kata bermakna) yang memuat minimal satu posisi tiap daftar."""
+    events = sorted((position, owner) for owner, items in enumerate(position_lists) for position in items)
+    need = len(position_lists)
+    counts: Dict[int, int] = {}
+    covered = 0
+    best = 10**9
+    left = 0
+    for right in range(len(events)):
+        owner = events[right][1]
+        counts[owner] = counts.get(owner, 0) + 1
+        if counts[owner] == 1:
+            covered += 1
+        while covered == need:
+            best = min(best, events[right][0] - events[left][0] + 1)
+            left_owner = events[left][1]
+            counts[left_owner] -= 1
+            if counts[left_owner] == 0:
+                covered -= 1
+            left += 1
+    return best
 
 
 class LexicalReranker(BaseReranker):
-    """Reranker lintas-encoder berbasis leksikal: IDF + frasa + kedekatan + cakupan.
+    """Reranker leksikal: cakupan istilah kueri (berbobot IDF) + kedekatan + frasa + kepadatan.
 
-    Skornya dihitung untuk kandidat yang sudah lolos pencarian, jadi biayanya kecil (tanpa
-    model, tanpa jaringan) dan hasilnya deterministik - penting untuk layanan yang jawabannya
-    harus bisa dipertanggungjawabkan.
+    Skornya **absolut** di rentang 0..1 - bukan dinormalkan ke kandidat terbaik. Itu yang
+    membuat ambang relevansi bermakna: dulu kandidat terbaik selalu bernilai 1.0, sehingga
+    pertanyaan di luar knowledge tetap "lolos" dan dijawab dengan konteks yang tidak relevan.
+
+    Bobot IDF diambil dari SELURUH knowledge tenant (bila diberikan): kata yang langka di
+    seluruh knowledge menentukan; kata yang ada di mana-mana hampir tidak berbobot. Kata kueri
+    yang tidak ada di knowledge sama sekali tetap berbobot penuh, sehingga pertanyaan tentang
+    hal yang tidak pernah diunggah mendapat cakupan rendah.
     """
 
     name = "lexical"
 
-    def score(self, query: str, documents: Sequence[str]) -> List[float]:
+    def score(self, query: str, documents: Sequence[str], idf: Optional[IdfFunction] = None) -> List[float]:
         if not documents:
             return []
-        query_tokens = _tokens(query)
+        query_tokens = unique(keywords(query))
         if not query_tokens:
             total = len(documents)
             return [1.0 - (index / max(1, total)) for index in range(total)]
 
-        # IDF dihitung dari himpunan kandidat: kata yang muncul di semua kandidat tidak
-        # membedakan apa pun; kata yang muncul di sedikit kandidat sangat menentukan.
-        doc_tokens = [_tokens(document) for document in documents]
-        document_count = len(doc_tokens)
-        unique_query = list(dict.fromkeys(query_tokens))
-        document_frequency: Dict[str, int] = {
-            token: sum(1 for tokens in doc_tokens if token in tokens) for token in unique_query
-        }
+        forms = {token: term_forms(token) for token in query_tokens}
+        doc_maps = [positions(document) for document in documents]
+        doc_lengths = [max(1, len(keywords(document))) for document in documents]
 
-        def idf(token: str) -> float:
-            frequency = document_frequency.get(token, 0)
-            # BM25-plus style: selalu positif, sehingga skor tidak pernah dibalik kata umum.
-            return math.log((document_count + 1) / (frequency + 0.5))
+        if idf is None:
+            # Tanpa statistik korpus: IDF dari himpunan kandidat.
+            count = len(doc_maps)
 
-        # Frasa utuh dari kueri (2-3 kata berturutan).
-        phrases = [
-            " ".join(unique_query[index:index + size])
-            for size in (3, 2)
-            for index in range(0, max(0, len(unique_query) - size + 1))
-        ]
-        total_weight = sum(idf(token) for token in unique_query) or 1.0
+            def idf(term: str) -> float:  # noqa: F811 - pengganti lokal
+                frequency = sum(1 for table in doc_maps if term in table)
+                return math.log(1.0 + (count - frequency + 0.5) / (frequency + 0.5))
+
+        weights = {token: max(0.05, min(idf(form) for form in forms[token])) for token in query_tokens}
+        total_weight = sum(weights.values()) or 1.0
 
         scores: List[float] = []
-        for tokens in doc_tokens:
-            token_set = set(tokens)
-            present = [token for token in unique_query if token in token_set]
-            if not present:
+        for table, length in zip(doc_maps, doc_lengths):
+            matched: Dict[str, List[int]] = {}
+            strength: Dict[str, float] = {}
+            for token in query_tokens:
+                if token in table:
+                    matched[token] = table[token]
+                    strength[token] = 1.0
+                    continue
+                hits = sorted({position for form in forms[token][1:] for position in table.get(form, [])})
+                if hits:
+                    # Cocok lewat bentuk dasar ("pengajuan" vs "diajukan"): sah, sedikit di bawah persis.
+                    matched[token] = hits
+                    strength[token] = 0.85
+            if not matched:
                 scores.append(0.0)
                 continue
 
-            coverage = sum(idf(token) for token in present) / total_weight
+            coverage = sum(weights[token] * strength[token] for token in matched) / total_weight
 
-            # Kepadatan: berapa kali kata kueri muncul, dinormalkan panjang dokumen.
-            occurrences = sum(tokens.count(token) for token in present)
-            density = occurrences / (len(tokens) or 1)
+            if len(query_tokens) == 1:
+                proximity = 1.0
+                phrase = 1.0
+            else:
+                proximity = 0.0
+                if len(matched) >= 2:
+                    window = _min_window(list(matched.values()))
+                    proximity = min(1.0, len(matched) / max(1, window))
+                pairs = list(zip(query_tokens, query_tokens[1:]))
+                adjacent = 0
+                for first, second in pairs:
+                    if first in matched and second in matched:
+                        later = set(matched[second])
+                        if any(position + 1 in later or position + 2 in later for position in matched[first]):
+                            adjacent += 1
+                phrase = adjacent / len(pairs)
 
-            # Frasa utuh lebih kuat daripada kata yang terpisah-pisah.
-            text_lower = " ".join(tokens)
-            phrase_bonus = 0.0
-            for phrase in phrases:
-                if phrase and phrase in text_lower:
-                    phrase_bonus = max(phrase_bonus, 0.25 if len(phrase.split()) >= 3 else 0.15)
+            occurrences = sum(len(items) for items in matched.values())
+            density = min(1.0, (occurrences / length) * 8)
 
-            # Kedekatan: makin rapat kemunculan kata kueri, makin baik.
-            positions = [index for index, token in enumerate(tokens) if token in set(present)]
-            proximity = 0.0
-            if len(positions) >= 2:
-                span = positions[-1] - positions[0] + 1
-                proximity = len(present) / max(1, span)
-
-            raw = 0.55 * coverage + 0.15 * min(1.0, density * 12) + phrase_bonus + 0.15 * proximity
+            raw = 0.6 * coverage + 0.15 * proximity + 0.15 * phrase + 0.10 * density
             scores.append(round(min(1.0, raw), 6))
-
-        # Normalkan sehingga kandidat terbaik = 1.0, sama seperti sisi sparse (skor/best).
-        # Dua alasan: (1) threshold relevansi (bawaan 0.35) jadi bermakna sebagai "berapa jauh
-        # di bawah yang terbaik", bukan angka absolut yang bisa memotong SEMUA kandidat;
-        # (2) kandidat terbaik selalu lolos threshold, sehingga reranker tidak pernah membuat
-        # layanan menjawab "tidak ditemukan" padahal datanya ada.
-        best = max(scores) if scores else 0.0
-        if best > 0:
-            scores = [round(score / best, 6) for score in scores]
         return scores
 
 
@@ -161,7 +178,7 @@ class CrossEncoderReranker(BaseReranker):
             logger.info("loaded reranker %s in %.1fs", self._settings.reranker_model, time.perf_counter() - started)
         return self._model
 
-    def score(self, query: str, documents: Sequence[str]) -> List[float]:
+    def score(self, query: str, documents: Sequence[str], idf: Optional[IdfFunction] = None) -> List[float]:
         if not documents:
             return []
         model = self._load()
@@ -196,7 +213,7 @@ class FastEmbedReranker(BaseReranker):
             logger.info("loaded fastembed reranker %s", self._model_name)
         return self._model
 
-    def score(self, query: str, documents: Sequence[str]) -> List[float]:
+    def score(self, query: str, documents: Sequence[str], idf: Optional[IdfFunction] = None) -> List[float]:
         if not documents:
             return []
         model = self._load()
@@ -281,12 +298,13 @@ class RerankerService:
         *,
         top_k: int,
         threshold: Optional[float] = None,
+        idf: Optional[IdfFunction] = None,
     ) -> List[Tuple[str, str, float]]:
         """``candidates`` = [(chunk_id, content)] -> [(chunk_id, content, score)]."""
         if not candidates:
             return []
         try:
-            scores = self.reranker.score(query, [content for _, content in candidates])
+            scores = self.reranker.score(query, [content for _, content in candidates], idf=idf)
         except Exception as exc:  # noqa: BLE001
             raise AppError("RERANK_FAILED", f"Reranker failed: {exc}") from exc
         scored = [

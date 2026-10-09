@@ -47,12 +47,18 @@ SYSTEM_PROMPT = """You are an organizational knowledge assistant.
 Answer only using the provided context.
 
 Rules:
-1. Do not invent information.
-2. If the context does not contain enough information, say that the information was not found.
-3. Do not use knowledge from other organizations.
-4. Cite the source for factual claims.
-5. Preserve numbers, dates, names, and policies accurately.
-6. Do not expose internal metadata unless requested and permitted.
+1. Do not invent information. Every fact in the answer must come from the context.
+2. If the context contains nothing that answers the question, reply with exactly this sentence
+   and nothing else: "{no_answer_id}" (for an English question: "{no_answer_en}").
+3. If the context answers only part of the question, answer that part (with citations) and then
+   say briefly which part is not in the context. Do not refuse a question you can partly answer.
+4. Do not use knowledge from other organizations.
+5. Cite the source for every factual sentence with its context number, e.g. [1] or [2][3]. Only
+   use numbers that exist in the context.
+6. Preserve numbers, dates, names, and policies accurately - copy them exactly as written.
+7. Context blocks from the same document are given in document order; read neighbouring blocks
+   together, because a sentence or table can continue into the next block.
+8. Do not expose internal metadata unless requested and permitted.
 
 Formatting:
 - Answer in Markdown (GitHub-flavoured). It is rendered in a chat panel, so use Markdown to make
@@ -80,7 +86,9 @@ Script (important):
 
 {untrusted_notice}
 Cite sources with the bracketed context number, for example [1] or [2][3].
-Answer in the same language as the user's question.""".format(untrusted_notice=UNTRUSTED_NOTICE)
+Answer in the same language as the user's question.""".format(
+    untrusted_notice=UNTRUSTED_NOTICE, no_answer_id=NO_ANSWER_ID, no_answer_en=NO_ANSWER_EN
+)
 
 EXTRACT_SYSTEM_PROMPT = (
     """You extract structured data from organizational documents.
@@ -383,6 +391,7 @@ class Generator:
         context: BuiltContext,
         strict_grounding: bool = True,
         no_candidate_reason: Optional[str] = None,
+        history: Optional[Sequence[Dict[str, str]]] = None,
     ) -> GeneratedAnswer:
         if not context.used:
             return GeneratedAnswer(
@@ -392,11 +401,16 @@ class Generator:
             )
 
         user_prompt = f"{context.text}\n\nUser query:\n{query}"
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
+        messages: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # Riwayat percakapan hanya sebagai rujukan "apa yang sedang dibicarakan"; konteks
+        # dokumen tetap hanya di pesan terakhir, jadi jawaban tetap bersumber dari konteks.
+        for turn in history or []:
+            if turn.get("role") in ("user", "assistant") and turn.get("content"):
+                messages.append({"role": turn["role"], "content": str(turn["content"])[:2000]})
+        messages.append({"role": "user", "content": user_prompt})
         text, usage = self._client.chat(messages)
+        if isinstance(context.used, (list, tuple)):
+            text = clean_citations(text, len(context.used))
         truncated = self._looks_truncated(text, usage)
         grounded = not truncated and not self._looks_like_refusal(text)
 
@@ -705,20 +719,48 @@ class Generator:
     # ------------------------------------------------------------------ #
     @staticmethod
     def _looks_like_refusal(text: str) -> bool:
-        if not text:
+        """Apakah jawaban model = "tidak ditemukan" (bukan jawaban yang kebetulan memuat frasa itu)?
+
+        Jawaban yang mengutip sumber adalah jawaban: "Tidak terdapat biaya pendaftaran [1]" berarti
+        biayanya NOL menurut dokumen, bukan datanya tidak ada. Dulu kalimat seperti itu diganti
+        "informasi tidak ditemukan" - kebalikan dari isinya.
+        """
+        if not text or not text.strip():
             return True
-        lowered = text.lower()
+        if extract_citation_numbers(text):
+            return False
+        lowered = " ".join(text.lower().split())
+        for sentence in (NO_ANSWER_ID, NO_ANSWER_EN):
+            if lowered.startswith(sentence.lower().rstrip(".")):
+                return True
         if any(marker in lowered for marker in NOT_FOUND_MARKERS):
-            # a refusal that also answers is still a grounded answer
-            return len(lowered) < 400
+            return len(lowered) < 300
         return False
 
     def health(self) -> str:
         return self._client.health()
 
 
+_CITATION_RE = re.compile(r"\[(\d{1,3})\]")
+
+
 def extract_citation_numbers(text: str) -> List[int]:
-    return sorted({int(match) for match in re.findall(r"\[(\d{1,2})\]", text or "")})
+    return sorted({int(match) for match in _CITATION_RE.findall(text or "")})
+
+
+def clean_citations(text: str, count: int) -> str:
+    """Buang sitasi ``[n]`` yang menunjuk blok konteks yang tidak ada (n < 1 atau n > count).
+
+    Sitasi palsu lebih buruk daripada tanpa sitasi: pembaca mengira klaimnya punya sumber.
+    """
+    if not text or count <= 0:
+        return text
+
+    def keep(match: "re.Match[str]") -> str:
+        number = int(match.group(1))
+        return match.group(0) if 1 <= number <= count else ""
+
+    return _CITATION_RE.sub(keep, text)
 
 
 def _loads_tolerant(text: str) -> Optional[Any]:

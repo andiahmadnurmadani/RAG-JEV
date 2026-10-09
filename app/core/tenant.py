@@ -27,6 +27,22 @@ class TrustedContext:
     # sesi mana yang sedang aktif, tanpa perlu meminta tokennya lagi.
     session_id: Optional[str] = None
     session_expires_at: Optional[str] = None
+    # Knowledge base yang boleh disentuh kredensial ini. Kosong = semua KB organisasinya (perilaku
+    # lama). Diisi = kunci proyek: hanya KB miliknya, walau organisasinya dipakai bersama.
+    knowledge_base_ids: List[str] = field(default_factory=list)
+
+    def allows_knowledge_base(self, knowledge_base_id: Optional[str]) -> bool:
+        if not self.knowledge_base_ids:
+            return True
+        return bool(knowledge_base_id) and str(knowledge_base_id) in self.knowledge_base_ids
+
+    def require_knowledge_base(self, knowledge_base_id: Optional[str]) -> None:
+        if not self.allows_knowledge_base(knowledge_base_id):
+            raise AppError(
+                "AUTH_FORBIDDEN",
+                "Kunci ini tidak diizinkan mengakses knowledge base tersebut",
+                details={"knowledge_base_id": knowledge_base_id, "allowed": list(self.knowledge_base_ids)},
+            )
 
     def has_permission(self, permission: str) -> bool:
         if "*" in self.permissions:
@@ -51,4 +67,5 @@ class TrustedContext:
             "organization_id": self.organization_id,
             "application_id": self.application_id,
             "permissions": list(self.permissions),
+            "knowledge_base_ids": list(self.knowledge_base_ids),
         }

@@ -26,7 +26,26 @@ WS_RE = re.compile(r"[ \t\u00a0]+")
 # tercemar label tombol seperti "Arrow right"/"Next"/"Chevron left" dari carousel, paginasi,
 # atau menu. Dibuang SEBELUM tag dilucuti (bukan sesudah), karena sesudahnya teks anaknya
 # sudah lepas dari tag pembungkusnya dan tidak bisa dibedakan dari isi sah.
-_NAV_CHROME_RE = re.compile(r"(?is)<(nav|header|footer|button|svg|form)\b[^>]*>.*?</\1>")
+_NAV_CHROME_RE = re.compile(
+    r"(?is)<(nav|footer|button|svg|form|aside|noscript|template|dialog|iframe|select)\b[^>]*>.*?</\1>"
+)
+# ``<header>`` situs (logo, menu) dibuang, tetapi ``<header>`` artikel yang memuat judul (h1/h2)
+# atau tanggal (``<time>``) adalah isi - dulu ikut terbuang sehingga judul berita hilang.
+_HEADER_RE = re.compile(r"(?is)<header\b[^>]*>(.*?)</header>")
+_HEADER_KEEP_RE = re.compile(r"(?i)<(h1|h2|time)\b")
+# Elemen ber-role navigasi/banner/footer dan blok yang namanya jelas chrome (banner cookie,
+# tombol bagikan, breadcrumb, sidebar, paginasi). Hanya dibuang bila teksnya pendek: wadah
+# halaman yang kebetulan bernama "sidebar-layout" tidak boleh menyeret isi utama.
+_ROLE_CHROME_RE = re.compile(
+    r"(?is)<(\w+)\b(?=[^>]*\brole\s*=\s*[\"'](?:navigation|banner|contentinfo|search|menu|menubar|toolbar"
+    r"|dialog|alertdialog)[\"'])[^>]*>.*?</\1>"
+)
+_CLASS_CHROME_RE = re.compile(
+    r"(?is)<(?!(?:body|main|article)\b)(\w+)\b(?=[^>]*\b(?:class|id)\s*=\s*[\"'][^\"']*\b(?:cookie|cookies|consent|gdpr"
+    r"|breadcrumbs?|share|sharing|social|sidebar|widget|related|newsletter|popup|modal|advert|advertisement"
+    r"|skip-link|pagination|pager)\b)[^>]*>.*?</\1>"
+)
+_CHROME_MAX_TEXT = 600
 # Elemen yang ditandai eksplisit "sembunyikan dari pembaca" (aria-hidden="true") atau
 # disembunyikan SECARA VISUAL tapi tetap ada di DOM untuk pembaca layar (pola umum ikon
 # Font Awesome/Bootstrap: class sr-only/visually-hidden dst). Keduanya tidak pernah dilihat
@@ -187,8 +206,12 @@ def _pdf_pages_pypdf(content: bytes) -> List[ParsedPage]:
 def _word_part_text(xml: str) -> str:
     """Teks satu bagian Word (document/header/footer/catatan): tabel tetap terpisah jelas."""
 
+    # Spasi/baris baru pemformat XML di antara tag bukan isi dokumen (isi ada di dalam <w:t>).
+    xml = re.sub(r">[ \t]*\r?\n\s*<", "><", xml)
     xml = re.sub(r"(?is)<w:instrText[^>]*>.*?</w:instrText>", "", xml)   # kode field, bukan isi
     xml = re.sub(r"(?is)<w:delText[^>]*>.*?</w:delText>", "", xml)       # teks yang dihapus (track changes)
+    # Paragraf di DALAM sel tetap satu sel (spasi), bukan baris baru yang memecah baris tabel.
+    xml = re.sub(r"(?is)<w:tc\b.*?</w:tc>", lambda m: re.sub(r"(?is)</w:p>", " ", m.group(0)), xml)
     xml = re.sub(r"(?is)<w:tc[^>]*>", "", xml)
     # Penanda sementara: batas sel harus menang atas batas paragraf di dalam sel,
     # supaya satu baris tabel tidak pecah jadi beberapa baris teks.
@@ -198,7 +221,9 @@ def _word_part_text(xml: str) -> str:
     xml = re.sub(r"(?is)<w:(tab|ptab)[^>]*/>", "\t", xml)
     xml = re.sub(r"(?is)<w:br[^>]*/>", "\n", xml)
     text = html.unescape(TAG_RE.sub("", xml)).replace("\x01", "|")
-    text = re.sub(r"\s*\|\s*", " | ", text)
+    # "[ \t]" bukan "\s": pemisah sel tidak boleh menelan pergantian baris, kalau tidak seluruh
+    # tabel (dan paragraf sesudahnya) menyatu jadi satu baris.
+    text = re.sub(r"[ \t]*\|[ \t]*", " | ", text)
     text = re.sub(r"(?m)[ \t]*\|[ \t]*$", "", text)
     return _normalize(text)
 
@@ -285,16 +310,28 @@ def _decode_text(content: bytes) -> str:
     return content.decode("utf-8", "ignore")
 
 
+def _drop_short_chrome(match: "re.Match[str]") -> str:
+    visible = TAG_RE.sub(" ", match.group(0))
+    return " " if len(" ".join(visible.split())) <= _CHROME_MAX_TEXT else match.group(0)
+
+
 def _html_to_text(raw: str) -> str:
+    raw = re.sub(r"(?is)<(script|style|head)\b.*?</\1>", " ", raw)
     raw = _NAV_CHROME_RE.sub(" ", raw)
     raw = _HIDDEN_CHROME_RE.sub(" ", raw)
-    raw = re.sub(r"(?is)<(script|style|head).*?</\1>", " ", raw)
+    raw = _ROLE_CHROME_RE.sub(" ", raw)
+    raw = _CLASS_CHROME_RE.sub(_drop_short_chrome, raw)
+    raw = _HEADER_RE.sub(lambda m: m.group(0) if _HEADER_KEEP_RE.search(m.group(1)) else " ", raw)
     raw = re.sub(r"(?i)<br\s*/?>", "\n", raw)
-    raw = re.sub(r"(?i)</(p|div|section|article|li|h[1-6]|tr|table|blockquote|dd|dt|figcaption|pre)>", "\n", raw)
+    raw = re.sub(r"(?i)</(p|div|section|article|header|li|h[1-6]|tr|table|blockquote|dd|dt|figcaption|pre|time)>", "\n", raw)
     raw = re.sub(r"(?i)</t[dh]>", " | ", raw)
     raw = re.sub(r"(?i)<t[dh]\b[^>]*>", "", raw)
     text = _normalize(html.unescape(TAG_RE.sub("", raw)))
-    return re.sub(r"(\s*\|\s*)+", " | ", text).strip(" |").strip()
+    # Baris tabel tetap per baris: pemisah "|" tidak boleh menelan pergantian baris (dulu semua
+    # baris tabel menyatu jadi satu baris panjang).
+    text = re.sub(r"[ \t]*\|[ \t]*(?:\|[ \t]*)*", " | ", text)
+    text = re.sub(r"(?m)^[ \t]*\|[ \t]*|[ \t]*\|[ \t]*$", "", text)
+    return _normalize(text)
 
 
 def _document_title(raw: str, fallback: str) -> str:

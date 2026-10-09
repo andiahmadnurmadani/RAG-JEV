@@ -157,19 +157,32 @@ def collection_exists_guard(settings: Settings) -> bool:
         return False
 
 
-def delete_document(settings: Settings, *, organization_id: str, document_id: str) -> int:
-    """Remove every chunk of one document inside one tenant (PRD 23, 32)."""
+def delete_document(
+    settings: Settings,
+    *,
+    organization_id: str,
+    document_id: str,
+    knowledge_base_id: Optional[str] = None,
+) -> int:
+    """Remove every chunk of one document inside one tenant (PRD 23, 32).
+
+    ``knowledge_base_id`` mempersempit penghapusan ke satu KB (kunci proyek yang diikat ke KB):
+    dokumen ber-ID sama di KB lain organisasi yang sama tidak ikut terhapus.
+    """
 
     if not collection_exists_guard(settings):
         return 0
     if not organization_id:
         raise AppError("TENANT_CONTEXT_MISSING", "organization_id is required for delete")
-    query_filter = qmodels.Filter(
-        must=[
-            qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
-            qmodels.FieldCondition(key="document_id", match=qmodels.MatchValue(value=document_id)),
-        ]
-    )
+    conditions = [
+        qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
+        qmodels.FieldCondition(key="document_id", match=qmodels.MatchValue(value=document_id)),
+    ]
+    if knowledge_base_id:
+        conditions.append(
+            qmodels.FieldCondition(key="knowledge_base_id", match=qmodels.MatchValue(value=knowledge_base_id))
+        )
+    query_filter = qmodels.Filter(must=conditions)
     client = get_client(settings)
     before = count_document(settings, organization_id=organization_id, document_id=document_id)
     client.delete(
@@ -311,12 +324,18 @@ def get_chunks_by_ids(
     keys = [key for key in chunk_ids if key]
     if not keys:
         return {}
-    bare_chunk_ids = [key.partition("::")[2] or key for key in keys]
+    wanted_keys = set(keys)
+    bare_chunk_ids = sorted({key.partition("::")[2] or key for key in keys})
+    key_documents = sorted({key.partition("::")[0] for key in keys if "::" in key and key.partition("::")[0]})
 
     conditions = [
         qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
         qmodels.FieldCondition(key="chunk_id", match=qmodels.MatchAny(any=bare_chunk_ids)),
     ]
+    if key_documents:
+        # chunk_0001 ada di SETIAP dokumen: tanpa batas dokumen, pencarian ini memindai potongan
+        # bernomor sama di seluruh dokumen tenant.
+        conditions.append(qmodels.FieldCondition(key="document_id", match=qmodels.MatchAny(any=key_documents)))
     if knowledge_base_id:
         conditions.append(
             qmodels.FieldCondition(key="knowledge_base_id", match=qmodels.MatchValue(value=knowledge_base_id))
@@ -345,7 +364,7 @@ def get_chunks_by_ids(
                 logger.error("tenant mismatch while retrieving chunk %s", payload.get("chunk_id"))
                 continue
             key = f"{payload.get('document_id', '')}::{payload.get('chunk_id', '')}"
-            if key in keys:
+            if key in wanted_keys:
                 out.setdefault(key, payload)
         if offset is None or not records:
             break

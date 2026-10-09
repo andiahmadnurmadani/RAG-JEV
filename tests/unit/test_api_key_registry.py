@@ -106,6 +106,7 @@ def test_resolve_returns_the_trusted_context(registry: ApiKeyRegistry):
         "organization_id": "org_a",
         "application_id": "app_a",
         "permissions": ["read", "write"],
+        "knowledge_base_ids": [],
         "key_id": entry["key_id"],
         "source": "registry",
     }

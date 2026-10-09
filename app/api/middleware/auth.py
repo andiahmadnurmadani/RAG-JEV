@@ -50,6 +50,7 @@ def resolve_context(
             application_id=str(payload["application_id"]),
             permissions=[str(p) for p in payload.get("permissions") or []],
             source="kms_token",
+            knowledge_base_ids=[str(k) for k in payload.get("knowledge_base_ids") or [] if str(k).strip()],
         )
 
     if not token:
@@ -64,6 +65,7 @@ def resolve_context(
         key_id=context.get("key_id"),
         session_id=context.get("session_id"),
         session_expires_at=context.get("session_expires_at"),
+        knowledge_base_ids=[str(k) for k in context.get("knowledge_base_ids") or [] if str(k).strip()],
     )
 
 

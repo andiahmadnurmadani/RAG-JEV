@@ -128,6 +128,7 @@ class ApiKeyRegistry:
     def _public(self, record: Dict[str, Any]) -> Dict[str, Any]:
         out: Dict[str, Any] = {field: record.get(field) for field in _VISIBLE_FIELDS}
         out["permissions"] = [str(p) for p in (record.get("permissions") or [])]
+        out["knowledge_base_ids"] = [str(k) for k in (record.get("knowledge_base_ids") or [])]
         out["source"] = "registry"
         out["revocable"] = not bool(record.get("revoked_at"))
         out["state"] = self._state(record)
@@ -164,6 +165,7 @@ class ApiKeyRegistry:
                         "organization_id": str(record.get("organization_id") or ""),
                         "application_id": str(record.get("application_id") or ""),
                         "permissions": [str(p) for p in (record.get("permissions") or [])],
+                        "knowledge_base_ids": [str(k) for k in (record.get("knowledge_base_ids") or [])],
                         "key_id": record.get("key_id"),
                         "source": "registry",
                     }
@@ -195,6 +197,7 @@ class ApiKeyRegistry:
         application_id: str,
         created_by: str,
         expires_in_days: Optional[int] = None,
+        knowledge_base_ids: Optional[List[str]] = None,
     ) -> Tuple[str, Dict[str, Any]]:
         """Buat kunci baru. Mengembalikan (kunci penuh, entri publik) - kunci tampil sekali saja."""
         clean_label = (label or "").strip()
@@ -216,6 +219,13 @@ class ApiKeyRegistry:
         for field, value in (("organization_id", organization_id), ("user_id", user_id), ("application_id", application_id)):
             if not str(value or "").strip():
                 raise AppError("VALIDATION_ERROR", f"'{field}' tidak boleh kosong", details={"field": field})
+
+        bound = sorted({str(item).strip() for item in (knowledge_base_ids or []) if str(item).strip()})
+        if len(bound) > 50 or any(len(item) > 200 for item in bound):
+            raise AppError(
+                "VALIDATION_ERROR",
+                "knowledge_base_ids maksimal 50 item, masing-masing maksimal 200 karakter",
+            )
 
         expires_at = None
         if expires_in_days is not None:
@@ -250,6 +260,7 @@ class ApiKeyRegistry:
                 "user_id": str(user_id),
                 "application_id": str(application_id),
                 "permissions": granted,
+                "knowledge_base_ids": bound,
                 "created_at": _iso(),
                 "created_by": str(created_by or ""),
                 "expires_at": expires_at,

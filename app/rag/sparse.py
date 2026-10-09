@@ -3,34 +3,52 @@
 Stored per ``(organization_id, knowledge_base_id)`` pair so a lexical query can
 never see another tenant's documents, exactly like the vector side. Documents are
 JSON files on disk: small, inspectable, no extra service to run.
+
+Versi 2 (indeks lama = versi 1):
+
+* **Inverted index sendiri, bukan rank_bm25.** BM25Plus dulu memberi skor positif ke SEMUA
+  potongan - termasuk yang tidak memuat satu pun kata kueri - sehingga daftar hasil selalu
+  penuh potongan tak relevan. Sekarang hanya potongan yang memuat minimal satu istilah kueri
+  yang dinilai, dan biayanya sebanding jumlah kecocokan, bukan jumlah seluruh potongan.
+* **Analisis teks bahasa Indonesia** (``textnorm``): kata tugas dibuang, bentuk dasar ikut.
+* **Nama dokumen + bagian ikut terindeks**, dan ``is_summary`` ikut tersimpan (dulu hilang
+  setiap restart sehingga ringkasan ikut bersaing di pencarian biasa).
+
+Indeks versi 1 tetap terbaca (token lamanya dipakai setelah kata tugas dibuang) dan dibangun
+ulang di latar belakang dari isi Qdrant oleh :func:`migrate_legacy_scopes`.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.rag.constants import SUMMARY_CHUNK_ID
+from app.rag.textnorm import STOPWORDS, keywords, sparse_text, term_forms, unique
 
 logger = get_logger(__name__)
 
-TOKEN_RE = re.compile(r"[\w\-]+", re.UNICODE)
+INDEX_VERSION = 2
+K1 = 1.2
+B = 0.75
 
-
-def tokenize(text: str) -> List[str]:
-    return [token.lower() for token in TOKEN_RE.findall(text or "")]
+# (chunk_id, document_id, text) atau (chunk_id, document_id, text, is_summary)
+Row = Tuple
 
 
 @dataclass
 class SparseEntry:
     chunk_id: str
     document_id: str
+    # Versi 2: kata bermakna (permukaan). Bentuk dasarnya dihitung saat indeks dibangun, jadi
+    # perbaikan stemming berlaku tanpa membangun ulang berkas.
     tokens: List[str]
     # Potongan ringkasan dokumen: ikut disimpan supaya bisa dicari saat pertanyaannya memang
     # minta ringkasan, tetapi tidak ikut bersaing pada pencarian biasa.
@@ -40,8 +58,24 @@ class SparseEntry:
 @dataclass
 class _Scope:
     entries: List[SparseEntry] = field(default_factory=list)
-    model: object = None
+    legacy: bool = False
+    generation: int = 0
     dirty: bool = True
+    postings: Dict[str, Dict[int, int]] = field(default_factory=dict)
+    lengths: List[int] = field(default_factory=list)
+    avgdl: float = 1.0
+
+
+def tokenize(text: str) -> List[str]:
+    """Kata bermakna yang disimpan per potongan (bentuk dasarnya dihitung saat indeks dibangun)."""
+    return keywords(text)
+
+
+def _entry_terms(entry: SparseEntry) -> List[str]:
+    out: List[str] = []
+    for token in entry.tokens:
+        out.extend(term_forms(token))
+    return out
 
 
 class SparseIndex:
@@ -63,42 +97,90 @@ class SparseIndex:
     def _path(self, scope: str) -> Path:
         return self._root / f"{scope}.json"
 
+    def _load(self, path: Path) -> _Scope:
+        loaded = _Scope()
+        if not path.exists():
+            return loaded
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("sparse index %s unreadable (%s); starting empty", path.name, exc)
+            return loaded
+        version = int(payload.get("version") or 1)
+        entries: List[SparseEntry] = []
+        for item in payload.get("entries", []):
+            chunk_id = str(item.get("chunk_id") or "")
+            tokens = list(item.get("tokens") or [])
+            if version < INDEX_VERSION:
+                # Token lama memuat kata tugas dan belum dipangkas; yang bermakna tetap dipakai
+                # (bentuk dasarnya dihitung saat membangun posting) sampai dibangun ulang.
+                tokens = [token for token in tokens if token not in STOPWORDS]
+            entries.append(
+                SparseEntry(
+                    chunk_id=chunk_id,
+                    document_id=str(item.get("document_id") or ""),
+                    tokens=tokens,
+                    is_summary=bool(item.get("is_summary")) or chunk_id == SUMMARY_CHUNK_ID,
+                )
+            )
+        loaded.entries = entries
+        loaded.legacy = version < INDEX_VERSION
+        return loaded
+
     def _scope(self, organization_id: str, knowledge_base_id: str) -> _Scope:
         scope = self.scope_key(organization_id, knowledge_base_id)
         with self._lock:
             if scope not in self._scopes:
-                loaded = _Scope()
-                path = self._path(scope)
-                if path.exists():
-                    try:
-                        payload = json.loads(path.read_text(encoding="utf-8"))
-                        loaded.entries = [SparseEntry(**item) for item in payload.get("entries", [])]
-                        loaded.dirty = False
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("sparse index %s unreadable (%s); starting empty", scope, exc)
-                self._scopes[scope] = loaded
+                self._scopes[scope] = self._load(self._path(scope))
             return self._scopes[scope]
 
     def _persist(self, organization_id: str, knowledge_base_id: str, scope_obj: _Scope) -> None:
         scope = self.scope_key(organization_id, knowledge_base_id)
         payload = {
+            "version": 1 if scope_obj.legacy else INDEX_VERSION,
             "organization_id": organization_id,
             "knowledge_base_id": knowledge_base_id,
-            "entries": [dict(chunk_id=e.chunk_id, document_id=e.document_id, tokens=e.tokens) for e in scope_obj.entries],
+            "entries": [
+                dict(chunk_id=e.chunk_id, document_id=e.document_id, tokens=e.tokens, is_summary=e.is_summary)
+                for e in scope_obj.entries
+            ],
         }
         tmp = self._path(scope).with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self._path(scope))
+
+    def _touch(self, scope_obj: _Scope) -> None:
+        scope_obj.dirty = True
+        scope_obj.generation += 1
+
+    def _ensure_postings(self, scope_obj: _Scope) -> None:
+        if not scope_obj.dirty:
+            return
+        postings: Dict[str, Dict[int, int]] = {}
+        lengths: List[int] = []
+        for index, entry in enumerate(scope_obj.entries):
+            terms = _entry_terms(entry)
+            lengths.append(len(terms))
+            for term in terms:
+                bucket = postings.setdefault(term, {})
+                bucket[index] = bucket.get(index, 0) + 1
+        scope_obj.postings = postings
+        scope_obj.lengths = lengths
+        scope_obj.avgdl = (sum(lengths) / len(lengths)) if lengths else 1.0
         scope_obj.dirty = False
+
+    @staticmethod
+    def _idf(total: int, frequency: int) -> float:
+        return math.log(1.0 + (total - frequency + 0.5) / (frequency + 0.5))
 
     # ------------------------------------------------------------------ #
     def upsert(
         self,
         organization_id: str,
         knowledge_base_id: str,
-        items: Sequence[Tuple[str, str, str]],
+        items: Sequence[Row],
     ) -> int:
-        """``items`` = (chunk_id, document_id, content). Replaces those chunks.
+        """``items`` = (chunk_id, document_id, text[, is_summary]). Replaces those chunks.
 
         Identity is the *(document_id, chunk_id)* pair: ``chunk_0001`` exists in every
         document, so matching on the bare chunk id would make a second document's
@@ -107,21 +189,18 @@ class SparseIndex:
         added = 0
         scope_obj = self._scope(organization_id, knowledge_base_id)
         with self._lock:
-            incoming = {(document_id, chunk_id) for chunk_id, document_id, _ in items}
+            incoming = {(item[1], item[0]) for item in items}
             scope_obj.entries = [
                 entry for entry in scope_obj.entries if (entry.document_id, entry.chunk_id) not in incoming
             ]
-            for chunk_id, document_id, content in items:
+            for item in items:
+                chunk_id, document_id, text = item[0], item[1], item[2]
+                summary = bool(item[3]) if len(item) > 3 else chunk_id == SUMMARY_CHUNK_ID
                 scope_obj.entries.append(
-                    SparseEntry(
-                        chunk_id=chunk_id,
-                        document_id=document_id,
-                        tokens=tokenize(content),
-                        is_summary=chunk_id == SUMMARY_CHUNK_ID,
-                    )
+                    SparseEntry(chunk_id=chunk_id, document_id=document_id, tokens=keywords(text), is_summary=summary)
                 )
                 added += 1
-            scope_obj.model = None
+            self._touch(scope_obj)
             self._persist(organization_id, knowledge_base_id, scope_obj)
         return added
 
@@ -132,7 +211,7 @@ class SparseIndex:
             scope_obj.entries = [entry for entry in scope_obj.entries if entry.document_id != document_id]
             removed = before - len(scope_obj.entries)
             if removed:
-                scope_obj.model = None
+                self._touch(scope_obj)
                 self._persist(organization_id, knowledge_base_id, scope_obj)
         return removed
 
@@ -143,17 +222,6 @@ class SparseIndex:
             path = self._path(scope)
             if path.exists():
                 path.unlink()
-
-    def _ensure_model(self, scope_obj: _Scope):
-        if scope_obj.model is None or scope_obj.dirty:
-            from rank_bm25 import BM25Plus
-
-            # BM25Plus (not Okapi): its idf is log((N+1)/n) which stays positive even
-            # for a one-document scope, where Okapi's idf floor makes every score <= 0.
-            corpus = [entry.tokens or [""] for entry in scope_obj.entries]
-            scope_obj.model = BM25Plus(corpus) if corpus else None
-            scope_obj.dirty = False
-        return scope_obj.model
 
     def search(
         self,
@@ -169,35 +237,56 @@ class SparseIndex:
         The key is composite because ``chunk_0001`` repeats in every document; a bare
         chunk id would make two documents indistinguishable for the fusion stage.
 
-        ``document_ids`` narrows the search to a subset of this scope's documents. Scores
-        come from the scope-wide BM25 model (its idf is corpus-wide), so the subset only
-        *filters* candidates — it does not rebuild statistics. That is a deliberate
-        trade-off: rebuilding the index per prompt would cost more than the ranking
-        difference, and the scores are normalised against the surviving set anyway.
-
-        ``include_summary`` bawaannya False: potongan ringkasan tidak ikut pencarian biasa
-        supaya ia tidak mendesak potongan isi keluar dari ``top_k``.
+        Hanya potongan yang memuat minimal satu istilah kueri yang dikembalikan. ``document_ids``
+        hanya MENYARING kandidat; statistik IDF tetap seluruh scope.
         """
+        terms = unique(term for token in keywords(query) for term in term_forms(token))
+        if not terms:
+            return []
         scope_obj = self._scope(organization_id, knowledge_base_id)
         wanted = {str(item) for item in (document_ids or []) if item} or None
         with self._lock:
             if not scope_obj.entries:
                 return []
-            model = self._ensure_model(scope_obj)
-            if model is None:
-                return []
-            scores = model.get_scores(tokenize(query))
-            paired = [
-                (f"{entry.document_id}::{entry.chunk_id}", float(score))
-                for entry, score in zip(scope_obj.entries, scores)
-                if (wanted is None or entry.document_id in wanted)
-                and (include_summary or not entry.is_summary)
+            self._ensure_postings(scope_obj)
+            total = len(scope_obj.entries)
+            scores: Dict[int, float] = {}
+            for term in terms:
+                bucket = scope_obj.postings.get(term)
+                if not bucket:
+                    continue
+                idf = self._idf(total, len(bucket))
+                for index, frequency in bucket.items():
+                    entry = scope_obj.entries[index]
+                    if wanted is not None and entry.document_id not in wanted:
+                        continue
+                    if entry.is_summary and not include_summary:
+                        continue
+                    norm = K1 * (1 - B + B * scope_obj.lengths[index] / scope_obj.avgdl)
+                    scores[index] = scores.get(index, 0.0) + idf * frequency * (K1 + 1) / (frequency + norm)
+            ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
+            keys = [
+                (f"{scope_obj.entries[index].document_id}::{scope_obj.entries[index].chunk_id}", score)
+                for index, score in ranked
             ]
-        ranked = sorted(paired, key=lambda item: item[1], reverse=True)[:top_k]
-        if not ranked:
+        if not keys:
             return []
-        best = max(score for _, score in ranked) or 1.0
-        return [(key, score / best) for key, score in ranked if score > 0]
+        best = keys[0][1] or 1.0
+        return [(key, score / best) for key, score in keys]
+
+    def idf_function(self, organization_id: str, knowledge_base_id: str) -> Callable[[str], float]:
+        """IDF tingkat korpus (seluruh scope) untuk reranker: kata yang langka di SELURUH
+        knowledge lebih menentukan - jauh lebih stabil daripada IDF dari segelintir kandidat."""
+        scope_obj = self._scope(organization_id, knowledge_base_id)
+        with self._lock:
+            self._ensure_postings(scope_obj)
+            total = max(1, len(scope_obj.entries))
+            frequencies = {term: len(bucket) for term, bucket in scope_obj.postings.items()}
+
+        def idf(term: str) -> float:
+            return self._idf(total, frequencies.get(term, 0))
+
+        return idf
 
     def document_ids(self, organization_id: str, knowledge_base_id: str) -> List[str]:
         scope_obj = self._scope(organization_id, knowledge_base_id)
@@ -207,3 +296,122 @@ class SparseIndex:
     def stats(self) -> Dict[str, int]:
         with self._lock:
             return {scope: len(scope_obj.entries) for scope, scope_obj in self._scopes.items()}
+
+    # ------------------------------------------------------------------ #
+    # Pembangunan ulang indeks lama
+    # ------------------------------------------------------------------ #
+    def legacy_scopes(self) -> List[Tuple[str, str]]:
+        """``[(organization_id, knowledge_base_id)]`` yang berkasnya masih versi lama."""
+        found: List[Tuple[str, str]] = []
+        for path in sorted(self._root.glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            if int(payload.get("version") or 1) >= INDEX_VERSION:
+                continue
+            organization_id = str(payload.get("organization_id") or "")
+            knowledge_base_id = str(payload.get("knowledge_base_id") or "")
+            if organization_id and knowledge_base_id:
+                found.append((organization_id, knowledge_base_id))
+        return found
+
+    def generation(self, organization_id: str, knowledge_base_id: str) -> int:
+        scope_obj = self._scope(organization_id, knowledge_base_id)
+        with self._lock:
+            return scope_obj.generation
+
+    def rebuild_scope(
+        self,
+        organization_id: str,
+        knowledge_base_id: str,
+        rows: Iterable[Row],
+        *,
+        expected_generation: Optional[int] = None,
+    ) -> bool:
+        """Ganti seluruh isi scope. Ditolak (False) bila scope berubah sejak ``expected_generation``
+        - pengindeksan yang berjalan bersamaan tidak boleh tertimpa data yang lebih lama."""
+        entries = [
+            SparseEntry(
+                chunk_id=row[0],
+                document_id=row[1],
+                tokens=keywords(row[2]),
+                is_summary=bool(row[3]) if len(row) > 3 else row[0] == SUMMARY_CHUNK_ID,
+            )
+            for row in rows
+        ]
+        scope_obj = self._scope(organization_id, knowledge_base_id)
+        with self._lock:
+            if expected_generation is not None and scope_obj.generation != expected_generation:
+                return False
+            scope_obj.entries = entries
+            scope_obj.legacy = False
+            self._touch(scope_obj)
+            self._persist(organization_id, knowledge_base_id, scope_obj)
+        return True
+
+
+def qdrant_rows_loader(settings: Settings) -> Callable[[str, str, Sequence[str]], List[Row]]:
+    """Baca ulang isi potongan dari Qdrant (sumber kebenaran) untuk membangun ulang BM25."""
+    from app.qdrant import repository
+
+    def load(organization_id: str, knowledge_base_id: str, document_ids: Sequence[str]) -> List[Row]:
+        rows: List[Row] = []
+        for document_id in document_ids:
+            for payload in repository.list_document_chunks(
+                settings,
+                organization_id=organization_id,
+                document_id=document_id,
+                knowledge_base_id=knowledge_base_id,
+                include_summary=True,
+            ):
+                chunk_id = str(payload.get("chunk_id") or "")
+                if not chunk_id:
+                    continue
+                rows.append(
+                    (
+                        chunk_id,
+                        document_id,
+                        sparse_text(
+                            str(payload.get("document_name") or ""),
+                            str(payload.get("section") or ""),
+                            str(payload.get("content") or ""),
+                        ),
+                        bool(payload.get("is_summary")) or chunk_id == SUMMARY_CHUNK_ID,
+                    )
+                )
+        return rows
+
+    return load
+
+
+def migrate_legacy_scopes(
+    index: SparseIndex,
+    loader: Callable[[str, str, Sequence[str]], List[Row]],
+    *,
+    attempts: int = 3,
+) -> Dict[str, int]:
+    """Bangun ulang setiap scope versi lama dari Qdrant. Aman dijalankan berulang.
+
+    Bila isi Qdrant untuk scope itu kosong padahal indeks lama berisi, scope dibiarkan (lebih
+    baik indeks lama daripada indeks kosong). Hasil: {scope: jumlah potongan} yang dibangun.
+    """
+    done: Dict[str, int] = {}
+    for organization_id, knowledge_base_id in index.legacy_scopes():
+        scope = index.scope_key(organization_id, knowledge_base_id)
+        for _ in range(attempts):
+            generation = index.generation(organization_id, knowledge_base_id)
+            document_ids = index.document_ids(organization_id, knowledge_base_id)
+            try:
+                rows = loader(organization_id, knowledge_base_id, document_ids)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("bangun ulang BM25 %s gagal membaca Qdrant: %s", scope, exc)
+                break
+            if document_ids and not rows:
+                logger.warning("bangun ulang BM25 %s dilewati: Qdrant tidak mengembalikan potongan", scope)
+                break
+            if index.rebuild_scope(organization_id, knowledge_base_id, rows, expected_generation=generation):
+                done[scope] = len(rows)
+                logger.info("indeks BM25 %s dibangun ulang (versi %d): %d potongan", scope, INDEX_VERSION, len(rows))
+                break
+    return done

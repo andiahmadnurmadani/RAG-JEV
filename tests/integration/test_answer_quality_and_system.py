@@ -66,13 +66,17 @@ def test_undocumented_query_option_is_rejected_not_ignored(client):
 
 
 def test_dense_only_search_returns_every_matching_document(client):
-    """Dense hits must carry document_id, or fusion collapses them into one candidate."""
+    """Dense hits must carry document_id, or fusion collapses them into one candidate.
+
+    Isinya sengaja berbeda sedikit: potongan yang isinya identik persis memang dibuang sebagai
+    duplikat (lihat test_identical_chunks_are_deduplicated) - yang diuji di sini identitas kunci.
+    """
     shared = (
         "# SOP Cuti Bersama\n\nProsedur cuti tahunan wajib diajukan lewat sistem HR dan "
         "disetujui atasan paling lambat dua hari kerja sebelum tanggal mulai.\n"
     )
     _index(client, "doc_dense_a", shared)
-    _index(client, "doc_dense_b", shared)
+    _index(client, "doc_dense_b", shared + "Berlaku untuk kantor cabang.\n")
     response = client.post(
         "/api/v1/search",
         json={

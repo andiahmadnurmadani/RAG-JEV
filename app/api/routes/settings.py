@@ -89,6 +89,8 @@ class ApiKeyCreateRequest(BaseModel):
     user_id: Optional[str] = None
     application_id: Optional[str] = None
     expires_in_days: Optional[int] = None
+    # Batasi kunci ke knowledge base tertentu (kunci per proyek). Kosong = semua KB organisasinya.
+    knowledge_base_ids: Optional[List[str]] = None
 
 
 class AccessCodeRequest(BaseModel):
@@ -118,8 +120,34 @@ def _require_admin(context: TrustedContext, settings: Settings) -> None:
     Setel ``CONSOLE_API_KEY_ONLY=false`` untuk kembali ke pemeriksaan izin ``admin``.
     """
     if settings.console_api_key_only:
-        return
+        # Mode satu-operator: kunci milik organisasi operator (atau berizin admin) membuka
+        # Pengaturan. Kunci TENANT lain tidak: setelan ini global, jadi tenant mana pun yang bisa
+        # mengubahnya ikut mengubah model, prompt, dan kunci untuk semua tenant lain.
+        if context.has_permission("admin") or context.organization_id == settings.ui_session_organization_id:
+            return
     context.require("admin")
+
+
+def _is_superuser(context: TrustedContext) -> bool:
+    return "*" in (context.permissions or [])
+
+
+def _require_grantable(context: TrustedContext, requested: List[str]) -> None:
+    """Kunci baru tidak boleh lebih berkuasa daripada kunci yang membuatnya.
+
+    Dulu kunci ``read`` bisa membuat kunci ``*``, lalu kunci ``*`` itu mengelola kunci dan
+    setelan seluruh tenant - eskalasi hak akses dalam dua langkah.
+    """
+    for permission in requested:
+        if permission not in ALLOWED_PERMISSIONS:
+            continue  # izin tak dikenal ditolak registry dengan pesan yang lebih jelas (422)
+        allowed = _is_superuser(context) if permission == "*" else context.has_permission(permission)
+        if not allowed:
+            raise AppError(
+                "AUTH_FORBIDDEN",
+                f"Kunci baru tidak boleh punya izin '{permission}' yang tidak dimiliki kunci pembuatnya",
+                details={"permission": permission, "caller_permissions": list(context.permissions or [])},
+            )
 
 
 def _effective(value: Optional[str], fallback: str) -> str:
@@ -141,6 +169,20 @@ def validate_probe_url(url: str) -> str:
     if parsed.hostname.lower() in _BLOCKED_HOSTS:
         raise AppError("VALIDATION_ERROR", "base_url points at a link-local/metadata host")
     return url.rstrip("/")
+
+
+def _probe_secret(given: Optional[str], url: str, stored_key: str, stored_url: str) -> str:
+    """Kunci yang boleh dikirim ke endpoint yang sedang diuji.
+
+    Kunci yang diketik pemanggil dipakai apa adanya. Kunci TERSIMPAN hanya dikirim ke URL yang
+    tersimpan bersamanya - dulu probe ke URL apa pun ikut membawa kunci tersimpan, sehingga
+    siapa pun yang bisa memanggil probe bisa "memancing" kunci LLM ke server miliknya.
+    (Alamat lokal/Tailscale tetap boleh diuji: gateway dan Jev memang sering berada di sana.)
+    """
+    if isinstance(given, str) and given.strip():
+        return given.strip()
+    same = url.rstrip("/") == str(stored_url or "").strip().rstrip("/")
+    return (stored_key or "") if same else ""
 
 
 def _decorate_uploads(body: Dict[str, Any], settings) -> Dict[str, Any]:
@@ -218,7 +260,25 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
         "reranker_enabled": None,
         "strict_grounding": None,
         "context_expand_documents": None,
+        "context_neighbor_chunks": (0, 5),
+        "context_full_document_tokens": (0, 50_000),
+        "context_expand_max_documents": (1, 10),
     }
+    float_limits = {
+        "min_relevance": (0.0, 1.0),
+        "relevance_threshold": (0.0, 1.0),
+        "hash_dense_weight": (0.0, 1.0),
+    }
+    for field, (low, high) in float_limits.items():
+        if not section or field not in section:
+            continue
+        try:
+            value = float(section[field])
+        except (TypeError, ValueError) as exc:
+            raise AppError("VALIDATION_ERROR", f"{field} harus berupa angka") from exc
+        if not low <= value <= high:
+            raise AppError("VALIDATION_ERROR", f"{field} harus antara {low} dan {high}", details={field: value})
+        section[field] = value
     # Provider reranker dibatasi ke nilai yang dikenal: salah ketik akan membuat build_reranker
     # diam-diam memakai 'none' (tanpa reranking sama sekali).
     if section and "reranker_provider" in section:
@@ -378,7 +438,7 @@ def list_llm_models(
     _require_admin(context, services_from_request(request).settings)
     services = services_from_request(request)
     base = validate_probe_url(_effective(payload.base_url, services.settings.llm_base_url))
-    key = _effective(payload.api_key, services.settings.llm_api_key)
+    key = _probe_secret(payload.api_key, base, services.settings.llm_api_key, services.settings.llm_base_url)
 
     import httpx
 
@@ -437,13 +497,14 @@ def probe_jev(
             details={"provider": provider},
         )
 
+    probe_url = validate_probe_url(_effective(payload.url, settings.jev_systemone_url))
     stub = settings.model_copy(
         update={
             "jev_enabled": True,
             "jev_provider": "systemone",
-            "jev_systemone_url": validate_probe_url(_effective(payload.url, settings.jev_systemone_url)),
+            "jev_systemone_url": probe_url,
             "jev_model": _effective(payload.model, settings.jev_model),
-            "jev_api_key": _effective(payload.api_key, settings.jev_api_key),
+            "jev_api_key": _probe_secret(payload.api_key, probe_url, settings.jev_api_key, settings.jev_systemone_url),
         }
     )
     client = SystemOneClient(stub)
@@ -529,6 +590,9 @@ def list_api_keys(
     _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     keys = _env_key_entries(settings) + registry_for(settings).public()
+    if not _is_superuser(context):
+        # Kunci tenant hanya melihat kunci organisasinya sendiri.
+        keys = [item for item in keys if item.get("organization_id") == context.organization_id]
     keys.sort(key=lambda item: (str(item.get("source")) != "registry", str(item.get("label") or "").lower()))
     return ok(
         {
@@ -552,6 +616,19 @@ def create_api_key(
     _require_admin(context, services_from_request(request).settings)
     settings = services_from_request(request).settings
     tenant = _tenant_fields(payload, context)
+    _require_grantable(
+        context,
+        list(DEFAULT_PERMISSIONS) if payload.permissions is None else [str(p).strip() for p in payload.permissions],
+    )
+    bound = [str(item).strip() for item in (payload.knowledge_base_ids or []) if str(item).strip()]
+    if context.knowledge_base_ids:
+        # Kunci yang terikat ke KB tidak bisa membuat kunci yang lepas dari ikatannya.
+        if not bound or any(item not in context.knowledge_base_ids for item in bound):
+            raise AppError(
+                "AUTH_FORBIDDEN",
+                "Kunci ini terikat ke knowledge base tertentu; kunci baru harus terikat ke subset yang sama",
+                details={"allowed": list(context.knowledge_base_ids)},
+            )
     key, entry = registry_for(settings).create(
         label=payload.label,
         permissions=payload.permissions,
@@ -560,6 +637,7 @@ def create_api_key(
         application_id=tenant["application_id"],
         created_by=f"{context.user_id}@{context.organization_id}",
         expires_in_days=payload.expires_in_days,
+        knowledge_base_ids=bound,
     )
     logger.info(
         "kunci api dibuat key_id=%s organization_id=%s oleh=%s",
@@ -597,6 +675,17 @@ def revoke_api_key(
             "Kunci yang sedang dipakai tidak bisa mencabut dirinya sendiri; buat kunci pengganti, pakai kunci itu, lalu cabut yang lama",
             details={"key_id": key_id},
         )
+    if not _is_superuser(context):
+        owner = next(
+            (item for item in registry_for(settings).public() if str(item.get("key_id")) == str(key_id)),
+            None,
+        )
+        if owner is not None and owner.get("organization_id") != context.organization_id:
+            raise AppError(
+                "AUTH_FORBIDDEN",
+                "Kunci milik organisasi lain tidak bisa dicabut dengan kunci ini",
+                details={"key_id": key_id},
+            )
     entry = registry_for(settings).revoke(key_id)
     logger.info("kunci api dicabut key_id=%s oleh=%s", key_id, context.user_id)
     return ok({"entry": entry})

@@ -109,21 +109,20 @@ def build_context(
                 flags.append(marker)
 
     def render(candidate: Candidate) -> str:
-        block = fence_document(
+        notes = []
+        if candidate.is_summary:
+            notes.append("Type: ringkasan dokumen")
+        elif candidate.document_order:
+            # Posisi di dokumen: model tahu blok mana yang bersambung (bagian 7 lalu 8).
+            notes.append(f"Part: {candidate.document_order}")
+        return fence_document(
             candidate.chunk_id,
             candidate.document_name or candidate.document_id,
             candidate.page,
             candidate.content.strip(),
+            section=candidate.section,
+            notes=notes,
         )
-        if candidate.section:
-            block += f"\n[SECTION]\n{candidate.section}"
-        if candidate.expanded:
-            # Bagian pelengkap dokumen: tandai sebagai urutan dokumen, bukan hasil pencarian
-            # lain, supaya model membacanya sebagai satu dokumen utuh.
-            block += f"\n[DOCUMENT_PART]\nbagian {candidate.document_order}"
-        if candidate.is_summary:
-            block += "\n[SUMMARY]\nringkasan dokumen"
-        return block
 
     # Isi dokumen dan ringkasan diperlakukan berbeda saat anggaran mepet.
     #

@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261007a">
+<link rel="stylesheet" href="style.css?v=20261010a">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -126,6 +126,7 @@
               <button type="button" id="btn-mode-search" aria-pressed="false">Cari saja</button>
             </span>
             <span class="scope-chip" id="scope-chip">semua dokumen</span>
+            <button class="btn ghost sm" id="btn-new-chat" type="button" title="Mulai percakapan baru (riwayat pertanyaan sebelumnya dilupakan)">Percakapan baru</button>
             <span class="spacer" style="flex:1"></span>
             <span id="req-id"></span>
           </div>
@@ -151,7 +152,8 @@
         <button type="button" data-panel="llm" aria-selected="false">Model AI</button>
         <button type="button" data-panel="jev" aria-selected="false">Jev</button>
         <button type="button" data-panel="fmt" aria-selected="false">Format berkas</button>
-        <button type="button" data-panel="retr" aria-selected="false">Retrieval</button>
+        <button type="button" data-panel="retr" aria-selected="false">Kualitas jawaban</button>
+        <button type="button" data-panel="eval" aria-selected="false">Uji akurasi</button>
         <button type="button" data-panel="web" aria-selected="false">Sumber web</button>
         <button type="button" data-panel="summary" aria-selected="false">Ringkasan</button>
       </nav>
@@ -277,8 +279,8 @@
           </div>
           <div class="field">
             <label for="llm-frequency-penalty">frequency_penalty</label>
-            <input type="number" id="llm-frequency-penalty" min="-2" max="2" step="0.1" value="0.2">
-            <span class="help">Menekan kata yang terulang terus. 0 = tidak dipakai.</span>
+            <input type="number" id="llm-frequency-penalty" min="-2" max="2" step="0.1" value="0">
+            <span class="help" id="llm-frequency-help">Menekan kata yang terulang. <b>Disarankan 0</b> untuk jawaban dari dokumen: angka, nama kolom, "Rp", dan tahun memang sering berulang, dan penalti membuat model menghindarinya (memicu kata terpotong/salah salin).</span>
           </div>
           <div class="field">
             <label for="llm-repair-attempts">Perbaikan teks rusak</label>
@@ -371,80 +373,171 @@
 
       <section class="group" data-panel="retr" hidden>
         <div class="group-head">
-          <h2>Retrieval</h2>
-          <p>Pilihan per permintaan dari browser ini; tidak mengubah setelan layanan.</p>
+          <h2>Kualitas jawaban</h2>
+          <p>Mengatur kapan layanan menjawab, kapan menolak dengan "tidak ditemukan", dan seberapa banyak isi dokumen yang dibaca model. Berlaku untuk seluruh layanan (semua aplikasi yang memakai API ini), tanpa redeploy.</p>
         </div>
-        <div class="grid-2">
-          <div class="field">
-            <label for="r-topk">top_k</label>
-            <input type="number" id="r-topk" min="1" max="50" step="1">
-          </div>
-          <div class="field">
-            <label for="r-threshold">threshold</label>
-            <input type="number" id="r-threshold" min="0" max="1" step="0.05">
-          </div>
-          <div class="field">
-            <label for="r-route">Keputusan Jev</label>
-            <select id="r-route">
-              <option value="">otomatis (dari Jev)</option>
-              <option value="knowledge_query">knowledge_query</option>
-              <option value="knowledge_search">knowledge_search</option>
-              <option value="knowledge_summary">knowledge_summary</option>
-              <option value="knowledge_extract">knowledge_extract</option>
-            </select>
-            <span class="help">Memaksa capability untuk permintaan berikutnya.</span>
-          </div>
-        </div>
-        <div class="row">
-          <label class="switch" for="r-strict"><input type="checkbox" id="r-strict"><span class="track"></span><span>strict grounding</span></label>
-          <label class="switch" for="r-hybrid"><input type="checkbox" id="r-hybrid"><span class="track"></span><span>hybrid (BM25 + vektor)</span></label>
-          <label class="switch" for="r-reranker"><input type="checkbox" id="r-reranker"><span class="track"></span><span>reranker</span></label>
-        </div>
-        <div class="group-foot">
-          <button class="btn primary" id="btn-save-retr" type="button">Simpan pilihan</button>
-          <span id="retr-status"></span>
+        <div id="retr-engine-note"></div>
+        <div class="preset-row" role="group" aria-label="Preset kualitas">
+          <button class="preset" type="button" data-preset="accurate"><b>Akurat</b><span>Disarankan. Menolak pertanyaan di luar knowledge, membaca bagian sekitar jawaban.</span></button>
+          <button class="preset" type="button" data-preset="balanced"><b>Seimbang</b><span>Lebih jarang menolak; cocok bila pertanyaan pengguna sering memakai istilah lain.</span></button>
+          <button class="preset" type="button" data-preset="complete"><b>Dokumen lengkap</b><span>Membaca lebih banyak isi dokumen. Lebih lambat, untuk dokumen panjang &amp; daftar lengkap.</span></button>
         </div>
 
-        <div class="group-head">
-          <h2>Dokumen besar</h2>
-          <p>Setelan layanan (perlu izin admin, berlaku untuk semua tenant). Naikkan anggaran konteks kalau dokumennya besar; turunkan kalau model yang dipakai berjendela kecil.</p>
-        </div>
+        <h3 class="mini-head">Kapan menjawab "tidak ditemukan"</h3>
         <div class="grid-2">
           <div class="field">
-            <label for="s-context-tokens">Anggaran konteks (token)</label>
-            <input type="number" id="s-context-tokens" min="2000" max="200000" step="1000" value="24000">
-            <span class="help">Berapa banyak isi dokumen yang benar-benar dikirim ke model. 0 = ikut batas karakter.</span>
+            <label for="s-min-relevance">Ambang relevansi minimum <output class="val" id="s-min-relevance-val"></output></label>
+            <input type="range" id="s-min-relevance" min="0" max="0.8" step="0.05" value="0.3">
+            <span class="help">Skor hasil terbaik (0&ndash;1) di bawah nilai ini = langsung dijawab "tidak ditemukan" tanpa memanggil model. Naikkan bila masih ada jawaban ngawur; turunkan bila pertanyaan yang datanya ada ikut ditolak. <b>0 = matikan.</b> Lihat skornya di setiap jawaban (baris <i>skor terbaik</i>).</span>
           </div>
           <div class="field">
-            <label for="s-topk">top_k bawaan</label>
-            <input type="number" id="s-topk" min="1" max="50" step="1" value="12">
-            <span class="help">Jumlah potongan hasil pencarian sebelum dokumen dilengkapi.</span>
-          </div>
-          <div class="field">
-            <label for="s-maxchunks">Maks. potongan per dokumen</label>
-            <input type="number" id="s-maxchunks" min="1" max="200" step="1" value="8">
-            <span class="help">Batas potongan satu dokumen di tahap pencarian.</span>
+            <label for="s-rel-threshold">Saring hasil lemah <output class="val" id="s-rel-threshold-val"></output></label>
+            <input type="range" id="s-rel-threshold" min="0" max="0.9" step="0.05" value="0.35">
+            <span class="help">Hasil dengan skor di bawah (skor terbaik &times; nilai ini) dibuang, supaya potongan yang hanya kebetulan mirip tidak ikut dibaca model.</span>
           </div>
         </div>
         <div class="row">
-          <label class="switch" for="s-expand"><input type="checkbox" id="s-expand"><span class="track"></span><span>lengkapi dokumen sampai utuh</span></label>
-          <label class="switch" for="s-reranker"><input type="checkbox" id="s-reranker" checked><span class="track"></span><span>pakai reranker</span></label>
+          <label class="switch" for="s-strict"><input type="checkbox" id="s-strict" checked><span class="track"></span><span>Tolak jawaban yang tidak berdasar (strict grounding)</span></label>
         </div>
+
+        <h3 class="mini-head">Seberapa banyak dokumen yang dibaca model</h3>
         <div class="grid-2">
           <div class="field">
-            <label for="s-reranker-provider">Mesin reranker</label>
-            <select id="s-reranker-provider">
-              <option value="lexical">lexical (bawaan, tanpa model - IDF + frasa)</option>
-              <option value="fastembed">fastembed (ONNX, perlu image dengan model)</option>
-              <option value="sentence_transformers">sentence_transformers (bge-reranker, perlu torch)</option>
-              <option value="none">none (matikan reranking)</option>
-            </select>
-            <span class="help">Reranker menilai ulang hasil pencarian lalu menyusunnya kembali. Bila mesin neural tidak terpasang di server, layanan otomatis memakai <span class="mono">lexical</span> dan mencatatnya di log.</span>
+            <label for="s-topk">Jumlah hasil pencarian</label>
+            <input type="number" id="s-topk" min="1" max="50" step="1" value="12">
+            <span class="help">Potongan teratas yang diambil dari seluruh knowledge sebelum dilengkapi.</span>
+          </div>
+          <div class="field">
+            <label for="s-neighbor">Bagian di sekitar setiap hasil</label>
+            <input type="number" id="s-neighbor" min="0" max="5" step="1" value="1">
+            <span class="help">Bagian sebelum &amp; sesudah potongan yang cocok ikut dibaca, supaya kalimat/tabel yang terpotong tetap utuh. 1 sudah cukup untuk kebanyakan dokumen.</span>
+          </div>
+          <div class="field">
+            <label for="s-fulldoc">Dokumen kecil dibaca utuh (token)</label>
+            <input type="number" id="s-fulldoc" min="0" max="50000" step="500" value="3000">
+            <span class="help">Dokumen yang lebih pendek dari ini disertakan seluruhnya (&plusmn;4 halaman per 3000 token).</span>
+          </div>
+          <div class="field">
+            <label for="s-context-tokens">Batas total teks ke model (token)</label>
+            <input type="number" id="s-context-tokens" min="2000" max="200000" step="1000" value="24000">
+            <span class="help">Batas atas isi dokumen dalam satu pertanyaan. Turunkan bila model berjendela kecil.</span>
+          </div>
+          <div class="field">
+            <label for="s-maxchunks">Maks. hasil per dokumen</label>
+            <input type="number" id="s-maxchunks" min="1" max="200" step="1" value="8">
+            <span class="help">Mencegah satu dokumen memonopoli hasil saat knowledge banyak.</span>
+          </div>
+          <div class="field">
+            <label for="s-expand-docs">Dokumen yang dilengkapi</label>
+            <input type="number" id="s-expand-docs" min="1" max="10" step="1" value="3">
+            <span class="help">Berapa dokumen teratas yang dilengkapi dengan bagian sekitarnya.</span>
           </div>
         </div>
+        <div class="row">
+          <label class="switch" for="s-expand"><input type="checkbox" id="s-expand" checked><span class="track"></span><span>Lengkapi hasil dengan bagian sekitarnya (dan dokumen utuh bila pertanyaan meminta "seluruh/daftar lengkap")</span></label>
+        </div>
+
+        <details class="adv">
+          <summary>Mesin penilai (lanjutan)</summary>
+          <div class="row">
+            <label class="switch" for="s-reranker"><input type="checkbox" id="s-reranker" checked><span class="track"></span><span>Pakai reranker</span></label>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="s-reranker-provider">Mesin reranker</label>
+              <select id="s-reranker-provider">
+                <option value="lexical">lexical (bawaan, tanpa model &ndash; IDF + frasa + bentuk dasar kata)</option>
+                <option value="fastembed">fastembed (ONNX, perlu image dengan model)</option>
+                <option value="sentence_transformers">sentence_transformers (bge-reranker, perlu torch)</option>
+                <option value="none">none (matikan reranking)</option>
+              </select>
+              <span class="help">Reranker menilai ulang hasil pencarian. Bila mesin neural tidak terpasang di server, layanan otomatis memakai <span class="mono">lexical</span>.</span>
+            </div>
+            <div class="field">
+              <label for="s-hash-weight">Bobot pencarian vektor saat embedder <span class="mono">hash</span> <output class="val" id="s-hash-weight-val"></output></label>
+              <input type="range" id="s-hash-weight" min="0" max="1" step="0.05" value="0.25">
+              <span class="help">Embedder <span class="mono">hash</span> hanya menghitung kata (bukan makna), jadi bobotnya dibuat kecil agar tidak mengencerkan pencarian kata kunci. Tidak berpengaruh bila embedder semantik dipakai.</span>
+            </div>
+          </div>
+        </details>
         <div class="group-foot">
-          <button class="btn primary" id="btn-save-retr-svc" type="button">Simpan setelan konteks</button>
+          <button class="btn primary" id="btn-save-retr-svc" type="button">Simpan kualitas jawaban</button>
           <span id="retr-svc-status"></span>
+        </div>
+
+        <details class="adv">
+          <summary>Pilihan uji khusus browser ini</summary>
+          <p class="help">Bawaan: semua <b>ikut setelan layanan</b>, jadi jawaban di konsol sama persis dengan yang diterima aplikasi lain lewat API. Ubah hanya untuk eksperimen.</p>
+          <div class="grid-2">
+            <div class="field">
+              <label for="r-topk">Jumlah hasil</label>
+              <input type="number" id="r-topk" min="1" max="50" step="1" placeholder="ikut layanan">
+            </div>
+            <div class="field">
+              <label for="r-threshold">Saring hasil lemah</label>
+              <input type="number" id="r-threshold" min="0" max="1" step="0.05" placeholder="ikut layanan">
+            </div>
+            <div class="field">
+              <label for="r-reranker">Reranker</label>
+              <select id="r-reranker"><option value="">ikut layanan</option><option value="on">nyala</option><option value="off">mati</option></select>
+            </div>
+            <div class="field">
+              <label for="r-hybrid">Pencarian kata kunci (BM25)</label>
+              <select id="r-hybrid"><option value="">ikut layanan</option><option value="on">nyala</option><option value="off">mati</option></select>
+            </div>
+            <div class="field">
+              <label for="r-strict">Strict grounding</label>
+              <select id="r-strict"><option value="">ikut layanan</option><option value="on">nyala</option><option value="off">mati</option></select>
+            </div>
+            <div class="field">
+              <label for="r-route">Keputusan Jev</label>
+              <select id="r-route">
+                <option value="">otomatis (dari Jev)</option>
+                <option value="knowledge_query">knowledge_query</option>
+                <option value="knowledge_search">knowledge_search</option>
+                <option value="knowledge_summary">knowledge_summary</option>
+                <option value="knowledge_extract">knowledge_extract</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <label class="switch" for="r-memory"><input type="checkbox" id="r-memory" checked><span class="track"></span><span>Ingat percakapan (pertanyaan lanjutan seperti "yang kedua?" dipahami)</span></label>
+          </div>
+          <div class="group-foot">
+            <button class="btn" id="btn-save-retr" type="button">Simpan pilihan browser</button>
+            <button class="btn ghost" id="btn-reset-retr" type="button">Kembalikan ke "ikut layanan"</button>
+            <span id="retr-status"></span>
+          </div>
+        </details>
+      </section>
+
+      <section class="group" data-panel="eval" hidden>
+        <div class="group-head">
+          <h2>Uji akurasi</h2>
+          <p>Daftar pertanyaan uji untuk knowledge base <b id="eval-kb">-</b>. Jalankan ulang setiap kali menambah dokumen untuk memastikan kualitas tidak turun walau knowledge makin banyak.</p>
+        </div>
+        <div class="field">
+          <label for="eval-cases">Pertanyaan uji (satu per baris)</label>
+          <textarea id="eval-cases" rows="8" spellcheck="false" placeholder="Berapa jatah cuti tahunan? => SOP Cuti&#10;Siapa yang menyetujui lembur? => SOP Lembur&#10;Berapa harga saham tahun 2030? => -"></textarea>
+          <span class="help">Tambahkan <span class="mono">=&gt; nama dokumen</span> untuk dokumen yang seharusnya menjawab (cukup sebagian namanya). <span class="mono">=&gt; -</span> berarti pertanyaan ini <b>seharusnya ditolak</b> (di luar knowledge). Tanpa <span class="mono">=&gt;</span> hanya dilihat hasilnya.</span>
+        </div>
+        <div class="row" style="align-items:center;gap:14px;flex-wrap:wrap">
+          <span class="seg" role="group" aria-label="Cara uji">
+            <button type="button" id="btn-eval-mode-search" aria-pressed="true">Cepat (pencarian saja)</button>
+            <button type="button" id="btn-eval-mode-answer" aria-pressed="false">Lengkap (dengan jawaban model)</button>
+          </span>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-eval-run" type="button">Jalankan uji</button>
+          <button class="btn ghost" id="btn-eval-stop" type="button" hidden>Hentikan</button>
+          <span id="eval-status"></span>
+        </div>
+        <div id="eval-summary"></div>
+        <div class="key-list">
+          <table class="key-table eval-table" id="eval-table" hidden>
+            <thead><tr><th>#</th><th>Pertanyaan</th><th>Hasil teratas</th><th>Diharapkan</th><th>Skor</th><th>Status</th></tr></thead>
+            <tbody id="eval-rows"></tbody>
+          </table>
         </div>
       </section>
 
@@ -536,6 +629,11 @@
           <label class="switch" for="key-perm-admin"><input type="checkbox" id="key-perm-admin"><span class="track"></span><span>admin</span></label>
           <span class="help">read selalu ikut; admin hanya bila kunci ini memang dipakai mengurus layanan.</span>
         </div>
+        <div class="field">
+          <label for="key-kbs">Batasi ke knowledge base (opsional)</label>
+          <input type="text" id="key-kbs" spellcheck="false" placeholder="mis. kb_proyek_pamjaya, kb_proyek_tirtamusi">
+          <span class="help">Untuk kunci per proyek/klien: kunci hanya bisa mencari, mengunggah, dan menghapus di knowledge base ini, walau organisasinya sama. Kosong = semua knowledge base organisasinya.</span>
+        </div>
         <details class="adv">
           <summary>Tenant kunci (opsional)</summary>
           <div class="grid-3">
@@ -570,7 +668,7 @@
         <div class="key-list">
           <table class="key-table">
             <thead>
-              <tr><th>Label</th><th>Kunci</th><th>Tenant</th><th>Izin</th><th>Dibuat</th><th>Dipakai</th><th>Status</th><th></th></tr>
+              <tr><th>Label</th><th>Kunci</th><th>Tenant</th><th>Knowledge base</th><th>Izin</th><th>Dibuat</th><th>Dipakai</th><th>Status</th><th></th></tr>
             </thead>
             <tbody id="keys-rows"></tbody>
           </table>
@@ -638,7 +736,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261007a"></script>
-<script src="app.js?v=20261007a"></script>
+<script src="markdown.js?v=20261010a"></script>
+<script src="app.js?v=20261010a"></script>
 </body>
 </html>

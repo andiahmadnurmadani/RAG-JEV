@@ -435,6 +435,11 @@ class LoginThrottle:
 _STORES: Dict[str, Any] = {}
 _STORE_LOCK = threading.Lock()
 THROTTLE = LoginThrottle()
+# Batas GLOBAL percobaan gagal (semua klien digabung). Alamat klien diambil dari header proxy
+# yang bisa dipalsukan, jadi batas per-klien saja bisa diakali dengan header acak; batas global
+# membuat menebak kode akses tetap lambat apa pun alamat yang diklaim.
+GLOBAL_THROTTLE_KEY = "__all_clients__"
+GLOBAL_THROTTLE = LoginThrottle(max_failures=40, window=LOGIN_FAILURE_WINDOW_SECONDS)
 
 
 def _path_for(settings: Any, attribute: str, filename: str) -> Path:
@@ -472,6 +477,7 @@ def reset_stores() -> None:
     with _STORE_LOCK:
         _STORES.clear()
     THROTTLE.clear()
+    GLOBAL_THROTTLE.clear()
 
 
 def session_lifetime(settings: Any, remember: bool) -> Dict[str, Any]:

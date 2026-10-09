@@ -82,7 +82,10 @@ def login(payload: LoginRequest, request: Request) -> Dict[str, Any]:
         )
 
     client = _client(request)
-    blocked = access.THROTTLE.blocked_for(client)
+    blocked = max(
+        access.THROTTLE.blocked_for(client),
+        access.GLOBAL_THROTTLE.blocked_for(access.GLOBAL_THROTTLE_KEY),
+    )
     if blocked > 0:
         raise AppError(
             "RATE_LIMITED",
@@ -92,6 +95,7 @@ def login(payload: LoginRequest, request: Request) -> Dict[str, Any]:
 
     if not store.verify(payload.code):
         access.THROTTLE.register_failure(client)
+        access.GLOBAL_THROTTLE.register_failure(access.GLOBAL_THROTTLE_KEY)
         raise AppError(
             "AUTH_INVALID",
             "Kode akses salah",

@@ -143,8 +143,10 @@ def test_lexical_reranker_promotes_the_relevant_candidate():
 
     scores = LexicalReranker().score(query, candidates)
     assert scores[2] == max(scores), "kandidat relevan tidak dinaikkan oleh reranker leksikal"
-    assert max(scores) == 1.0, "skor teratas harus dinormalkan ke 1.0 (agar threshold tidak memotong)"
-    assert max(scores) >= 0.35, "kandidat terbaik harus lolos threshold bawaan"
+    # Skor ABSOLUT (bukan dinormalkan ke 1.0): kandidat relevan lolos gerbang relevansi bawaan,
+    # kandidat yang tidak memuat satu pun kata kueri bernilai 0.
+    assert max(scores) >= 0.25, "kandidat terbaik harus lolos gerbang relevansi bawaan"
+    assert scores[0] == 0.0 and scores[3] == 0.0
 
 
 def test_neural_provider_falls_back_to_lexical_when_the_library_is_missing(settings, monkeypatch):
@@ -197,6 +199,8 @@ def test_the_llm_receives_sampling_parameters(settings):
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(httpx, "post", fake_post)
+    # Bawaannya 0 (tidak dikirim); operator yang menyetelnya harus benar-benar terkirim.
+    settings.llm_frequency_penalty = 0.2
     try:
         client = generator_module.LLMClient(settings)
         client.chat([{"role": "user", "content": "halo"}])

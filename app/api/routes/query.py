@@ -57,6 +57,7 @@ def query(
         route_hint=options.route,
         document_ids=options.document_ids,
         table_analytics=options.table_analytics,
+        history=[turn.model_dump() for turn in payload.history or []],
     )
 
     data = QueryDataOut(

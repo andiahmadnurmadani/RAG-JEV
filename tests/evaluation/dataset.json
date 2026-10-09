@@ -120,6 +120,77 @@
     "doc_pengadaan_ti"
    ],
    "answerable": true
+  },
+  {
+   "query": "Kapan paling lambat cuti tahunan harus diajukan?",
+   "expected_documents": [
+    "doc_sop_cuti"
+   ],
+   "answerable": true,
+   "kind": "parafrase"
+  },
+  {
+   "query": "Siapa yang menyetujui lembur di hari libur nasional?",
+   "expected_documents": [
+    "doc_sop_lembur"
+   ],
+   "answerable": true,
+   "kind": "parafrase"
+  },
+  {
+   "query": "Apa akibatnya kalau terlambat tiga kali dalam sebulan?",
+   "expected_documents": [
+    "doc_sop_absensi"
+   ],
+   "answerable": true,
+   "kind": "parafrase"
+  },
+  {
+   "query": "Berapa panjang minimal kata sandi?",
+   "expected_documents": [
+    "doc_iso27001"
+   ],
+   "answerable": true,
+   "kind": "parafrase"
+  },
+  {
+   "query": "Apa yang diterima pegawai baru di hari pertama?",
+   "expected_documents": [
+    "doc_onboarding"
+   ],
+   "answerable": true,
+   "kind": "parafrase"
+  },
+  {
+   "query": "Mengapa penjualan bulan Maret turun?",
+   "expected_documents": [
+    "doc_penjualan_q1"
+   ],
+   "answerable": true,
+   "kind": "parafrase"
+  },
+  {
+   "query": "Kelas tiket pesawat apa untuk penerbangan di atas empat jam?",
+   "expected_documents": [
+    "doc_perjalanan_dinas"
+   ],
+   "answerable": true,
+   "kind": "parafrase"
+  },
+  {
+   "query": "Berapa gaji pokok manajer HR?",
+   "expected_documents": [],
+   "answerable": false
+  },
+  {
+   "query": "Bagaimana prosedur klaim asuransi kendaraan dinas?",
+   "expected_documents": [],
+   "answerable": false
+  },
+  {
+   "query": "Kapan jadwal libur bersama Idul Fitri 2027?",
+   "expected_documents": [],
+   "answerable": false
   }
  ]
 }

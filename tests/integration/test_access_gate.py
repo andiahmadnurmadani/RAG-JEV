@@ -265,8 +265,9 @@ def test_clearing_the_code_returns_the_console_to_api_keys(client):
 # --------------------------------------------------------------------------- #
 # Batas izin: hanya admin
 # --------------------------------------------------------------------------- #
-def test_any_valid_key_may_manage_the_code_in_api_key_only_mode(client):
-    """Mode bawaan: kunci apa pun yang sah boleh mengelola kode akses (operator tunggal)."""
+def test_any_valid_key_may_manage_the_code_in_api_key_only_mode(client, settings):
+    """Mode bawaan: kunci organisasi operator boleh mengelola kode akses (operator tunggal)."""
+    settings.ui_session_organization_id = "org_a"
     _set_code(client)
     assert client.get(ACCESS, headers=auth(READ_ONLY_KEY)).status_code == 200
     assert client.get(ACCESS).status_code == 401, "tanpa kredensial tetap 401"

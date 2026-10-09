@@ -39,6 +39,7 @@ from app.rag.embedder import EmbedderService
 from app.rag.constants import SUMMARY_CHUNK_ID
 from app.parsing.tables import extract_tables, supports_tables
 from app.rag.sparse import SparseIndex
+from app.rag.textnorm import sparse_text
 from app.tables.store import TableStore
 
 logger = get_logger(__name__)
@@ -115,7 +116,13 @@ class JobStore:
 
     def _persist(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"jobs": [asdict(record) for record in self._jobs.values()][-500:]}
+        # Job terbaru SETIAP dokumen selalu disimpan; batas 500 hanya untuk riwayat percobaan
+        # lama. Dulu dokumen lama hilang dari daftar padahal vektornya masih ada.
+        latest = set(self._by_document.values())
+        records = list(self._jobs.values())
+        history = [record for record in records if record.job_id not in latest][-500:]
+        kept = {record.job_id for record in history} | latest
+        payload = {"jobs": [asdict(record) for record in records if record.job_id in kept]}
         tmp = self._path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self._path)
@@ -213,6 +220,34 @@ class JobStore:
         with self._lock:
             record = self._jobs.get(job_id)
             return record is None or record.status == STATUS_DELETED
+
+    def recover_interrupted(self) -> int:
+        """Selesaikan job yang terputus karena layanan dimulai ulang (mis. setiap deploy).
+
+        Antrian worker hidup di memori, jadi job berstatus queued/processing dari proses
+        sebelumnya tidak akan pernah dilanjutkan - tanpa ini statusnya macet selamanya.
+        Job yang sudah sampai tahap ringkasan berarti isinya sudah tersimpan dan bisa dicari:
+        ditandai selesai (ringkasannya saja yang tertunda). Sisanya ditandai gagal dengan alasan
+        yang jelas supaya bisa diunggah ulang.
+        """
+        recovered = 0
+        with self._lock:
+            for record in self._jobs.values():
+                if record.status not in (STATUS_QUEUED, STATUS_PROCESSING):
+                    continue
+                if record.stage == "summarizing":
+                    record.status = STATUS_COMPLETED
+                    record.stage = "completed"
+                    record.summary_error = "ringkasan terhenti karena layanan dimulai ulang"
+                else:
+                    record.status = STATUS_FAILED
+                    record.stage = "failed"
+                    record.error = "pengindeksan terputus karena layanan dimulai ulang; unggah ulang dokumen ini"
+                record.updated_at = _now()
+                recovered += 1
+            if recovered:
+                self._persist()
+        return recovered
 
     def stats(self) -> Dict[str, int]:
         with self._lock:
@@ -369,11 +404,17 @@ class IndexingPipeline:
                 if self._tables is not None and not supports_tables(parse_name):
                     self._tables.delete_document(organization_id=organization_id, document_id=document_id)
             written = repository.upsert_chunks(self._settings, dim=self._embedder.dim, points=vectors)
+            name_for_index = document_name or parsed.document_name
             self._sparse.upsert(
                 organization_id,
                 knowledge_base_id,
-                [(chunk.chunk_id, document_id, chunk.content) for chunk in chunks],
+                [
+                    (chunk.chunk_id, document_id, sparse_text(name_for_index, chunk.section, chunk.content))
+                    for chunk in chunks
+                ],
             )
+            if self._discard_if_deleted(job_id, organization_id, knowledge_base_id, document_id):
+                return self._jobs.get(job_id)
 
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             metric_observe("embedding_latency", duration_ms / 1000.0)
@@ -527,8 +568,13 @@ class IndexingPipeline:
         self._sparse.upsert(
             organization_id,
             knowledge_base_id,
-            [(chunk.chunk_id, document_id, chunk.content) for chunk in chunks],
+            [
+                (chunk.chunk_id, document_id, sparse_text(display_name, chunk.section, chunk.content))
+                for chunk in chunks
+            ],
         )
+        if self._discard_if_deleted(job_id, organization_id, knowledge_base_id, document_id):
+            return self._jobs.get(job_id)
         # Sama seperti jalur berkas: isi selesai dulu, ringkasan di jalur terpisah.
         if self._settings.document_summary_enabled:
             self._jobs.update(
@@ -728,7 +774,7 @@ class IndexingPipeline:
             self._sparse.upsert(
                 organization_id,
                 knowledge_base_id,
-                [(SUMMARY_CHUNK_ID, document_id, result.text)],
+                [(SUMMARY_CHUNK_ID, document_id, sparse_text(document_name, "Ringkasan dokumen", result.text), True)],
             )
         except Exception as exc:  # noqa: BLE001 - gagal menyimpan ringkasan tidak fatal
             logger.warning("ringkasan dokumen %s gagal disimpan: %s", document_id, exc)
@@ -786,6 +832,19 @@ class IndexingPipeline:
         vector = self._embedder.encode([_contextual_text_from_payload(payload)])[0]
         return [{"chunk_id": payload["chunk_id"], "vector": vector, "payload": payload}]
 
+    def _discard_if_deleted(self, job_id: str, organization_id: str, knowledge_base_id: str, document_id: str) -> bool:
+        """Dokumen dihapus SELAMA diindeks: buang hasil yang baru saja ditulis.
+
+        Tanpa ini, penghapusan yang terjadi di tengah proses "dibatalkan" oleh upsert sesudahnya -
+        dokumen yang sudah dihapus pengguna bisa dicari lagi.
+        """
+        if not self._jobs.is_deleted(job_id):
+            return False
+        repository.delete_document(self._settings, organization_id=organization_id, document_id=document_id)
+        self._sparse.remove_document(organization_id, knowledge_base_id, document_id)
+        logger.info("dokumen %s dihapus saat diindeks; hasil indeks dibuang", document_id)
+        return True
+
     # ------------------------------------------------------------------ #
     def _encode(
         self,
@@ -802,7 +861,7 @@ class IndexingPipeline:
         created_at = _now()
         points: List[Dict[str, Any]] = []
         batch = self._settings.embedding_batch_size
-        contexts = [_contextual_text(chunk) for chunk in chunks]
+        contexts = [_contextual_text(chunk, document_name or parsed.document_name) for chunk in chunks]
         for start in range(0, len(chunks), batch):
             window_chunks = chunks[start : start + batch]
             window_texts = contexts[start : start + batch]
@@ -929,16 +988,21 @@ class IndexingPipeline:
         return bytes(buffer), parse_name, name
 
 
-def _contextual_text(chunk) -> str:
-    """Index with a contextual header so isolated chunks stay interpretable."""
-    header = " | ".join(part for part in [chunk.section, f"page {chunk.page}"] if part)
+def _contextual_text(chunk, document_name: str = "") -> str:
+    """Index with a contextual header so isolated chunks stay interpretable.
+
+    Nama dokumen ikut (pertanyaan sering menyebut dokumennya: "SOP cuti"), sedangkan "page N"
+    tidak - nomor halaman tidak membawa makna dan hanya menambah derau pada vektor.
+    """
+    header = " | ".join(part for part in [document_name, chunk.section] if part)
     return f"{header}\n{chunk.content}" if header else chunk.content
 
 
 def _contextual_text_from_payload(payload: Dict[str, Any]) -> str:
     """Sama seperti ``_contextual_text``, untuk payload yang belum jadi objek ``Chunk``."""
     section = str(payload.get("section") or "")
-    header = " | ".join(part for part in [section] if part)
+    name = str(payload.get("document_name") or "")
+    header = " | ".join(part for part in [name, section] if part)
     content = str(payload.get("content") or "")
     return f"{header}\n{content}" if header else content
 

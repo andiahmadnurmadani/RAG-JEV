@@ -66,6 +66,9 @@ def search(
             document_name=candidate.document_name,
             section=candidate.section,
             source_url=candidate.source_url,
+            dense_score=_round(candidate.dense_score),
+            sparse_score=_round(candidate.sparse_score),
+            rerank_score=_round(candidate.rerank_score),
         )
         for candidate in retrieval.candidates
     ]
@@ -78,5 +81,15 @@ def search(
             hybrid=retrieval.hybrid_used,
             reranker=retrieval.reranker_used,
             retrieval_ms=retrieval.elapsed_ms,
+            best_score=round(float(retrieval.best_score), 4),
+            relevant=retrieval.relevant,
+            relevance_gate=retrieval.gate,
+            dense_weight=retrieval.dense_weight,
+            dense_hits=retrieval.dense_hits,
+            sparse_hits=retrieval.sparse_hits,
         ).model_dump()
     )
+
+
+def _round(value):
+    return None if value is None else round(float(value), 4)

@@ -73,7 +73,39 @@ def test_tag_xlsx_headerfooter_tidak_tertukar_dengan_tag_html_header():
     assert _html_to_text(xml) == "Laporan Penjualan"
 
 
-def test_tabel_masih_terbaca_seperti_sebelumnya():
-    """Regresi: perubahan filter tidak boleh menyentuh jalur tabel yang sudah ada."""
+def test_tabel_tetap_satu_baris_per_baris_tabel():
+    """Setiap baris tabel jadi satu baris teks (dulu seluruh tabel menyatu jadi satu baris)."""
     html = "<table><tr><th>Kolom A</th><th>Kolom B</th></tr><tr><td>1</td><td>2</td></tr></table>"
-    assert _html_to_text(html) == "Kolom A | Kolom B | 1 | 2"
+    assert _html_to_text(html) == "Kolom A | Kolom B\n1 | 2"
+
+
+def test_header_artikel_dengan_judul_tetap_ada():
+    """<header> situs dibuang, tetapi <header> artikel yang memuat judul/tanggal adalah isi."""
+    html = (
+        '<header class="site"><a>Logo PT</a></header>'
+        "<article><header><h1>Pengumuman Libur Nasional 2026</h1><time>1 Jan 2026</time></header>"
+        "<p>Kantor tutup tanggal 17 Agustus.</p></article>"
+    )
+    text = _html_to_text(html)
+    assert "Pengumuman Libur Nasional 2026" in text
+    assert "1 Jan 2026" in text
+    assert "Logo PT" not in text
+
+
+def test_banner_cookie_breadcrumb_dan_tombol_bagikan_dibuang():
+    html = (
+        '<div class="cookie-banner">Kami memakai cookie untuk pengalaman terbaik.</div>'
+        '<ol class="breadcrumb"><li>Beranda</li><li>Berita</li></ol>'
+        "<p>Isi berita yang sah.</p>"
+        '<div class="share-buttons">Bagikan: Facebook Twitter</div>'
+        "<aside>Artikel terkait lain</aside>"
+    )
+    text = _html_to_text(html)
+    assert text == "Isi berita yang sah."
+
+
+def test_wadah_panjang_bernama_sidebar_tidak_menyeret_isi_utama():
+    """Kelas "chrome" hanya dibuang bila teksnya pendek - wadah halaman tidak boleh ikut hilang."""
+    body = "Isi utama dokumen yang panjang. " * 40
+    html = f'<div class="layout with-sidebar"><p>{body}</p></div>'
+    assert "Isi utama dokumen yang panjang." in _html_to_text(html)

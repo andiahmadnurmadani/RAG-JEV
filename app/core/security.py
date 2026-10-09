@@ -11,7 +11,7 @@ import re
 import time
 import unicodedata
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -321,11 +321,30 @@ def scan_injection(text: str) -> List[str]:
     return [marker for marker in INJECTION_MARKERS if marker in lowered]
 
 
-def fence_document(chunk_id: str, document_name: str, page: Any, content: str) -> str:
-    """Wrap retrieved content as inert data with an explicit boundary (PRD 35)."""
+def fence_document(
+    chunk_id: str,
+    document_name: str,
+    page: Any,
+    content: str,
+    *,
+    section: str = "",
+    notes: Sequence[str] = (),
+) -> str:
+    """Wrap retrieved content as inert data with an explicit boundary (PRD 35).
+
+    Semua keterangan (bagian, halaman, posisi) ada di header SEBELUM isi, di dalam batas blok -
+    model membaca "ini bagian apa" lebih dulu, dan tidak ada label yang tercecer di luar blok.
+    """
+    header = [f"Name: {document_name}"]
+    if section:
+        header.append(f"Section: {section}")
+    if page not in (None, ""):
+        header.append(f"Page: {page}")
+    header.append(f"Chunk: {chunk_id}")
+    header.extend(note for note in notes if note)
     return (
         "<retrieved_document>\n"
-        f"[DOCUMENT]\nName: {document_name}\nPage: {page}\nChunk: {chunk_id}\n"
+        "[DOCUMENT]\n" + "\n".join(header) + "\n"
         "[CONTENT]\n"
         f"{content}\n"
         "</retrieved_document>"

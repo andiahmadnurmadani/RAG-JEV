@@ -91,6 +91,7 @@ nav:
       - Sumber web & berkas publik: web-sources.md
       - Ringkasan dokumen: document-summary.md
       - Jawaban Markdown: markdown-answers.md
+      - Akurasi retrieval & multi-tenant: retrieval-accuracy.md
       - Kualitas jawaban (teks bersih & reranker): answer-quality.md
       - Teks bersih (aksara asing & sampah biner): text-hygiene.md
       - Isolasi tenant: tenant-isolation.md

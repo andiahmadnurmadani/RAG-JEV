@@ -10,7 +10,24 @@
 const KEY = "rag.console.v3";
 const SESSION_KEY = "rag.session.v1";
 const DEFAULT_KB = "kb_chat";
-const PANELS = ["conn", "access", "keys", "llm", "jev", "fmt", "retr", "web", "summary"];
+const PANELS = ["conn", "access", "keys", "llm", "jev", "fmt", "retr", "eval", "web", "summary"];
+// Versi bentuk opsi uji di localStorage. Versi lama memaksa reranker MATI di setiap pertanyaan konsol,
+// sehingga hasil uji berbeda dari yang diterima aplikasi lewat API; opsi lama itu dibuang.
+const OPTS_VERSION = 2;
+const HISTORY_TURNS = 6;
+const EVAL_KEY = "rag.console.eval.v1";
+// Preset kualitas jawaban (setelan layanan).
+const PRESETS = {
+  accurate: { min_relevance: 0.3, relevance_threshold: 0.35, final_top_k: 12, context_neighbor_chunks: 1,
+    context_full_document_tokens: 3000, context_max_tokens: 24000, max_chunks_per_document: 8,
+    context_expand_max_documents: 3, context_expand_documents: true, strict_grounding: true },
+  balanced: { min_relevance: 0.2, relevance_threshold: 0.25, final_top_k: 15, context_neighbor_chunks: 1,
+    context_full_document_tokens: 3000, context_max_tokens: 24000, max_chunks_per_document: 8,
+    context_expand_max_documents: 3, context_expand_documents: true, strict_grounding: true },
+  complete: { min_relevance: 0.25, relevance_threshold: 0.3, final_top_k: 20, context_neighbor_chunks: 2,
+    context_full_document_tokens: 8000, context_max_tokens: 48000, max_chunks_per_document: 12,
+    context_expand_max_documents: 4, context_expand_documents: true, strict_grounding: true },
+};
 
 const state = {
   base: "",
@@ -24,7 +41,11 @@ const state = {
   mode: "answer",
   picked: new Set(),
   docs: [],
-  opts: { top_k: 12, threshold: 0.35, strict: true, hybrid: true, reranker: false, route: "" },
+  // null = ikut setelan layanan (bawaan): konsol menguji perilaku yang sama dengan API.
+  opts: { top_k: null, threshold: null, strict: null, hybrid: null, reranker: null, route: "", memory: true },
+  history: [],
+  evalMode: "search",
+  evalStop: false,
   limits: { max_mb: null, allowed: [], allowed_ext: [] },
   catalog: [],
   models: [],
@@ -192,12 +213,16 @@ function loadPrefs() {
     state.key = stored.key || "";
     state.kb = stored.kb || DEFAULT_KB;
     state.mode = stored.mode === "search" ? "search" : "answer";
-    state.opts = Object.assign(state.opts, stored.opts || {});
+    if (stored.optsVersion === OPTS_VERSION) state.opts = Object.assign(state.opts, stored.opts || {});
   }
 }
 
 function savePrefs() {
-  localStorage.setItem(KEY, JSON.stringify({ key: state.key, kb: state.kb, mode: state.mode, opts: state.opts }));
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ key: state.key, kb: state.kb, mode: state.mode, opts: state.opts, optsVersion: OPTS_VERSION }));
+  } catch (err) {
+    /* penyimpanan browser tidak tersedia: pilihan berlaku untuk tab ini saja */
+  }
 }
 
 function restore() {
@@ -207,13 +232,13 @@ function restore() {
   loadSession();
   $("set-kb").value = state.kb;
   $("set-key").value = state.key;
-  $("r-topk").value = state.opts.top_k;
-  $("r-threshold").value = state.opts.threshold;
-  $("r-route").value = state.opts.route;
-  $("r-strict").checked = !!state.opts.strict;
-  $("r-hybrid").checked = !!state.opts.hybrid;
-  $("r-reranker").checked = !!state.opts.reranker;
+  renderBrowserOptions();
   setMode(state.mode);
+  try {
+    $("eval-cases").value = localStorage.getItem(EVAL_KEY) || "";
+  } catch (err) {
+    /* tanpa localStorage: daftar uji tidak diingat */
+  }
 }
 
 function readConnInputs() {
@@ -371,6 +396,7 @@ function selectPanel(name) {
     section.hidden = section.dataset.panel !== state.panel;
   });
   if (state.panel === "access") loadAccess();
+  if (state.panel === "eval") $("eval-kb").textContent = state.kb;
 }
 
 // Sembunyikan/tampilkan bagian yang hanya berguna saat gerbang kode akses dipakai.
@@ -757,7 +783,10 @@ function renderAnswer(node, data) {
         ? ' <a class="cite-link" href="' + escapeHtml(source.source_url) + '" target="_blank" rel="noopener noreferrer" title="' +
           escapeHtml(source.source_url) + '">buka</a>'
         : "";
-      return '<span class="cite"><b>[' + (index + 1) + "]</b>" + escapeHtml(label) + page + link + " " + score + "</span>";
+      const number = source.index || index + 1;
+      const cited = source.cited ? " cited" : "";
+      const title = source.cited ? "dikutip di jawaban" : "dibaca model, tidak dikutip";
+      return '<span class="cite' + cited + '" title="' + title + '"><b>[' + number + "]</b>" + escapeHtml(label) + page + link + " " + score + "</span>";
     }).join("");
     node.appendChild(cites);
   }
@@ -795,10 +824,14 @@ function renderAnswer(node, data) {
       ]);
     }
   }
+  if (!data.computed && usage.best_score != null) {
+    chips.push(["skor terbaik", fmtScore(usage.best_score) + (usage.relevance_gate ? " (" + (GATE_LABELS[usage.relevance_gate] || usage.relevance_gate) + ")" : "")]);
+  }
+  if (usage.search_query) chips.push(["dicari bersama pertanyaan sebelumnya", "ya"]);
   chips.push(["retrieval_ms", usage.retrieval_ms != null ? usage.retrieval_ms : "-"]);
   chips.push(["rendering_ms", usage.generation_ms != null ? Math.round(usage.generation_ms) : "-"]);
   if (usage.computed_rows) chips.push(["baris dihitung", usage.computed_rows]);
-  if (data.no_answer_reason) chips.push(["alasan", data.no_answer_reason]);
+  if (data.no_answer_reason) chips.push(["alasan", NO_ANSWER_REASONS[data.no_answer_reason] || data.no_answer_reason]);
 
   const meta = document.createElement("div");
   meta.className = "meta";
@@ -811,50 +844,122 @@ function renderAnswer(node, data) {
 function renderHits(node, data) {
   const results = data.results || [];
   const bubble = node.querySelector(".bubble");
-  bubble.textContent = "Retrieval saja" + (data.hybrid ? " (hybrid)" : "") + ": " + results.length + " hasil, tanpa memanggil model.";
+  const verdict = data.relevant
+    ? '<span class="tag ok">cukup relevan untuk dijawab</span>'
+    : '<span class="tag warn">akan dijawab "tidak ditemukan"</span>';
+  bubble.innerHTML = "Pencarian saja (tanpa model): <b>" + results.length + "</b> hasil. Skor terbaik <b>" +
+    escapeHtml(fmtScore(data.best_score)) + "</b> " + (results.length ? verdict : "");
   if (results.length) {
-    const cites = document.createElement("div");
-    cites.className = "cites";
-    cites.innerHTML = results.map((hit, index) => {
+    const wrap = document.createElement("div");
+    wrap.className = "hit-wrap";
+    const rows = results.map((hit, index) => {
       const label = hit.document_name || hit.document_id;
-      const score = typeof hit.score === "number" ? '<span class="score">' + hit.score.toFixed(2) + "</span>" : "";
-      return '<span class="cite"><b>[' + (index + 1) + "]</b>" + escapeHtml(label) + " " + score + "</span>";
+      const where = [hit.section, hit.page ? "hal. " + hit.page : ""].filter(Boolean).join(" · ");
+      const preview = String(hit.content || "").replace(/\s+/g, " ").slice(0, 220);
+      return "<tr><td>" + (index + 1) + "</td><td><b>" + escapeHtml(label) + "</b>" +
+        (where ? '<div class="help">' + escapeHtml(where) + "</div>" : "") +
+        '<div class="hit-preview">' + escapeHtml(preview) + (String(hit.content || "").length > 220 ? "…" : "") + "</div></td>" +
+        '<td class="mono">' + fmtScore(hit.rerank_score != null ? hit.rerank_score : hit.score) + "</td>" +
+        '<td class="mono">' + fmtScore(hit.sparse_score) + "</td>" +
+        '<td class="mono">' + fmtScore(hit.dense_score) + "</td></tr>";
     }).join("");
-    node.appendChild(cites);
+    wrap.innerHTML = '<table class="key-table hit-table"><thead><tr><th>#</th><th>Potongan</th>' +
+      '<th title="Skor akhir reranker (0-1)">Skor</th><th title="Skor kata kunci BM25 (relatif)">Kata kunci</th>' +
+      '<th title="Kemiripan vektor">Vektor</th></tr></thead><tbody>' + rows + "</tbody></table>";
+    node.appendChild(wrap);
   }
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.innerHTML = "<span><span class=\"k\">retrieval_ms:</span><span class=\"v\">" + escapeHtml(data.retrieval_ms != null ? data.retrieval_ms : "-") +
-    "</span></span><span><span class=\"k\">reranker:</span><span class=\"v\">" + escapeHtml(data.reranker || "-") + "</span></span>";
+  const chips = [
+    ["retrieval_ms", data.retrieval_ms != null ? data.retrieval_ms : "-"],
+    ["reranker", data.reranker || "-"],
+    ["kata kunci / vektor", (data.sparse_hits || 0) + " / " + (data.dense_hits || 0)],
+    ["bobot vektor", data.dense_weight != null ? data.dense_weight : "-"],
+    ["gerbang", GATE_LABELS[data.relevance_gate] || data.relevance_gate || "-"],
+  ];
+  meta.innerHTML = chips.map((pair) =>
+    "<span><span class=\"k\">" + escapeHtml(pair[0]) + ":</span><span class=\"v\">" + escapeHtml(pair[1]) + "</span></span>").join("");
   node.appendChild(meta);
+  if (!data.relevant) node.classList.add("no-answer");
 }
 
+// Opsi per permintaan: hanya yang DIUBAH di browser ini yang dikirim; sisanya ikut setelan layanan.
 function queryOptions() {
-  const options = {
-    top_k: Number(state.opts.top_k) || 12,
-    threshold: Number(state.opts.threshold) || 0,
-    strict_grounding: !!state.opts.strict,
-    include_sources: true,
-    use_hybrid: !!state.opts.hybrid,
-    use_reranker: !!state.opts.reranker,
-  };
-  if (state.opts.route) options.route = state.opts.route;
+  const options = { include_sources: true };
+  const opts = state.opts;
+  if (opts.top_k) options.top_k = Number(opts.top_k);
+  if (opts.threshold !== null && opts.threshold !== "" && opts.threshold !== undefined) options.threshold = Number(opts.threshold);
+  if (opts.strict !== null && opts.strict !== undefined) options.strict_grounding = !!opts.strict;
+  if (opts.hybrid !== null && opts.hybrid !== undefined) options.use_hybrid = !!opts.hybrid;
+  if (opts.reranker !== null && opts.reranker !== undefined) options.use_reranker = !!opts.reranker;
+  if (opts.route) options.route = opts.route;
   if (state.picked.size) options.document_ids = Array.from(state.picked);
+  return options;
+}
+
+function searchOptions() {
+  const options = queryOptions();
+  delete options.include_sources;
+  delete options.strict_grounding;
   return options;
 }
 
 async function ask(query) {
   addMessage("user", { html: escapeHtml(query) });
   const node = addMessage("assistant", { html: '<span class="pending">Menyusun jawaban</span>' });
-  const path = state.mode === "search" ? "/search" : "/query";
+  const searching = state.mode === "search";
+  const body = { query: query, knowledge_base_id: state.kb };
+  if (searching) {
+    body.top_k = Number(state.opts.top_k) || 10;
+    body.options = searchOptions();
+  } else {
+    body.options = queryOptions();
+    if (state.opts.memory && state.history.length) body.history = state.history.slice(-HISTORY_TURNS);
+  }
   try {
-    const data = await api("POST", path, { query: query, knowledge_base_id: state.kb, options: queryOptions() });
-    if (state.mode === "search") renderHits(node, data);
-    else renderAnswer(node, data);
+    const data = await api("POST", searching ? "/search" : "/query", body);
+    if (searching) {
+      renderHits(node, data);
+    } else {
+      renderAnswer(node, data);
+      if (state.opts.memory) {
+        state.history.push({ role: "user", content: query.slice(0, 2000) });
+        if (data.grounded && data.answer) state.history.push({ role: "assistant", content: String(data.answer).slice(0, 2000) });
+        state.history = state.history.slice(-HISTORY_TURNS * 2);
+      }
+    }
   } catch (err) {
     node.querySelector(".bubble").textContent = "Gagal: " + (err.message || err.code || "tidak diketahui");
     node.classList.add("no-answer");
   }
+}
+
+function newConversation() {
+  state.history = [];
+  $("thread-inner").querySelectorAll(".msg").forEach((item) => item.remove());
+  $("thread-empty").hidden = false;
+}
+
+const NO_ANSWER_REASONS = {
+  below_threshold: "skor relevansi terbaik di bawah ambang minimum",
+  no_candidates: "tidak ada potongan yang memuat kata dari pertanyaan",
+  strict_grounding: "model menyatakan konteks tidak cukup",
+  context_empty: "konteks kosong",
+  answer_truncated: "jawaban terpotong batas token",
+  table_plan_invalid: "perhitungan tabel tidak bisa dilakukan",
+};
+
+const GATE_LABELS = {
+  lexical: "cocok kata kunci",
+  semantic: "cocok makna (vektor)",
+  reranker_off: "reranker mati, tanpa gerbang",
+  gate_off: "gerbang dimatikan",
+  below_min_relevance: "di bawah ambang",
+  no_candidates: "tanpa kandidat",
+};
+
+function fmtScore(value) {
+  return typeof value === "number" ? value.toFixed(2) : "-";
 }
 
 /* ---------------------------------------------------------------- settings */
@@ -885,7 +990,8 @@ async function loadSettings() {
     $("llm-max-tokens").value = llm.max_tokens != null ? llm.max_tokens : 8192;
     $("llm-temperature").value = llm.temperature != null ? llm.temperature : 0.1;
     $("llm-top-p").value = llm.top_p != null ? llm.top_p : 0.9;
-    $("llm-frequency-penalty").value = llm.frequency_penalty != null ? llm.frequency_penalty : 0.2;
+    $("llm-frequency-penalty").value = llm.frequency_penalty != null ? llm.frequency_penalty : 0;
+    $("llm-frequency-help").classList.toggle("warn-text", Number(llm.frequency_penalty) > 0);
     $("llm-repair-attempts").value = llm.repair_attempts != null ? llm.repair_attempts : 1;
     $("llm-strip-foreign").checked = llm.strip_foreign_scripts !== false;
     $("jev-enabled").checked = !!jev.enabled;
@@ -901,6 +1007,7 @@ async function loadSettings() {
       clearNote("fmt-note");
     }
     if (data.sections.retrieval) renderRetrievalService(data.sections.retrieval);
+    loadEngineNote();
     if (data.sections.web) renderWebService(data.sections.web);
     if (data.sections.summary) renderSummaryService(data.sections.summary);
   } catch (err) {
@@ -1096,51 +1203,255 @@ async function probeJev() {
   }
 }
 
+function triState(value) {
+  return value === "on" ? true : value === "off" ? false : null;
+}
+
+function triValue(value) {
+  return value === true ? "on" : value === false ? "off" : "";
+}
+
+function renderBrowserOptions() {
+  $("r-topk").value = state.opts.top_k || "";
+  $("r-threshold").value = state.opts.threshold === null || state.opts.threshold === undefined ? "" : state.opts.threshold;
+  $("r-route").value = state.opts.route || "";
+  $("r-strict").value = triValue(state.opts.strict);
+  $("r-hybrid").value = triValue(state.opts.hybrid);
+  $("r-reranker").value = triValue(state.opts.reranker);
+  $("r-memory").checked = state.opts.memory !== false;
+}
+
 function saveRetrieval() {
+  const threshold = $("r-threshold").value.trim();
   state.opts = {
-    top_k: Number($("r-topk").value) || 12,
-    threshold: Number($("r-threshold").value) || 0,
-    strict: $("r-strict").checked,
-    hybrid: $("r-hybrid").checked,
-    reranker: $("r-reranker").checked,
+    top_k: Number($("r-topk").value) || null,
+    threshold: threshold === "" ? null : Number(threshold),
+    strict: triState($("r-strict").value),
+    hybrid: triState($("r-hybrid").value),
+    reranker: triState($("r-reranker").value),
     route: $("r-route").value,
+    memory: $("r-memory").checked,
   };
+  if (!state.opts.memory) state.history = [];
   savePrefs();
   note("retr-status", "ok", "Pilihan disimpan untuk browser ini.");
 }
 
+function resetBrowserOptions() {
+  state.opts = { top_k: null, threshold: null, strict: null, hybrid: null, reranker: null, route: "", memory: true };
+  renderBrowserOptions();
+  savePrefs();
+  note("retr-status", "ok", "Semua pilihan kembali <b>ikut setelan layanan</b>.");
+}
+
+function syncRangeLabels() {
+  [["s-min-relevance", "s-min-relevance-val"], ["s-rel-threshold", "s-rel-threshold-val"], ["s-hash-weight", "s-hash-weight-val"]]
+    .forEach((pair) => {
+      const value = Number($(pair[0]).value);
+      $(pair[1]).textContent = pair[0] === "s-min-relevance" && value === 0 ? "mati" : value.toFixed(2);
+    });
+}
+
+function setNumber(id, value) {
+  if (value !== null && value !== undefined) $(id).value = value;
+}
+
 function renderRetrievalService(retrieval) {
-  if (retrieval.context_max_tokens != null) $("s-context-tokens").value = retrieval.context_max_tokens;
-  if (retrieval.final_top_k != null) $("s-topk").value = retrieval.final_top_k;
-  if (retrieval.max_chunks_per_document != null) $("s-maxchunks").value = retrieval.max_chunks_per_document;
+  setNumber("s-context-tokens", retrieval.context_max_tokens);
+  setNumber("s-topk", retrieval.final_top_k);
+  setNumber("s-maxchunks", retrieval.max_chunks_per_document);
+  setNumber("s-min-relevance", retrieval.min_relevance);
+  setNumber("s-rel-threshold", retrieval.relevance_threshold);
+  setNumber("s-neighbor", retrieval.context_neighbor_chunks);
+  setNumber("s-fulldoc", retrieval.context_full_document_tokens);
+  setNumber("s-expand-docs", retrieval.context_expand_max_documents);
+  setNumber("s-hash-weight", retrieval.hash_dense_weight);
   $("s-expand").checked = retrieval.context_expand_documents !== false;
   $("s-reranker").checked = retrieval.reranker_enabled !== false;
+  $("s-strict").checked = retrieval.strict_grounding !== false;
   if (retrieval.reranker_provider) $("s-reranker-provider").value = retrieval.reranker_provider;
+  syncRangeLabels();
+  markPreset();
+}
+
+function collectRetrieval() {
+  return {
+    context_max_tokens: Number($("s-context-tokens").value) || 24000,
+    final_top_k: Number($("s-topk").value) || 12,
+    max_chunks_per_document: Number($("s-maxchunks").value) || 8,
+    min_relevance: Number($("s-min-relevance").value),
+    relevance_threshold: Number($("s-rel-threshold").value),
+    context_neighbor_chunks: Number($("s-neighbor").value),
+    context_full_document_tokens: Number($("s-fulldoc").value),
+    context_expand_max_documents: Number($("s-expand-docs").value) || 3,
+    hash_dense_weight: Number($("s-hash-weight").value),
+    context_expand_documents: $("s-expand").checked,
+    reranker_enabled: $("s-reranker").checked,
+    reranker_provider: $("s-reranker-provider").value,
+    strict_grounding: $("s-strict").checked,
+  };
+}
+
+function applyPreset(name) {
+  const preset = PRESETS[name];
+  if (!preset) return;
+  renderRetrievalService(Object.assign(collectRetrieval(), preset, { reranker_enabled: true }));
+  note("retr-svc-status", "info", "Preset <b>" + escapeHtml(name === "accurate" ? "Akurat" : name === "balanced" ? "Seimbang" : "Dokumen lengkap") +
+    "</b> diisikan. Klik <b>Simpan kualitas jawaban</b> untuk menerapkan.");
+}
+
+function markPreset() {
+  const current = collectRetrieval();
+  document.querySelectorAll("[data-preset]").forEach((button) => {
+    const preset = PRESETS[button.dataset.preset];
+    const same = Object.keys(preset).every((key) => String(preset[key]) === String(current[key]));
+    button.setAttribute("aria-pressed", same ? "true" : "false");
+  });
+}
+
+async function loadEngineNote() {
+  try {
+    const ready = await api("GET", "/ready");
+    const detail = ready.detail || {};
+    const provider = detail.embedding_provider || "";
+    if (!provider) return;
+    if (provider === "hash") {
+      note("retr-engine-note", "warn", "Pencarian makna: <span class=\"mono\">hash</span> &mdash; layanan mencari berdasarkan <b>kata</b> (dengan bentuk dasar kata Indonesia), belum memahami sinonim seperti <i>karyawan/pegawai</i>. Pertanyaan yang memakai istilah lain dari dokumen bisa tidak ditemukan; pasang embedder semantik untuk mengatasinya.");
+    } else {
+      note("retr-engine-note", "ok", "Pencarian makna aktif: <span class=\"mono\">" + escapeHtml(detail.embedding_model || provider) + "</span>.");
+    }
+  } catch (err) {
+    clearNote("retr-engine-note");
+  }
 }
 
 async function saveRetrievalService() {
-  const payload = {
-    retrieval: {
-      context_max_tokens: Number($("s-context-tokens").value) || 0,
-      final_top_k: Number($("s-topk").value) || 12,
-      max_chunks_per_document: Number($("s-maxchunks").value) || 8,
-      context_expand_documents: $("s-expand").checked,
-      reranker_enabled: $("s-reranker").checked,
-      reranker_provider: $("s-reranker-provider").value,
-    },
-  };
-  note("retr-svc-status", "info", "Menyimpan setelan konteks...");
+  const payload = { retrieval: collectRetrieval() };
+  note("retr-svc-status", "info", "Menyimpan...");
   try {
     const data = await api("PUT", "/settings", payload);
-    note("retr-svc-status", "ok", "Tersimpan: <span class=\"mono\">" + escapeHtml((data.applied || []).join(", ")) + "</span>");
+    note("retr-svc-status", "ok", "Tersimpan dan langsung berlaku.");
     if (data.sections && data.sections.retrieval) renderRetrievalService(data.sections.retrieval);
   } catch (err) {
     const forbidden = err.code === "AUTH_FORBIDDEN";
     const message = forbidden
-      ? "Setelan layanan hanya bisa diubah dengan kunci berizin <strong>admin</strong>."
+      ? "Setelan layanan hanya bisa diubah dengan kunci berizin <strong>admin</strong> atau kunci organisasi operator."
       : escapeHtml(err.message || "gagal menyimpan") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>";
     note("retr-svc-status", forbidden ? "warn" : "err", message);
   }
+}
+
+/* ------------------------------------------------------------ uji akurasi */
+
+function parseEvalCases(text) {
+  return String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+    const parts = line.split("=>");
+    const query = parts[0].trim();
+    const expected = parts.length > 1 ? parts.slice(1).join("=>").trim() : null;
+    return { query: query, expected: expected };
+  }).filter((item) => item.query);
+}
+
+function docMatches(hit, expected) {
+  const wanted = expected.toLowerCase();
+  return String(hit.document_name || "").toLowerCase().indexOf(wanted) !== -1 ||
+    String(hit.document_id || "").toLowerCase() === wanted;
+}
+
+function setEvalMode(mode) {
+  state.evalMode = mode;
+  $("btn-eval-mode-search").setAttribute("aria-pressed", mode === "search" ? "true" : "false");
+  $("btn-eval-mode-answer").setAttribute("aria-pressed", mode === "answer" ? "true" : "false");
+}
+
+async function evalOne(item) {
+  if (state.evalMode === "answer") {
+    const data = await api("POST", "/query", { query: item.query, knowledge_base_id: state.kb, options: queryOptions() });
+    const docs = [];
+    (data.sources || []).filter((s) => s.cited).concat(data.sources || []).forEach((s) => {
+      if (!docs.some((d) => d.document_id === s.document_id)) docs.push(s);
+    });
+    return { docs: docs, relevant: !!data.grounded, best: (data.usage || {}).best_score, answer: data.answer || "" };
+  }
+  const data = await api("POST", "/search", { query: item.query, knowledge_base_id: state.kb, top_k: 10, options: searchOptions() });
+  const docs = [];
+  (data.results || []).forEach((hit) => {
+    if (!docs.some((d) => d.document_id === hit.document_id)) docs.push(hit);
+  });
+  return { docs: docs, relevant: !!data.relevant, best: data.best_score, answer: "" };
+}
+
+async function runEval() {
+  const cases = parseEvalCases($("eval-cases").value);
+  try {
+    localStorage.setItem(EVAL_KEY, $("eval-cases").value);
+  } catch (err) {
+    /* tidak bisa diingat: tetap dijalankan */
+  }
+  if (!cases.length) {
+    note("eval-status", "err", "Tulis minimal satu pertanyaan uji.");
+    return;
+  }
+  state.evalStop = false;
+  $("btn-eval-run").disabled = true;
+  $("btn-eval-stop").hidden = false;
+  $("eval-table").hidden = false;
+  $("eval-rows").innerHTML = "";
+  clearNote("eval-summary");
+  const tally = { expected: 0, hit1: 0, hit3: 0, refuse_ok: 0, refuse_total: 0, false_refusal: 0, done: 0 };
+  for (let index = 0; index < cases.length; index += 1) {
+    if (state.evalStop) break;
+    const item = cases[index];
+    note("eval-status", "info", "Menguji " + (index + 1) + " dari " + cases.length + "...");
+    const row = document.createElement("tr");
+    $("eval-rows").appendChild(row);
+    let status;
+    let tone;
+    let top = "-";
+    let expectedCell = item.expected === null ? '<span class="help">tidak ditentukan</span>' : escapeHtml(item.expected === "-" ? "harus ditolak" : item.expected);
+    let best = "-";
+    try {
+      const result = await evalOne(item);
+      top = result.relevant && result.docs[0] ? escapeHtml(result.docs[0].document_name || result.docs[0].document_id) : "-";
+      best = fmtScore(result.best);
+      if (item.expected === "-") {
+        tally.refuse_total += 1;
+        if (!result.relevant) { tally.refuse_ok += 1; status = "Ditolak (benar)"; tone = "ok"; }
+        else { status = "Tidak ditolak"; tone = "warn"; }
+      } else if (item.expected) {
+        tally.expected += 1;
+        const rank = result.relevant ? result.docs.findIndex((doc) => docMatches(doc, item.expected)) + 1 : 0;
+        if (!result.relevant) { tally.false_refusal += 1; status = "Ditolak (seharusnya dijawab)"; tone = "off"; }
+        else if (rank === 1) { tally.hit1 += 1; tally.hit3 += 1; status = "Lulus"; tone = "ok"; }
+        else if (rank > 1 && rank <= 3) { tally.hit3 += 1; status = "Peringkat " + rank; tone = "warn"; }
+        else if (rank > 3) { status = "Peringkat " + rank; tone = "warn"; }
+        else { status = "Dokumen tidak ketemu"; tone = "off"; }
+        if (rank) expectedCell += ' <span class="help">(peringkat ' + rank + ")</span>";
+      } else {
+        status = result.relevant ? "Dijawab" : "Ditolak";
+        tone = result.relevant ? "ok" : "warn";
+      }
+      if (result.answer) top += '<div class="hit-preview">' + escapeHtml(String(result.answer).slice(0, 180)) + "</div>";
+    } catch (err) {
+      status = "Gagal: " + (err.code || "error");
+      tone = "off";
+    }
+    tally.done += 1;
+    row.innerHTML = "<td>" + (index + 1) + "</td><td>" + escapeHtml(item.query) + "</td><td>" + top + "</td><td>" + expectedCell +
+      '</td><td class="mono">' + best + '</td><td><span class="tag ' + tone + '">' + escapeHtml(status) + "</span></td>";
+  }
+  const parts = [];
+  if (tally.expected) {
+    parts.push("Dokumen benar di peringkat 1: <b>" + tally.hit1 + "/" + tally.expected + "</b> (" + Math.round(100 * tally.hit1 / tally.expected) + "%)");
+    parts.push("di 3 teratas: <b>" + tally.hit3 + "/" + tally.expected + "</b>");
+    parts.push("salah ditolak: <b>" + tally.false_refusal + "</b>");
+  }
+  if (tally.refuse_total) parts.push("pertanyaan di luar knowledge yang ditolak: <b>" + tally.refuse_ok + "/" + tally.refuse_total + "</b>");
+  note("eval-summary", tally.false_refusal || (tally.expected && tally.hit1 < tally.expected) ? "warn" : "ok",
+    parts.join(" &middot; ") || "Selesai " + tally.done + " pertanyaan.");
+  note("eval-status", "ok", state.evalStop ? "Dihentikan." : "Selesai " + tally.done + " pertanyaan.");
+  $("btn-eval-run").disabled = false;
+  $("btn-eval-stop").hidden = true;
 }
 
 function renderWebService(web) {
@@ -1237,6 +1548,8 @@ function keyRow(entry) {
   const tenant = [entry.organization_id, entry.user_id, entry.application_id]
     .filter(Boolean).map(escapeHtml).join(" / ") || "-";
   const perms = (entry.permissions || []).map((perm) => '<span class="tag">' + escapeHtml(perm) + "</span>").join(" ") || "-";
+  const kbs = (entry.knowledge_base_ids || []).map((kb) => '<span class="tag">' + escapeHtml(kb) + "</span>").join(" ") ||
+    '<span class="help">semua</span>';
   const label = entry.source === "env" ? "API_KEYS_JSON" : escapeHtml(entry.label);
   const state2 = entry.state === "active"
     ? '<span class="tag ok">aktif</span>'
@@ -1252,6 +1565,7 @@ function keyRow(entry) {
     "<td>" + label + (entry.expires_at ? '<span class="help"> berlaku sampai ' + escapeHtml(shortTime(entry.expires_at)) + "</span>" : "") + "</td>" +
     '<td class="mono">' + escapeHtml(entry.hint || "-") + "</td>" +
     "<td>" + tenant + "</td>" +
+    "<td>" + kbs + "</td>" +
     "<td>" + perms + "</td>" +
     "<td>" + escapeHtml(shortTime(entry.created_at)) + "</td>" +
     "<td>" + escapeHtml(shortTime(entry.last_used_at)) + "</td>" +
@@ -1325,6 +1639,8 @@ async function createKey() {
   if ($("key-perm-admin").checked) permissions.push("admin");
   const payload = { label: label, permissions: permissions };
   if ($("key-expiry").value.trim()) payload.expires_in_days = Number($("key-expiry").value);
+  const kbs = $("key-kbs").value.split(",").map((item) => item.trim()).filter(Boolean);
+  if (kbs.length) payload.knowledge_base_ids = kbs;
   const tenantFields = { "key-org": "organization_id", "key-user": "user_id", "key-app": "application_id" };
   Object.keys(tenantFields).forEach((id) => {
     const value = $(id).value.trim();
@@ -1339,6 +1655,7 @@ async function createKey() {
     $("key-result-help").textContent = data.note || "Simpan sekarang; nilainya hanya tampil sekali.";
     $("key-label").value = "";
     $("key-expiry").value = "";
+    $("key-kbs").value = "";
     note("keys-status", "ok", "Kunci untuk <span class=\"mono\">" + escapeHtml(data.entry.organization_id) +
       "</span> dibuat. Salin nilainya sebelum menutup layar.");
     loadApiKeys();
@@ -1645,6 +1962,18 @@ function wire() {
     note("fmt-status", "info", "Semua format yang didukung mesin ini dipilih. Klik Simpan format untuk menerapkan.");
   });
   $("btn-save-retr").addEventListener("click", saveRetrieval);
+  $("btn-reset-retr").addEventListener("click", resetBrowserOptions);
+  document.querySelectorAll("[data-preset]").forEach((button) => {
+    button.addEventListener("click", () => applyPreset(button.dataset.preset));
+  });
+  ["s-min-relevance", "s-rel-threshold", "s-hash-weight"].forEach((id) => $(id).addEventListener("input", () => { syncRangeLabels(); markPreset(); }));
+  ["s-topk", "s-neighbor", "s-fulldoc", "s-context-tokens", "s-maxchunks", "s-expand-docs", "s-expand", "s-strict"]
+    .forEach((id) => $(id).addEventListener("change", markPreset));
+  $("btn-new-chat").addEventListener("click", newConversation);
+  $("btn-eval-run").addEventListener("click", runEval);
+  $("btn-eval-stop").addEventListener("click", () => { state.evalStop = true; });
+  $("btn-eval-mode-search").addEventListener("click", () => setEvalMode("search"));
+  $("btn-eval-mode-answer").addEventListener("click", () => setEvalMode("answer"));
   $("btn-save-retr-svc").addEventListener("click", saveRetrievalService);
   $("btn-save-web-svc").addEventListener("click", saveWebService);
   $("btn-save-summary-svc").addEventListener("click", saveSummaryService);

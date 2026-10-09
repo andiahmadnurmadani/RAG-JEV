@@ -76,6 +76,11 @@ class RetrievalResult:
     rerank_ms: float = 0.0
     reranker_used: str = "none"
     hybrid_used: bool = True
+    dense_weight: float = 1.0
+    best_dense: float = 0.0
+    # Gerbang relevansi: apakah kandidat terbaik cukup relevan untuk dijawab, dan atas dasar apa.
+    relevant: bool = False
+    gate: str = ""
 
     @property
     def count(self) -> int:
@@ -85,6 +90,28 @@ class RetrievalResult:
 def fused_key(document_id: str, chunk_id: str) -> str:
     """Identity of a chunk: ``chunk_id`` alone repeats across documents (``chunk_0001``)."""
     return f"{document_id}::{chunk_id}"
+
+
+def is_semantic(settings: Settings) -> bool:
+    """Embedder yang benar-benar menangkap makna (bukan ``hash`` yang hanya menghitung kata)."""
+    return str(settings.embedding_provider or "hash") != "hash"
+
+
+def effective_dense_weight(settings: Settings) -> float:
+    """Bobot sisi vektor di fusi. Embedder ``hash`` hanyalah tiruan BM25 yang lebih kasar (tanpa
+    IDF, kata umum berbobot penuh); diberi bobot setara BM25 ia justru mengencerkan hasil."""
+    if is_semantic(settings):
+        return float(settings.dense_weight)
+    return min(float(settings.dense_weight), float(settings.hash_dense_weight))
+
+
+def chunk_position(chunk_id: str, payload: Optional[Dict[str, Any]] = None) -> int:
+    """Urutan potongan di dokumennya (``chunk_0007`` -> 7)."""
+    index = (payload or {}).get("chunk_index")
+    if isinstance(index, int):
+        return index
+    digits = str(chunk_id or "").rsplit("_", 1)[-1]
+    return int(digits) if digits.isdigit() else 0
 
 
 def _dedupe_by_document(candidates: Sequence[Candidate], max_per_document: int) -> List[Candidate]:
@@ -120,7 +147,7 @@ class Retriever:
         query: str,
         organization_id: str,
         knowledge_base_id: Optional[str] = None,
-        final_k: int = 5,
+        final_k: int = 12,
         dense_top_k: Optional[int] = None,
         sparse_top_k: Optional[int] = None,
         use_hybrid: Optional[bool] = None,
@@ -161,10 +188,17 @@ class Retriever:
             )
         result.sparse_hits = len(sparse_hits)
 
-        fused = fuse(dense_hits, sparse_hits, k=settings.rrf_k, dense_weight=settings.dense_weight)
+        dense_weight = effective_dense_weight(settings)
+        result.dense_weight = dense_weight
+        fused = fuse(dense_hits, sparse_hits, k=settings.rrf_k, dense_weight=dense_weight)
         result.fused_count = len(fused)
         if not fused:
             return result
+        # Kumpulan kandidat yang dinilai reranker. Batas per dokumen TIDAK dipasang di sini:
+        # urutan fusi masih kasar, jadi memotong per dokumen sekarang bisa membuang potongan
+        # yang justru dinilai terbaik oleh reranker.
+        pool_size = max(int(settings.reranker_candidates), final_k * 3)
+        fused = fused[:pool_size]
 
         # Re-read payloads through the tenant filter: nothing reaches the LLM
         # that was not verified to belong to this organization.
@@ -179,6 +213,7 @@ class Retriever:
         candidates: List[Candidate] = []
         dense_scores = dict(dense_hits)
         sparse_scores = dict(sparse_hits)
+        seen_content: set = set()
         for key, fused_score in fused:
             payload = payloads.get(key)
             if payload is None:
@@ -187,60 +222,102 @@ class Retriever:
                 continue
             if scope is not None and payload.get("document_id") not in scope:
                 continue
+            content = payload.get("content", "")
+            # Potongan yang isinya sama persis (boilerplate halaman web yang di-crawl, berkas
+            # yang diunggah dua kali) hanya memenuhi daftar: cukup satu yang dipakai.
+            fingerprint = " ".join(str(content).lower().split())
+            if fingerprint in seen_content:
+                continue
+            seen_content.add(fingerprint)
             chunk_id = payload.get("chunk_id", "")
-            dense_score = dense_scores.get(key)
-            sparse_score = sparse_scores.get(key)
             candidates.append(
                 Candidate(
                     chunk_id=chunk_id,
                     document_id=payload.get("document_id", ""),
-                    content=payload.get("content", ""),
+                    content=content,
                     document_name=payload.get("document_name", ""),
                     page=payload.get("page"),
                     section=payload.get("section", ""),
                     source_url=payload.get("source_url", ""),
                     language=payload.get("language", ""),
                     score=fused_score,
-                    dense_score=dense_score,
-                    sparse_score=sparse_score,
+                    dense_score=dense_scores.get(key),
+                    sparse_score=sparse_scores.get(key),
                     fused_score=fused_score,
                     is_summary=bool(payload.get("is_summary")),
+                    document_order=chunk_position(chunk_id, payload),
                 )
             )
 
         if not candidates:
             return result
 
-        candidates = _dedupe_by_document(candidates, settings.max_chunks_per_document)
-
+        result.best_dense = max((c.dense_score or 0.0 for c in candidates), default=0.0)
         if rerank:
             rerank_started = time.perf_counter()
-            candidates = self._apply_rerank(query, candidates, final_k=final_k, threshold=threshold)
+            candidates = self._apply_rerank(
+                query,
+                candidates,
+                threshold=threshold,
+                organization_id=organization_id,
+                knowledge_base_id=knowledge_base_id,
+            )
             result.rerank_ms = round((time.perf_counter() - rerank_started) * 1000, 2)
             # a no-op reranker must not be reported (or counted) as a real rerank
             result.reranked = settings.reranker_provider != "none"
             result.reranker_used = self._reranker.name
-        else:
-            candidates = candidates[:final_k]
 
+        candidates = _dedupe_by_document(candidates, settings.max_chunks_per_document)[:final_k]
         result.candidates = candidates
-        result.best_score = max((candidate.score for candidate in candidates), default=0.0)
+        result.best_score = max(
+            ((candidate.rerank_score if candidate.rerank_score is not None else candidate.score) for candidate in candidates),
+            default=0.0,
+        )
+        result.relevant, result.gate = self._relevance_gate(result, reranked=result.reranked)
         return result
 
     # ------------------------------------------------------------------ #
+    def _relevance_gate(self, result: "RetrievalResult", *, reranked: bool) -> Tuple[bool, str]:
+        """Apakah kandidat terbaik cukup relevan untuk dijawab?
+
+        Leksikal (skor reranker absolut) ATAU semantik (kemiripan vektor dari embedder sungguhan).
+        Embedder ``hash`` tidak dihitung sebagai bukti semantik - ia hanya menghitung kata.
+        """
+        settings = self._settings
+        if not result.candidates:
+            return False, "no_candidates"
+        if not reranked:
+            return True, "reranker_off"
+        minimum = float(settings.min_relevance or 0.0)
+        if minimum <= 0:
+            return True, "gate_off"
+        if result.best_score >= minimum:
+            return True, "lexical"
+        if is_semantic(settings) and result.best_dense >= float(settings.semantic_min_similarity):
+            return True, "semantic"
+        return False, "below_min_relevance"
+
     def _apply_rerank(
         self,
         query: str,
         candidates: Sequence[Candidate],
         *,
-        final_k: int,
         threshold: float,
+        organization_id: str,
+        knowledge_base_id: Optional[str],
     ) -> List[Candidate]:
-        pool = list(candidates)[: self._settings.reranker_candidates]
+        pool = list(candidates)
+        idf = None
+        if knowledge_base_id:
+            try:
+                idf = self._sparse.idf_function(organization_id, knowledge_base_id)
+            except Exception as exc:  # noqa: BLE001 - IDF korpus pelengkap; tanpa itu IDF kandidat
+                logger.warning("IDF korpus tidak tersedia: %s", exc)
         scored = self._reranker.rerank(
             query,
             [(fused_key(candidate.document_id, candidate.chunk_id), candidate.content) for candidate in pool],
             top_k=len(pool),
+            idf=idf,
         )
         by_key = {fused_key(candidate.document_id, candidate.chunk_id): candidate for candidate in pool}
         ordered: List[Candidate] = []
@@ -254,8 +331,18 @@ class Retriever:
         if self._settings.reranker_provider == "none":
             # NoopReranker returns descending pseudo-scores preserving fusion order;
             # filtering on them would silently drop relevant chunks, so do not.
-            return ordered[:final_k]
-        return [candidate for candidate in ordered if candidate.score >= threshold][:final_k]
+            return ordered
+        best = max((candidate.score for candidate in ordered), default=0.0)
+        if best <= 0:
+            # Tidak ada satu pun kata kueri di kandidat. Dengan embedder semantik, kecocokan
+            # makna (sinonim) tetap sah: pakai urutan fusi. Tanpa itu, tidak ada bukti relevansi.
+            if is_semantic(self._settings):
+                for candidate in pool:
+                    candidate.score = candidate.fused_score or 0.0
+                return list(pool)
+            return []
+        # Ambang RELATIF: buang kandidat yang jauh di bawah yang terbaik (derau di ekor daftar).
+        return [candidate for candidate in ordered if candidate.score >= best * threshold]
 
     # ------------------------------------------------------------------ #
     def search_only(self, **kwargs) -> RetrievalResult:

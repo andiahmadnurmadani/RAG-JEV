@@ -27,19 +27,22 @@ def test_settings_read_requires_credentials_at_all(client):
     assert response.json()["error"]["code"] == "AUTH_INVALID"
 
 
-def test_a_tenant_with_write_but_no_admin_cannot_read_settings(client):
-    """Kunci read/write boleh membuka Pengaturan HANYA saat konsol mode "cukup API key".
-
-Bawaannya ``CONSOLE_API_KEY_ONLY=true``: konsol ini dipakai satu operator, jadi kunci apa pun
-yang sah membuka Pengaturan (kalau tidak, kunci biasa tidak bisa membuat kunci baru atau
-mengubah setelan sama sekali). Dengan mode itu dimatikan, aturan lama berlaku kembali: hanya
-izin ``admin`` yang boleh membaca/mengubah konfigurasi global.
-"""
+def test_a_tenant_with_write_but_no_admin_cannot_read_settings(client, settings):
+    """Mode "cukup API key": kunci organisasi OPERATOR membuka Pengaturan tanpa izin admin,
+    tetapi kunci TENANT lain tidak - setelan ini global (model, prompt, kunci LLM), jadi tenant
+    yang bisa mengubahnya ikut mengubah perilaku semua tenant lain.
+    """
+    settings.ui_session_organization_id = "org_b"
     response = _settings(client, TENANT_B_KEY)
-    assert response.status_code == 200, "mode bawaan (cukup API key) harus membuka Pengaturan"
+    assert response.status_code == 200, "kunci organisasi operator harus membuka Pengaturan"
+
+    settings.ui_session_organization_id = "default"
+    response = _settings(client, TENANT_B_KEY)
+    assert response.status_code == 403, "kunci tenant lain tanpa admin tidak boleh membuka Pengaturan global"
 
 
-def test_settings_write_works_in_api_key_only_mode(client):
+def test_settings_write_works_in_api_key_only_mode(client, settings):
+    settings.ui_session_organization_id = "org_b"
     response = client.put(
         "/api/v1/settings",
         json={"llm": {"model": "cmc/deepseek/deepseek-v4-flash"}},
@@ -227,10 +230,23 @@ def test_model_list_probe_falls_back_to_the_stored_key(client, settings, monkeyp
     import httpx
 
     settings.llm_api_key = "sk-stored-key"
+    settings.llm_base_url = "http://localhost:20128/v1"
     seen = {}
     monkeypatch.setattr(httpx, "get", lambda url, headers=None, timeout=None: (seen.update(headers) or FakeModelsResponse()))
     client.post("/api/v1/settings/llm/models", json={"base_url": "http://localhost:20128/v1"}, headers=auth(TENANT_A_KEY))
     assert seen["Authorization"] == "Bearer sk-stored-key"
+
+
+def test_the_stored_key_is_never_sent_to_a_different_url(client, settings, monkeypatch):
+    """K2: probe ke URL lain tidak boleh membawa kunci tersimpan (bisa dipancing ke server penyerang)."""
+    import httpx
+
+    settings.llm_api_key = "sk-stored-key"
+    settings.llm_base_url = "https://gateway.resmi/v1"
+    seen = {}
+    monkeypatch.setattr(httpx, "get", lambda url, headers=None, timeout=None: (seen.update(headers) or FakeModelsResponse()))
+    client.post("/api/v1/settings/llm/models", json={"base_url": "https://penyerang.example/v1"}, headers=auth(TENANT_A_KEY))
+    assert "Authorization" not in seen
 
 
 def test_model_list_probe_surfaces_an_upstream_error(client, monkeypatch):

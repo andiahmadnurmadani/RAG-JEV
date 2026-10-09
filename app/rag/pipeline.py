@@ -9,6 +9,7 @@ pipeline can be unit-tested without HTTP.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
@@ -26,11 +27,32 @@ from app.rag.chunker import estimate_tokens
 from app.rag.constants import SUMMARY_CHUNK_ID
 from app.rag.context import BuiltContext, DocumentCoverage, build_context, merge_expanded
 from app.rag.generator import NO_ANSWER_EN, NO_ANSWER_ID, Generator
-from app.rag.retriever import Candidate, RetrievalResult, Retriever
+from app.rag.retriever import Candidate, RetrievalResult, Retriever, chunk_position
+from app.rag.textnorm import keywords
 from app.tables import analytics as table_analytics
 from app.tables.store import TableStore
 
 logger = get_logger(__name__)
+
+# Pertanyaan agregat yang memang harus dihitung dari tabel. Tanpa gerbang ini SETIAP pertanyaan
+# (mis. "berapa hari cuti?") dikirim dulu ke perencana tabel - panggilan model tambahan yang bisa
+# menjawab dari lembar yang salah, tanpa sumber.
+_AGGREGATE_RE = re.compile(
+    r"\b(total|jumlah(?:kan)?|rata-?rata|rerata|average|sum|count|hitung(?:kan)?|berapa banyak|"
+    r"terbanyak|tersedikit|tertinggi|terendah|terbesar|terkecil|paling|maksimum|minimum|median|"
+    r"persen(?:tase)?|rekap(?:itulasi)?|peringkat|ranking|top\s*\d+|urutkan|per\s+(?:bulan|tahun|hari|minggu))\b",
+    re.IGNORECASE,
+)
+# Pertanyaan yang butuh dokumen utuh, bukan potongan paling mirip.
+_FULL_DOCUMENT_RE = re.compile(
+    r"\b(seluruh|semua|lengkap|keseluruhan|daftar|list|all|full|struktur|ringkas(?:an|kan)?|rangkum(?:an)?|"
+    r"rekap|overview|garis besar)\b",
+    re.IGNORECASE,
+)
+# Pertanyaan lanjutan yang pendek ("yang kedua?", "kalau tahun lalu?") dicari bersama
+# pertanyaan sebelumnya; pertanyaan yang sudah lengkap dicari sendiri.
+FOLLOW_UP_MAX_KEYWORDS = 6
+HISTORY_MAX_TURNS = 6
 
 
 @dataclass
@@ -52,6 +74,7 @@ class PipelineResult:
     # Berapa bagian setiap dokumen yang benar-benar masuk konteks (transparansi ke klien:
     # "dokumen ini dibaca lengkap" vs "sebagian").
     document_coverage: List[Dict[str, Any]] = field(default_factory=list)
+    retrieval: Optional[RetrievalResult] = None
 
 
 class RagPipeline:
@@ -245,7 +268,7 @@ class RagPipeline:
         query: str,
         context: TrustedContext,
         knowledge_base_id: Optional[str],
-        top_k: int = 5,
+        top_k: Optional[int] = None,
         strict_grounding: Optional[bool] = None,
         include_sources: bool = True,
         use_hybrid: Optional[bool] = None,
@@ -254,9 +277,12 @@ class RagPipeline:
         route_hint: Optional[str] = None,
         document_ids: Optional[Sequence[str]] = None,
         table_analytics: Optional[bool] = None,
+        history: Optional[Sequence[Dict[str, str]]] = None,
     ) -> PipelineResult:
         settings = self._settings
         strict = settings.strict_grounding if strict_grounding is None else strict_grounding
+        top_k = int(top_k or settings.final_top_k or 12)
+        turns = clean_history(history)
         decision = self.route(query, context, route_hint)
         result = PipelineResult(route=decision, model=self._generator.model)
 
@@ -264,7 +290,7 @@ class RagPipeline:
         # jalur retrieval tidak bisa menjumlahkan baris yang tidak ikut terambil.
         use_tables = settings.table_analytics_enabled if table_analytics is None else table_analytics
         table_reason: Optional[str] = None
-        if use_tables and self._tables is not None:
+        if use_tables and self._tables is not None and _AGGREGATE_RE.search(query):
             computed, table_reason = self._answer_from_tables(
                 query=query,
                 context=context,
@@ -275,8 +301,9 @@ class RagPipeline:
             if computed is not None:
                 return computed
 
+        search_query = retrieval_query(query, turns)
         retrieval = self.retrieve(
-            query=query,
+            query=search_query,
             context=context,
             knowledge_base_id=knowledge_base_id,
             final_k=max(top_k, 1),
@@ -286,24 +313,30 @@ class RagPipeline:
             document_ids=document_ids,
         )
         result.candidates = retrieval.candidates
+        result.retrieval = retrieval
 
-        threshold_value = settings.relevance_threshold if threshold is None else threshold
         best = retrieval.best_score
         if not retrieval.candidates:
             reason = "no_candidates"
             return self._with_table_hint(self._no_answer(result, reason, retrieval), table_reason)
-        if retrieval.reranked and best < threshold_value:
+        if not retrieval.relevant:
+            # Kandidat terbaik pun terlalu lemah: menjawab dari konteks seperti itu hanya mengundang
+            # jawaban yang tampak meyakinkan padahal tidak berdasar.
             observe("best_relevance_score", best)
             return self._with_table_hint(self._no_answer(result, "below_threshold", retrieval), table_reason)
 
         observe("best_relevance_score", best)
         budget = settings.context_token_budget
+        wants_full = getattr(decision, "capability", "") == "knowledge_summary" or bool(
+            _FULL_DOCUMENT_RE.search(query)
+        )
         candidates, coverage = self._expand_context(
             retrieval.candidates,
             context=context,
             knowledge_base_id=knowledge_base_id,
             document_ids=document_ids,
             budget_tokens=budget,
+            wants_full=wants_full,
         )
         # Ringkasan dokumen (knowledge turunan) hanya diambil saat pertanyaannya memang minta
         # ringkasan; pada pertanyaan biasa ia tidak ikut agar isi asli yang menjawab.
@@ -331,7 +364,8 @@ class RagPipeline:
             return self._with_table_hint(self._no_answer(result, "context_empty", retrieval), table_reason)
 
         started = time.perf_counter()
-        generated = self._generator.answer(query=query, context=built, strict_grounding=strict)
+        extra = {"history": turns} if turns else {}
+        generated = self._generator.answer(query=query, context=built, strict_grounding=strict, **extra)
         generation_ms = round((time.perf_counter() - started) * 1000, 2)
         observe("generation_latency", generation_ms / 1000.0)
         incr("generation_requests")
@@ -356,6 +390,11 @@ class RagPipeline:
             "finish_reason": generated.usage.finish_reason,
             "retrieval_ms": retrieval.elapsed_ms,
             "generation_ms": generation_ms,
+            "best_score": round(best, 4),
+            "relevance_gate": retrieval.gate,
+            "dense_weight": retrieval.dense_weight,
+            "citations": generated.citations_used,
+            "search_query": search_query if search_query != query else None,
         }
         if generated.truncated:
             # Batas token keluaran, bukan "datanya tidak ada". Dua hal ini berbeda bagi pemakai,
@@ -402,8 +441,13 @@ class RagPipeline:
                     table_reason,
                 )
         if include_sources:
-            # Only chunks the model was actually shown are citable (PRD 40).
-            result.sources = built.citations()
+            # Only chunks the model was actually shown are citable (PRD 40). Urutan = nomor [n]
+            # di jawaban; yang benar-benar dikutip ditandai ``cited``.
+            cited = set(generated.citations_used)
+            result.sources = [
+                {**source, "index": number, "cited": number in cited}
+                for number, source in enumerate(built.citations(), start=1)
+            ]
         result.usage = usage
         if table_reason:
             # Perhitungan tabel diminta tetapi ditolak: klien harus tahu alasannya.
@@ -419,78 +463,105 @@ class RagPipeline:
         knowledge_base_id: Optional[str],
         document_ids: Optional[Sequence[str]],
         budget_tokens: int,
+        wants_full: bool = False,
     ) -> tuple[List[Candidate], List[DocumentCoverage]]:
-        """Lengkapi konteks dengan SISA potongan dokumen yang sudah terambil.
+        """Lengkapi hasil pencarian dengan potongan di SEKITARNYA, lalu susun per dokumen.
 
-        Pencarian kemiripan selalu menghasilkan sebagian: beberapa potongan teratas dari
-        dokumen yang bisa punya puluhan bagian. Pertanyaan seperti "struktur lengkap database
-        X" tidak bisa dijawab dari sebagian - model lalu menulis bahwa datanya tidak ada di
-        konteks, padahal datanya ADA di indeks. Di sini dokumen yang muncul di hasil pencarian
-        diikuti sampai habis (urut dokumen) selama anggaran token masih cukup, dan kelengkapan
-        yang benar-benar tercapai dilaporkan apa adanya.
+        * Setiap hasil ditemani tetangganya (``context_neighbor_chunks`` sebelum & sesudah):
+          kalimat yang terpotong di batas potongan jadi utuh lagi.
+        * Dokumen kecil (<= ``context_full_document_tokens``) disertakan utuh.
+        * Pertanyaan yang memang meminta dokumen utuh ("daftar lengkap", "seluruh isi",
+          "ringkas") melengkapi dokumennya dari awal selama anggaran token cukup.
+
+        Dulu dokumen SELALU dilengkapi dari bagian pertama sampai anggaran habis - hasil yang
+        cocok di bagian 150 ditemani bagian 1..k yang tidak relevan, dan model kecil kehilangan
+        jawabannya di tengah teks panjang.
         """
         settings = self._settings
         extras: List[tuple[str, List[Candidate]]] = []
         allowed = {str(item) for item in (document_ids or []) if item}
-        top_documents: List[Candidate] = []
+        order: List[str] = []
+        hits: Dict[str, List[Candidate]] = {}
         for candidate in candidates:
-            if allowed and candidate.document_id not in allowed:
-                # Lingkup dokumen yang diminta klien tetap mengikat di jalur pelengkap.
+            if candidate.is_summary or (allowed and candidate.document_id not in allowed):
                 continue
-            if candidate.is_summary:
-                # Potongan ringkasan bukan bagian isi: melengkapinya dengan seluruh isi
-                # dokumen hanya membuang anggaran token - pertanyaannya minta ringkasan.
-                continue
-            if candidate.document_id not in [item.document_id for item in top_documents]:
-                top_documents.append(candidate)
+            if candidate.document_id not in hits:
+                order.append(candidate.document_id)
+                hits[candidate.document_id] = []
+            hits[candidate.document_id].append(candidate)
 
-        if settings.context_expand_documents and top_documents:
-            spent = sum(estimate_tokens(candidate.content) + 60 for candidate in candidates)
-            for top in top_documents[: max(1, int(settings.context_expand_max_documents))]:
+        spent = sum(estimate_tokens(candidate.content) + 60 for candidate in candidates)
+        neighbor = max(0, int(settings.context_neighbor_chunks))
+        if settings.context_expand_documents and order:
+            for rank, document_id in enumerate(order[: max(1, int(settings.context_expand_max_documents))]):
                 if spent >= budget_tokens:
                     break
                 try:
                     parts = repository.list_document_chunks(
                         settings,
                         organization_id=context.organization_id,
-                        document_id=top.document_id,
+                        document_id=document_id,
                         knowledge_base_id=knowledge_base_id,
                     )
                 except Exception as exc:  # noqa: BLE001 - pelengkap, bukan jalur wajib
-                    logger.warning("gagal melengkapi dokumen %s: %s", top.document_id, exc)
+                    logger.warning("gagal melengkapi dokumen %s: %s", document_id, exc)
                     continue
                 if not parts:
                     continue
-                already = {item.chunk_id for item in candidates if item.document_id == top.document_id}
+                document_hits = hits[document_id]
+                index_of = {str(payload.get("chunk_id") or ""): index for index, payload in enumerate(parts)}
+                document_tokens = sum(estimate_tokens(str(payload.get("content") or "")) for payload in parts)
+                full = document_tokens <= int(settings.context_full_document_tokens) or (
+                    wants_full
+                    and (rank == 0 or len(document_hits) >= int(settings.context_expand_min_chunks))
+                )
+                hit_indexes = [index_of[hit.chunk_id] for hit in document_hits if hit.chunk_id in index_of]
+                if full:
+                    wanted = list(range(len(parts)))
+                elif neighbor and hit_indexes:
+                    nearby = {
+                        position
+                        for index in hit_indexes
+                        for position in range(index - neighbor, index + neighbor + 1)
+                        if 0 <= position < len(parts)
+                    }
+                    # Tetangga terdekat lebih dulu, supaya anggaran yang mepet tetap adil.
+                    wanted = sorted(nearby, key=lambda position: min(abs(position - index) for index in hit_indexes))
+                else:
+                    continue
+                already = {hit.chunk_id for hit in document_hits}
                 added: List[Candidate] = []
-                for position, payload in enumerate(parts, start=1):
+                for position in wanted:
+                    payload = parts[position]
                     chunk_id = str(payload.get("chunk_id") or "")
                     content = str(payload.get("content") or "")
                     if not chunk_id or not content.strip() or chunk_id in already:
                         continue
                     tokens = estimate_tokens(content)
                     if spent + tokens > budget_tokens:
-                        break
+                        if full:
+                            break
+                        continue
                     added.append(
                         Candidate(
                             chunk_id=chunk_id,
-                            document_id=top.document_id,
+                            document_id=document_id,
                             content=content,
-                            document_name=str(payload.get("document_name") or top.document_name),
+                            document_name=str(payload.get("document_name") or document_hits[0].document_name),
                             page=payload.get("page"),
                             section=str(payload.get("section") or ""),
                             source_url=str(payload.get("source_url") or ""),
                             language=str(payload.get("language") or ""),
                             expanded=True,
-                            document_order=position,
+                            document_order=chunk_position(chunk_id, payload) or position + 1,
                         )
                     )
                     spent += tokens
                 if added:
-                    extras.append((top.document_id, added))
+                    extras.append((document_id, added))
 
         coverage = self._document_coverage(candidates, extras, context=context)
-        return merge_expanded(candidates, extras), coverage
+        return order_for_context(merge_expanded(candidates, extras)), coverage
 
     def _document_coverage(
         self,
@@ -593,6 +664,15 @@ class RagPipeline:
             return None, None
         if not tables:
             return None, None
+        # Perencana hanya melihat beberapa tabel pertama: urutkan menurut kecocokan nama berkas,
+        # lembar, dan kolomnya dengan pertanyaan - bukan menurut urutan unggah.
+        wanted_terms = set(keywords(query))
+
+        def table_match(table) -> int:
+            described = " ".join([table.document_name, table.sheet, *list(table.headers)])
+            return len(wanted_terms & set(keywords(described)))
+
+        tables = sorted(tables, key=table_match, reverse=True)
 
         started = time.perf_counter()
         plan = table_analytics.build_plan(self._generator.client, query=query, tables=tables)
@@ -636,6 +716,19 @@ class RagPipeline:
             model=self._generator.model,
             computed=facts,
             table_note=note or None,
+            sources=[
+                {
+                    "document_id": table.document_id,
+                    "document_name": table.document_name,
+                    "chunk_id": f"table:{table.sheet}",
+                    "page": None,
+                    "section": f"Lembar {table.sheet}" if table.sheet else "",
+                    "source_url": "",
+                    "score": 1.0,
+                    "index": 1,
+                    "cited": True,
+                }
+            ],
         )
         result.usage = {
             "retrieved_chunks": 0,
@@ -784,6 +877,9 @@ class RagPipeline:
             "input_tokens": 0,
             "output_tokens": 0,
             "retrieval_ms": retrieval.elapsed_ms,
+            "best_score": round(retrieval.best_score, 4),
+            "relevance_gate": retrieval.gate,
+            "dense_weight": retrieval.dense_weight,
         }
         logger.info("no-answer path taken (%s) for org %s", reason, "-")
         return result
@@ -795,3 +891,42 @@ def ensure_knowledge_base(knowledge_base_id: Optional[str]) -> None:
             "VALIDATION_ERROR",
             "knowledge_base_id is required: retrieval is always scoped to a knowledge base",
         )
+
+
+def order_for_context(candidates: Sequence[Candidate]) -> List[Candidate]:
+    """Susun konteks per dokumen: ringkasan dulu, lalu dokumen urut relevansi terbaiknya, dan di
+    dalam satu dokumen potongan urut posisi aslinya - model membaca teks yang bersambung, bukan
+    potongan yang melompat-lompat antar dokumen."""
+    summaries = [candidate for candidate in candidates if candidate.is_summary]
+    documents: List[str] = []
+    grouped: Dict[str, List[Candidate]] = {}
+    for candidate in candidates:
+        if candidate.is_summary:
+            continue
+        if candidate.document_id not in grouped:
+            documents.append(candidate.document_id)
+            grouped[candidate.document_id] = []
+        grouped[candidate.document_id].append(candidate)
+    ordered: List[Candidate] = list(summaries)
+    for document_id in documents:
+        ordered.extend(sorted(grouped[document_id], key=lambda item: item.document_order))
+    return ordered
+
+
+def clean_history(history: Optional[Sequence[Dict[str, str]]]) -> List[Dict[str, str]]:
+    """Riwayat percakapan yang aman dipakai: hanya peran user/assistant, isi dipangkas."""
+    turns: List[Dict[str, str]] = []
+    for item in list(history or [])[-HISTORY_MAX_TURNS:]:
+        role = str((item or {}).get("role") or "").strip().lower()
+        content = str((item or {}).get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            turns.append({"role": role, "content": content[:2000]})
+    return turns
+
+
+def retrieval_query(query: str, turns: Sequence[Dict[str, str]]) -> str:
+    """Kueri pencarian: pertanyaan lanjutan yang pendek digabung dengan pertanyaan sebelumnya."""
+    if not turns or len(keywords(query)) > FOLLOW_UP_MAX_KEYWORDS:
+        return query
+    previous = next((turn["content"] for turn in reversed(turns) if turn["role"] == "user"), "")
+    return f"{previous}\n{query}" if previous else query

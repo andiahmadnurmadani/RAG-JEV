@@ -38,6 +38,7 @@ def retrieval_scope(context: TrustedContext, knowledge_base_id: Optional[str]) -
     """The only filter set any retrieval call may use."""
     if not context.organization_id:
         raise AppError("TENANT_CONTEXT_MISSING", "organization_id missing from the trusted context")
+    context.require_knowledge_base(knowledge_base_id)
     scope: Dict[str, Any] = {"organization_id": context.organization_id}
     if knowledge_base_id:
         scope["knowledge_base_id"] = knowledge_base_id

@@ -96,13 +96,23 @@ class Settings(BaseSettings):
     retrieval_hybrid: bool = True
     retrieval_dense_enabled: bool = True
     dense_weight: float = 1.0
+    # Bobot maksimum sisi vektor bila embedder masih ``hash`` (penghitung kata, bukan makna).
+    hash_dense_weight: float = 0.25
+    # Ambang RELATIF: kandidat di bawah (terbaik x nilai ini) dibuang sebagai derau ekor daftar.
     relevance_threshold: float = 0.35
+    # Ambang ABSOLUT kandidat terbaik (skor reranker 0..1): di bawah ini layanan menjawab "tidak
+    # ditemukan" tanpa memanggil LLM. 0 = matikan. Dengan embedder semantik, kemiripan vektor
+    # >= semantic_min_similarity juga dianggap cukup relevan.
+    min_relevance: float = 0.3
+    semantic_min_similarity: float = 0.45
     reranker_enabled: bool = True
-    reranker_candidates: int = 40
+    reranker_candidates: int = 60
     # Berapa banyak potongan dari SATU dokumen yang boleh masuk konteks. Batas kecil membuat
     # pertanyaan "seluruh isi dokumen ini" mustahil dijawab: pertanyaan seperti itu butuh
     # dokumennya utuh, bukan tiga potongan paling mirip.
     max_chunks_per_document: int = 8
+    # Indeks BM25 versi lama dibangun ulang dari Qdrant saat layanan menyala (latar belakang).
+    sparse_rebuild_on_startup: bool = True
     answer_language: Literal["id", "en"] = "id"
     # Buang aksara dari tulisan lain (China, Jepang, Korea, Arab, Kiril, Thai) yang DISELIPKAN
     # model ke jawaban/ringkasan. Aksara yang memang ada di dokumen tetap utuh - perbandingan
@@ -121,6 +131,11 @@ class Settings(BaseSettings):
     context_expand_documents: bool = True
     context_expand_max_documents: int = 3
     context_expand_min_chunks: int = 2      # hanya dokumen dengan >= N potongan di konteks
+    # Potongan tetangga (sebelum & sesudah) yang ikut di sekitar setiap hasil pencarian. Kalimat
+    # sering terpotong di batas potongan; tetangganya melengkapi tanpa membanjiri konteks.
+    context_neighbor_chunks: int = 1
+    # Dokumen kecil (total token <= nilai ini) disertakan utuh: murah, dan jawabannya lengkap.
+    context_full_document_tokens: int = 3000
 
     # ---- generation (PRD 8.1, 17) ----------------------------------------
     llm_provider: Literal["openai_compatible", "ollama", "mock"] = "mock"
@@ -142,7 +157,9 @@ class Settings(BaseSettings):
     # seperti "pemb.cgiian" / "praktikumaccording" (campur bahasa, kata terpotong) berasal.
     # 0 = jangan kirim (biarkan endpoint memutuskan).
     llm_top_p: float = 0.9
-    llm_frequency_penalty: float = 0.2
+    # 0: penalti frekuensi membuat model menghindari token yang memang harus berulang (angka,
+    # nama kolom, "Rp", tahun) - merugikan jawaban faktual dan tabel.
+    llm_frequency_penalty: float = 0.0
     llm_presence_penalty: float = 0.0
     # Perbaikan jawaban yang terdeteksi rusak (kata tercampur/terpotong). 0 = matikan.
     llm_repair_attempts: int = 1

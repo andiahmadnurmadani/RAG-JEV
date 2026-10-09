@@ -66,6 +66,7 @@ def index_knowledge(
     """Enqueue an indexing job (PRD 33: 202 Accepted, work happens in the worker)."""
     _rate_limit(request)
     context.require("write")
+    context.require_knowledge_base(payload.knowledge_base_id)
     organization_id = assert_tenant_match(context, payload.organization_id, where="/knowledge/index")
 
     # Pre-flight: a label that claims a type we never accept (payload.exe, script.js, ...) is
@@ -121,12 +122,16 @@ def list_knowledge(
     context.require("read")
     services = services_from_request(request)
 
+    if knowledge_base_id:
+        context.require_knowledge_base(knowledge_base_id)
     records: List[Any] = services.jobs.list_documents(
         context.organization_id,
         knowledge_base_id=knowledge_base_id,
         include_deleted=include_deleted,
-        limit=limit,
+        limit=limit if not context.knowledge_base_ids else 500,
     )
+    if context.knowledge_base_ids:
+        records = [record for record in records if context.allows_knowledge_base(record.knowledge_base_id)][:limit]
     documents = [
         DocumentStatusOut(
             document_id=record.document_id,
@@ -175,6 +180,7 @@ def update_knowledge(
     context.require("write")
     if payload.document_id != document_id:
         raise AppError("VALIDATION_ERROR", "document_id in the path and body must match")
+    context.require_knowledge_base(payload.knowledge_base_id)
     organization_id = assert_tenant_match(context, payload.organization_id, where="/knowledge/{id}")
 
     services = services_from_request(request)
@@ -211,10 +217,20 @@ def delete_knowledge(
     context.require("write")
     services = services_from_request(request)
 
-    removed_vectors = repository.delete_document(
-        services.settings, organization_id=context.organization_id, document_id=document_id
-    )
     record = services.jobs.by_document(context.organization_id, document_id)
+    bound_scope = None
+    if context.knowledge_base_ids:
+        # Kunci proyek: dokumen di KB lain (walau organisasinya sama) diperlakukan tidak ada, dan
+        # penghapusan dibatasi ke KB dokumen itu - dokumen ber-ID sama di proyek lain aman.
+        if record is None or not context.allows_knowledge_base(record.knowledge_base_id):
+            raise AppError("DOCUMENT_NOT_FOUND", f"document '{document_id}' was not found in this organization")
+        bound_scope = record.knowledge_base_id
+    removed_vectors = repository.delete_document(
+        services.settings,
+        organization_id=context.organization_id,
+        document_id=document_id,
+        knowledge_base_id=bound_scope,
+    )
     removed_lexical = 0
     if record is not None:
         removed_lexical = services.sparse.remove_document(
@@ -252,7 +268,7 @@ def knowledge_status(
     context.require("read")
     services = services_from_request(request)
     record = services.jobs.by_document(context.organization_id, document_id)
-    if record is None:
+    if record is None or not context.allows_knowledge_base(record.knowledge_base_id):
         raise AppError("DOCUMENT_NOT_FOUND", f"document '{document_id}' is unknown to this organization")
     vectors = repository.count_document(
         services.settings, organization_id=context.organization_id, document_id=document_id

@@ -35,17 +35,61 @@ def _entry_for(client, key_id: str) -> dict:
 # --------------------------------------------------------------------------- #
 # Siapa yang boleh menyentuh kunci
 # --------------------------------------------------------------------------- #
-def test_any_valid_key_may_list_keys_in_api_key_only_mode(client):
-    """Bawaan: konsol satu operator, kunci apa pun yang sah boleh mengelola kunci."""
-    for key in (TENANT_B_KEY, READ_ONLY_KEY):
-        assert _list(client, key).status_code == 200
+def test_operator_org_keys_may_list_keys_in_api_key_only_mode(client, settings):
+    """Mode satu operator: kunci organisasi operator mengelola kunci walau tanpa izin admin;
+    kunci tenant lain (tanpa admin) tidak."""
+    settings.ui_session_organization_id = "org_a"
+    assert _list(client, READ_ONLY_KEY).status_code == 200
+    assert _list(client, TENANT_B_KEY).status_code == 403
 
 
-def test_any_valid_key_may_create_and_revoke_keys_in_api_key_only_mode(client):
+def test_keys_may_be_created_and_revoked_within_the_operator_org(client, settings):
+    settings.ui_session_organization_id = "org_b"
     created = _create(client, TENANT_B_KEY)
     assert created.status_code == 200, created.text
     key_id = created.json()["data"]["entry"]["key_id"]
-    assert client.delete(f"{CREATE}/{key_id}", headers=auth(READ_ONLY_KEY)).status_code == 200
+    assert client.delete(f"{CREATE}/{key_id}", headers=auth(TENANT_B_KEY)).status_code == 200
+
+
+def test_a_key_of_another_org_cannot_be_revoked(client):
+    """Kunci admin org_a tidak boleh mencabut kunci milik org_b."""
+    created = _create(client, SUPER_KEY, organization_id="org_b", user_id="u", application_id="a")
+    key_id = created.json()["data"]["entry"]["key_id"]
+    refused = client.delete(f"{CREATE}/{key_id}", headers=auth(TENANT_A_KEY))
+    assert refused.status_code == 403
+    assert client.delete(f"{CREATE}/{key_id}", headers=auth(SUPER_KEY)).status_code == 200
+
+
+def test_a_key_cannot_grant_more_than_it_has(client, settings):
+    """K1: kunci read tidak boleh membuat kunci '*' / admin (eskalasi dua langkah)."""
+    settings.ui_session_organization_id = "org_a"
+    for permissions in (["*"], ["admin"], ["read", "write"]):
+        response = _create(client, READ_ONLY_KEY, permissions=permissions)
+        assert response.status_code == 403, (permissions, response.text)
+    assert _create(client, READ_ONLY_KEY, permissions=["read"]).status_code == 200
+    # Kunci admin pun tidak bisa membuat kunci '*'.
+    assert _create(client, TENANT_A_KEY, permissions=["*"]).status_code == 403
+
+
+def test_a_key_can_be_bound_to_knowledge_bases(client):
+    created = _create(client, label="Proyek A", knowledge_base_ids=["kb_proyek_a"])
+    assert created.status_code == 200, created.text
+    assert created.json()["data"]["entry"]["knowledge_base_ids"] == ["kb_proyek_a"]
+    key = created.json()["data"]["key"]
+    other = client.post(
+        "/api/v1/search",
+        json={"query": "cuti", "knowledge_base_id": "kb_proyek_b"},
+        headers=auth(key),
+    )
+    assert other.status_code == 403
+    own = client.post(
+        "/api/v1/search",
+        json={"query": "cuti", "knowledge_base_id": "kb_proyek_a"},
+        headers=auth(key),
+    )
+    assert own.status_code == 200
+    escape = client.post(CREATE, json={"label": "lepas", "permissions": ["read"]}, headers=auth(key))
+    assert escape.status_code == 403, "kunci terikat tidak boleh membuat kunci tanpa ikatan"
 
 
 def test_only_admin_may_manage_keys_when_api_key_only_is_off(client, settings):
@@ -117,9 +161,12 @@ def test_entry_reports_the_permissions_that_were_granted(client):
 
 
 def test_env_keys_are_visible_but_not_revocable(client):
-    keys = _list(client).json()["data"]["keys"]
+    # Kunci '*' melihat semua; kunci tenant hanya kunci organisasinya sendiri.
+    keys = _list(client, SUPER_KEY).json()["data"]["keys"]
     env = [item for item in keys if item["source"] == "env"]
     assert len(env) == 4
+    own = [item for item in _list(client).json()["data"]["keys"] if item["source"] == "env"]
+    assert {item["organization_id"] for item in own} == {"org_a"}
     assert all(item["key_id"] is None for item in env)
     assert all(item["revocable"] is False for item in env)
     # potongan kunci env cukup untuk mengenali, tidak cukup untuk dipakai
