@@ -22,6 +22,20 @@ from app.parsing.sanitize import clean_text, looks_like_binary_garbage
 
 TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"[ \t\u00a0]+")
+# Elemen navigasi/kontrol UI, bukan isi halaman - kalau ikut terbaca sebagai teks, knowledge
+# tercemar label tombol seperti "Arrow right"/"Next"/"Chevron left" dari carousel, paginasi,
+# atau menu. Dibuang SEBELUM tag dilucuti (bukan sesudah), karena sesudahnya teks anaknya
+# sudah lepas dari tag pembungkusnya dan tidak bisa dibedakan dari isi sah.
+_NAV_CHROME_RE = re.compile(r"(?is)<(nav|header|footer|button|svg|form)\b[^>]*>.*?</\1>")
+# Elemen yang ditandai eksplisit "sembunyikan dari pembaca" (aria-hidden="true") atau
+# disembunyikan SECARA VISUAL tapi tetap ada di DOM untuk pembaca layar (pola umum ikon
+# Font Awesome/Bootstrap: class sr-only/visually-hidden dst). Keduanya tidak pernah dilihat
+# pengguna di halaman - bukan knowledge yang sah, siapa pun yang menulisnya.
+_HIDDEN_CHROME_RE = re.compile(
+    r"(?is)<(\w+)\b(?=[^>]*\baria-hidden\s*=\s*[\"']true[\"']"
+    r"|[^>]*\bclass\s*=\s*[\"'][^\"']*\b(?:sr-only|visually-hidden|screen-reader-only"
+    r"|visually-hidden-focusable|a11y-hidden)\b)[^>]*>.*?</\1>"
+)
 OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 # Awal berkas RTF: { \ r t f  -- ditulis sebagai kode byte supaya tidak jadi karakter kontrol.
 RTF_HEADER = bytes([0x7B, 0x5C, 0x72, 0x74, 0x66])
@@ -272,6 +286,8 @@ def _decode_text(content: bytes) -> str:
 
 
 def _html_to_text(raw: str) -> str:
+    raw = _NAV_CHROME_RE.sub(" ", raw)
+    raw = _HIDDEN_CHROME_RE.sub(" ", raw)
     raw = re.sub(r"(?is)<(script|style|head).*?</\1>", " ", raw)
     raw = re.sub(r"(?i)<br\s*/?>", "\n", raw)
     raw = re.sub(r"(?i)</(p|div|section|article|li|h[1-6]|tr|table|blockquote|dd|dt|figcaption|pre)>", "\n", raw)

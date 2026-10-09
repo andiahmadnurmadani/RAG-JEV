@@ -1,6 +1,6 @@
-# Teks bersih: aksara asing dan sampah biner
+# Teks bersih: aksara asing, sampah biner, dan boilerplate navigasi web
 
-Dua keluhan nyata yang dijawab dokumen ini:
+Tiga keluhan nyata yang dijawab dokumen ini:
 
 1. **Aksara China muncul di jawaban.** Model menyelipkan aksara Han ke tengah kalimat
    Indonesia (`Dokumen final perakitan完整的 memuat wiring`). Faktanya benar, tapi pemakai
@@ -8,6 +8,9 @@ Dua keluhan nyata yang dijawab dokumen ini:
 2. **Sampah biner masuk jadi knowledge.** Sebuah PDF di web disajikan tanpa `content-type`
    yang benar, sehingga byte mentahnya (`%PDF-1.4`, `endstream`) masuk ke Qdrant sebagai
    "knowledge" — potongan yang tidak bisa dicari dan mencemari jawaban model.
+3. **Label tombol web ikut jadi knowledge.** Audit manual atas knowledge dari sumber web
+   menemukan potongan berisi teks seperti `Arrow right` — bukan isi dokumen, melainkan label
+   aksesibilitas tombol carousel/paginasi yang ikut terekstrak. Lihat §3.
 
 ## Temuan: bukan satu masalah, tapi tiga
 
@@ -67,6 +70,37 @@ hasil : Dokumen final perakitan memuat wiring dan firmware [1].
 
 Kata Latin, sitasi `[1]`, dan garis tabel Markdown `|---|---|` semuanya tetap utuh. Dikunci
 uji regresi.
+
+## 3. Boilerplate navigasi web: tombol, menu, ikon
+
+`_html_to_text()` (dipakai jalur **Sumber Web** — `file_url`/`crawl`) dulu hanya membuang tag
+`script`/`style`/`head`, lalu melucuti SEMUA tag lain sambil mempertahankan teks anaknya. Itu
+termasuk teks yang sengaja **disembunyikan secara visual** untuk pembaca layar — pola umum di
+situs modern untuk tombol carousel/paginasi:
+
+```html
+<button class="slick-next">
+  <span class="sr-only">Arrow right</span>   <!-- dulu ikut terekstrak -->
+  <svg aria-hidden="true">...</svg>
+</button>
+```
+
+Sekarang dibuang **sebelum** tag dilucuti (`_NAV_CHROME_RE`, `_HIDDEN_CHROME_RE` di
+`app/parsing/parser.py`), berdasarkan dua sinyal:
+
+| Sinyal | Contoh | Alasan dibuang |
+|---|---|---|
+| Elemen navigasi/kontrol | `<nav>`, `<header>`, `<footer>`, `<button>`, `<svg>`, `<form>` | Chrome UI, bukan isi halaman |
+| Ditandai tersembunyi | `aria-hidden="true"`, class `sr-only`/`visually-hidden`/dst | Tidak pernah dilihat pengguna |
+
+Yang **tidak** disentuh: `<headerFooter>`/`<oddHeader>` (tag XML internal XLSX, bukan tag HTML
+`<header>` — dibedakan lewat `\b` batas kata) dan isi `<table>` (jalur pipe `| a | b |` yang
+sudah ada tetap jalan). Dikunci di `tests/unit/test_html_chrome_filter.py`.
+
+**Belum diubah dengan sengaja**: knowledge web lama yang sudah terlanjur terindeks sebelum
+perbaikan ini tidak dibersihkan otomatis — sama seperti aksara asing lama di atas, perlu
+diunggah ulang untuk ikut bersih (menghapus/menulis ulang potongan lama adalah operasi
+destruktif pada data produksi).
 
 ## Verifikasi
 
