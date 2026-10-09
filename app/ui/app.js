@@ -10,7 +10,9 @@
 const KEY = "rag.console.v3";
 const SESSION_KEY = "rag.session.v1";
 const DEFAULT_KB = "kb_chat";
-const PANELS = ["conn", "access", "keys", "llm", "jev", "fmt", "retr", "eval", "web", "summary"];
+const PANELS = ["conn", "access", "keys", "llm", "jev", "retr", "fmt", "web", "summary"];
+const RECENT_KB_KEY = "rag.console.kbs.v1";
+const VIEWS = ["kbs", "chat", "eval", "settings"];
 // Versi bentuk opsi uji di localStorage. Versi lama memaksa reranker MATI di setiap pertanyaan konsol,
 // sehingga hasil uji berbeda dari yang diterima aplikasi lewat API; opsi lama itu dibuang.
 const OPTS_VERSION = 2;
@@ -45,6 +47,9 @@ const state = {
   opts: { top_k: null, threshold: null, strict: null, hybrid: null, reranker: null, route: "", memory: true },
   history: [],
   evalMode: "search",
+  kbs: [],
+  kbSort: "recent",
+  view: "",
   evalStop: false,
   limits: { max_mb: null, allowed: [], allowed_ext: [] },
   catalog: [],
@@ -344,7 +349,7 @@ async function login(event) {
     note("gate-status", "ok", "Sesi dibuka sampai <strong>" + escapeHtml(shortTime(data.expires_at)) + "</strong>.");
     hideGate();
     const ok = await checkConnection();
-    if (ok) loadDocs();
+    if (ok) route();
   } catch (err) {
     const left = err.details && typeof err.details.attempts_left === "number" ? err.details.attempts_left : null;
     note("gate-status", "err", escapeHtml(err.message || "gagal masuk") +
@@ -368,22 +373,59 @@ async function logout() {
 
 /* ------------------------------------------------------------------- views */
 
-function showView(name) {
-  const settings = name === "settings";
-  const sheet = $("dlg-settings");
-  if (settings) {
-    if (!sheet.open) sheet.showModal();
-    selectPanel(state.panel);
-    loadSettings();
-    loadApiKeys();
-    loadGate();
-  } else if (sheet.open) {
-    sheet.close();
-  }
-  if (currentView() !== name) location.hash = settings ? "#/settings" : "#/";
+/* Rute halaman (hash): #/kbs, #/kb/<id>, #/eval, #/settings/<panel>. */
+function parseRoute() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  const head = parts[0] || "";
+  if (head === "settings") return { view: "settings", arg: parts[1] || "" };
+  if (head === "eval") return { view: "eval", arg: "" };
+  if (head === "kb") return { view: "chat", arg: parts.slice(1).join("/") };
+  if (head === "chat") return { view: "chat", arg: "" };
+  return { view: "kbs", arg: "" };
 }
 
-function selectPanel(name) {
+function currentView() {
+  return parseRoute().view;
+}
+
+function showView(name, arg) {
+  const target = name === "settings"
+    ? "#/settings" + (arg ? "/" + arg : "")
+    : name === "chat"
+      ? "#/kb/" + encodeURIComponent(arg || state.kb)
+      : name === "eval" ? "#/eval" : "#/kbs";
+  if (location.hash !== target) location.hash = target;
+  else route();
+}
+
+function route() {
+  const { view, arg } = parseRoute();
+  const previous = state.view;
+  state.view = view;
+  VIEWS.forEach((name) => { $("view-" + name).hidden = name !== view; });
+  document.querySelectorAll(".rail-nav [data-route]").forEach((link) => {
+    if (link.dataset.route === view) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  $("nav-chat").setAttribute("href", "#/kb/" + encodeURIComponent(state.kb));
+  if (view === "chat") {
+    openKnowledgeBase(arg || state.kb);
+  } else if (view === "kbs") {
+    loadKbs();
+  } else if (view === "eval") {
+    renderEvalKbs();
+  } else if (view === "settings") {
+    selectPanel(arg || state.panel, true);
+    if (previous !== "settings") {
+      loadSettings();
+      loadApiKeys();
+      loadGate();
+    }
+  }
+  if (view !== "chat") window.scrollTo(0, 0);
+}
+
+function selectPanel(name, fromRoute) {
   state.panel = PANELS.indexOf(name) === -1 ? "conn" : name;
   // Panel Akses & Sesi hanya relevan bila konsol memang memakai kode akses. Pada mode
   // "cukup API key" panelnya disembunyikan supaya tidak ada setelan mati yang membingungkan.
@@ -391,12 +433,14 @@ function selectPanel(name) {
   document.querySelectorAll("#settings-nav [data-panel]").forEach((button) => {
     const on = button.dataset.panel === state.panel;
     button.setAttribute("aria-selected", on ? "true" : "false");
+    // Di layar sempit menu pengaturan jadi baris yang digeser: pastikan menu aktif terlihat.
+    if (on && button.offsetParent) button.scrollIntoView({ block: "nearest", inline: "center" });
   });
   document.querySelectorAll("#settings-panels > [data-panel]").forEach((section) => {
     section.hidden = section.dataset.panel !== state.panel;
   });
+  if (!fromRoute) history.replaceState(null, "", "#/settings/" + state.panel);
   if (state.panel === "access") loadAccess();
-  if (state.panel === "eval") $("eval-kb").textContent = state.kb;
 }
 
 // Sembunyikan/tampilkan bagian yang hanya berguna saat gerbang kode akses dipakai.
@@ -411,8 +455,160 @@ function applyConsoleMode() {
   if (logout) logout.hidden = apiKeyOnly || !state.session;
 }
 
-function currentView() {
-  return location.hash.replace(/^#\/?/, "") === "settings" ? "settings" : "chat";
+/* --------------------------------------------------------- knowledge base */
+
+function cleanKbId(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_.:-]/g, "").slice(0, 120);
+}
+
+function recentKbs() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(RECENT_KB_KEY) || "[]");
+    return Array.isArray(stored) ? stored.filter((item) => typeof item === "string") : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function rememberKb(id) {
+  if (!id) return;
+  const list = [id].concat(recentKbs().filter((item) => item !== id)).slice(0, 30);
+  try {
+    localStorage.setItem(RECENT_KB_KEY, JSON.stringify(list));
+  } catch (err) {
+    /* tidak bisa diingat: tetap bisa dibuka */
+  }
+}
+
+function openKnowledgeBase(id) {
+  const kb = cleanKbId(id) || DEFAULT_KB;
+  if (kb !== state.kb) {
+    state.kb = kb;
+    state.picked.clear();
+    state.docs = [];
+    newConversation();
+    renderDocs([]);
+  }
+  $("set-kb").value = state.kb;
+  $("kb-current").textContent = state.kb;
+  $("kb-current").title = state.kb;
+  document.title = state.kb + " - RAG Console";
+  $("nav-chat").setAttribute("href", "#/kb/" + encodeURIComponent(state.kb));
+  rememberKb(state.kb);
+  savePrefs();
+  if (credential()) loadDocs();
+}
+
+function relativeTime(value) {
+  if (!value) return "belum ada aktivitas";
+  const at = new Date(value);
+  if (isNaN(at.getTime())) return String(value).slice(0, 16);
+  const minutes = Math.round((Date.now() - at.getTime()) / 60000);
+  if (minutes < 1) return "baru saja";
+  if (minutes < 60) return minutes + " menit lalu";
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return hours + " jam lalu";
+  const days = Math.round(hours / 24);
+  if (days < 30) return days + " hari lalu";
+  return shortTime(value).slice(0, 10);
+}
+
+async function loadKbs() {
+  if (!credential()) {
+    $("kb-grid").innerHTML = "";
+    note("kbs-status", "warn", "Masuk dengan kode akses, atau tempel <strong>API key</strong> di <a href=\"#/settings/conn\">Pengaturan &rsaquo; Koneksi</a>.");
+    return;
+  }
+  note("kbs-status", "info", "Memuat knowledge base...");
+  try {
+    const data = await api("GET", "/knowledge-bases");
+    state.kbs = data.knowledge_bases || [];
+    clearNote("kbs-status");
+  } catch (err) {
+    state.kbs = [];
+    note("kbs-status", "err", escapeHtml(err.message || "gagal memuat") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+  renderKbs();
+}
+
+function renderKbs() {
+  const known = new Set(state.kbs.map((item) => item.knowledge_base_id));
+  // KB yang baru dibuat dari browser ini (belum ada dokumen) tetap terlihat.
+  const drafts = recentKbs().filter((id) => !known.has(id)).map((id) => ({
+    knowledge_base_id: id, documents: 0, chunks: 0, tokens: 0, completed: 0, processing: 0, failed: 0, updated_at: "", draft: true,
+  }));
+  const query = ($("kb-search").value || "").trim().toLowerCase();
+  let items = state.kbs.concat(drafts).filter((item) => !query || item.knowledge_base_id.toLowerCase().indexOf(query) !== -1);
+  if (state.kbSort === "name") items.sort((a, b) => a.knowledge_base_id.localeCompare(b.knowledge_base_id));
+  else if (state.kbSort === "size") items.sort((a, b) => (b.chunks - a.chunks) || (b.documents - a.documents));
+  else items.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+
+  const totals = state.kbs.reduce((acc, item) => {
+    acc.docs += item.documents; acc.chunks += item.chunks; acc.busy += item.processing; acc.failed += item.failed;
+    return acc;
+  }, { docs: 0, chunks: 0, busy: 0, failed: 0 });
+  $("kb-stats").innerHTML = [
+    ["Knowledge base", state.kbs.length],
+    ["Dokumen", totals.docs],
+    ["Potongan terindeks", totals.chunks],
+    ["Sedang diproses", totals.busy],
+  ].map((pair) => '<div class="stat"><span class="stat-v">' + escapeHtml(pair[1].toLocaleString("id-ID")) +
+    '</span><span class="stat-k">' + escapeHtml(pair[0]) + "</span></div>").join("");
+
+  $("kbs-empty").hidden = items.length > 0;
+  $("kb-grid").innerHTML = items.map((item) => {
+    const active = item.knowledge_base_id === state.kb ? " active" : "";
+    const badges = [];
+    if (item.draft) badges.push('<span class="tag">kosong</span>');
+    if (item.processing) badges.push('<span class="tag warn">' + item.processing + " diproses</span>");
+    if (item.failed) badges.push('<span class="tag off">' + item.failed + " gagal</span>");
+    if (active) badges.push('<span class="tag ok">aktif</span>');
+    return '<article class="kb-card' + active + '" data-kb="' + escapeHtml(item.knowledge_base_id) + '" tabindex="0">' +
+      '<div class="kb-card-head"><span class="kb-icon"><svg class="ico"><use href="#i-db"/></svg></span>' +
+      '<h3 class="mono" title="' + escapeHtml(item.knowledge_base_id) + '">' + escapeHtml(item.knowledge_base_id) + "</h3></div>" +
+      '<div class="kb-card-meta"><span><b>' + item.documents.toLocaleString("id-ID") + "</b> dokumen</span>" +
+      "<span><b>" + item.chunks.toLocaleString("id-ID") + "</b> potongan</span></div>" +
+      '<div class="kb-card-foot"><span class="help">' + escapeHtml(relativeTime(item.updated_at)) + "</span>" +
+      '<span class="kb-badges">' + badges.join("") + "</span></div>" +
+      '<div class="kb-card-actions"><button class="btn sm primary" type="button" data-open="' + escapeHtml(item.knowledge_base_id) +
+      '"><svg class="ico"><use href="#i-arrow"/></svg><span>Buka</span></button>' +
+      '<button class="btn sm" type="button" data-eval="' + escapeHtml(item.knowledge_base_id) +
+      '"><svg class="ico"><use href="#i-target"/></svg><span>Uji</span></button></div></article>';
+  }).join("");
+  $("kb-grid").querySelectorAll(".kb-card").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      const evalButton = event.target.closest("[data-eval]");
+      if (evalButton) {
+        openKnowledgeBase(evalButton.dataset.eval);
+        showView("eval");
+        return;
+      }
+      showView("chat", card.dataset.kb);
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") showView("chat", card.dataset.kb);
+    });
+  });
+}
+
+function newKbDialog() {
+  $("newkb-name").value = "";
+  $("newkb-preview").textContent = "Huruf kecil, angka, garis bawah, dan tanda hubung.";
+  $("dlg-newkb").showModal();
+  $("newkb-name").focus();
+}
+
+function renderEvalKbs() {
+  const ids = Array.from(new Set([state.kb].concat(state.kbs.map((item) => item.knowledge_base_id), recentKbs())));
+  $("eval-kb-select").innerHTML = ids.map((id) =>
+    '<option value="' + escapeHtml(id) + '"' + (id === state.kb ? " selected" : "") + ">" + escapeHtml(id) + "</option>").join("");
+  $("eval-kb").textContent = state.kb;
+  if (!state.kbs.length && credential()) {
+    api("GET", "/knowledge-bases").then((data) => {
+      state.kbs = data.knowledge_bases || [];
+      if (state.view === "eval") renderEvalKbs();
+    }).catch(() => {});
+  }
 }
 
 /* --------------------------------------------------------------- documents */
@@ -1034,6 +1230,7 @@ async function saveConnection() {
     note("conn-status", "ok", "Pengaturan koneksi disimpan di browser ini.");
     $("set-key-help").textContent = "Disimpan di localStorage browser untuk origin ini.";
     loadDocs();
+    state.kbs = [];
   }
 }
 
@@ -1848,15 +2045,37 @@ async function revokeSession(sessionId) {
 }
 
 function wire() {
-  $("btn-settings").addEventListener("click", () => showView(currentView() === "settings" ? "chat" : "settings"));
-  $("btn-settings-close").addEventListener("click", () => showView("chat"));
-  $("dlg-settings").addEventListener("close", () => {
-    if (currentView() === "settings") location.hash = "#/";
+  $("btn-kbs-refresh").addEventListener("click", loadKbs);
+  $("btn-kb-new").addEventListener("click", newKbDialog);
+  $("kb-search").addEventListener("input", renderKbs);
+  document.querySelectorAll("[data-kb-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.kbSort = button.dataset.kbSort;
+      document.querySelectorAll("[data-kb-sort]").forEach((other) => {
+        other.setAttribute("aria-pressed", other === button ? "true" : "false");
+      });
+      renderKbs();
+    });
+  });
+  $("newkb-name").addEventListener("input", () => {
+    const id = cleanKbId($("newkb-name").value);
+    $("newkb-preview").innerHTML = id ? "Akan dibuat sebagai <span class=\"mono\">" + escapeHtml(id) + "</span>" : "Huruf kecil, angka, garis bawah, dan tanda hubung.";
+  });
+  $("dlg-newkb").addEventListener("close", () => {
+    if ($("dlg-newkb").returnValue !== "ok") return;
+    const id = cleanKbId($("newkb-name").value);
+    if (!id) return;
+    rememberKb(id);
+    showView("chat", id);
+  });
+  $("eval-kb-select").addEventListener("change", () => {
+    openKnowledgeBase($("eval-kb-select").value);
+    renderEvalKbs();
   });
   document.querySelectorAll("#settings-nav [data-panel]").forEach((button) => {
     button.addEventListener("click", () => selectPanel(button.dataset.panel));
   });
-  window.addEventListener("hashchange", () => showView(currentView()));
+  window.addEventListener("hashchange", route);
 
   $("btn-create-key").addEventListener("click", createKey);
   $("btn-keys-refresh").addEventListener("click", loadApiKeys);
@@ -1992,7 +2211,7 @@ function wire() {
 async function boot() {
   restore();
   wire();
-  showView(currentView());
+  route();
   // Tombol Keluar hanya bermakna bila ada sesi (bukan pada mode "cukup API key");
   // applyConsoleMode() di bawah menetapkan keadaan akhirnya setelah mode diketahui.
   try {
@@ -2004,11 +2223,11 @@ async function boot() {
       applyConsoleMode();
       if (state.key) {
         const connected = await checkConnection();
-        if (connected) loadDocs();
+        if (connected) route();
       } else {
         setConnection("warn", "tempel kunci API");
         note("conn-status", "warn", "Konsol ini tidak memakai kode akses. Tempel <strong>kunci API</strong> sekali di panel <strong>Koneksi</strong> - kunci itu langsung membuka semua fitur, termasuk Pengaturan.");
-        showView("settings");
+        showView("settings", "conn");
       }
       return;
     }
@@ -2019,7 +2238,7 @@ async function boot() {
     }
     if (state.session || state.key) {
       const ok = await checkConnection();
-      if (ok) loadDocs();
+      if (ok) route();
     } else if (gate && gate.enabled) {
       setConnection("warn", "butuh kode akses");
     } else {

@@ -10,7 +10,7 @@ def test_ui_is_served_without_credentials(client):
     response = client.get("/ui/")
     assert response.status_code == 200
     body = response.text
-    assert "RAG Chat" in body
+    assert "RAG Console" in body
     # Assets are referenced relatively so the console also works behind a proxy that
     # mounts it somewhere other than /ui/.
     assert re.search(r'src="app\.js\?v=[^"]+"', body), "app.js harus punya cap versi"
@@ -108,15 +108,14 @@ def test_the_main_page_stays_clean_and_configuration_lives_in_settings(client):
     """The chat page holds upload, the document list and the prompt - nothing else.
 
     Model/Jev configuration must not be reachable from the chat surface, otherwise the
-    operator sees two places that promise the same thing. Since the settings screen became a
-    dialog, the boundary is the dialog element itself.
+    operator sees two places that promise the same thing. The boundary is the settings page.
     """
     body = client.get("/ui/").text
-    chat = body[body.index('id="view-chat"') : body.index('id="dlg-settings"')]
+    chat = body[body.index('id="view-chat"') : body.index('id="view-eval"')]
     for leaked in ("llm-model", "llm-base", "llm-key", "jev-url", "jev-model", "set-key", "key-label"):
         assert 'id="' + leaked + '"' not in chat, leaked
 
-    settings = body[body.index('id="dlg-settings"') :]
+    settings = body[body.index('id="view-settings"') : body.index('id="dlg-newkb"')]
     for node in ("set-key", "set-kb", "llm-base", "llm-model", "llm-provider", "jev-url", "jev-model", "jev-provider"):
         assert 'id="' + node + '"' in settings, node
     assert 'id="dropzone"' not in settings and 'id="prompt"' not in settings
@@ -139,7 +138,7 @@ def test_settings_can_fetch_the_model_list_and_test_jev(client):
 def test_every_input_in_the_settings_screen_has_a_label(client):
     """A settings screen nobody can navigate by keyboard is not finished."""
     body = client.get("/ui/").text
-    settings = body[body.index('id="dlg-settings"') :]
+    settings = body[body.index('id="view-settings"') : body.index('id="dlg-newkb"')]
     labelled = set(re.findall(r'<label[^>]*for="([^"]+)"', settings))
     tags = re.findall(r"<(?:input|select)\b[^>]*>", settings)
     unlabelled = []
@@ -193,39 +192,51 @@ def test_console_calls_the_api_prefix_it_advertises(client):
 def test_the_main_page_and_the_format_control_never_overlap(client):
     """Format berkas adalah kebijakan layanan: kontrolnya di Pengaturan, bukan di chat."""
     body = client.get("/ui/").text
-    chat = body[body.index('id="view-chat"') : body.index('id="dlg-settings"')]
+    chat = body[body.index('id="view-chat"') : body.index('id="view-eval"')]
     for leaked in ("fmt-groups", "fmt-max", "btn-save-fmt"):
         assert 'id="' + leaked + '"' not in chat, leaked
 
-    settings = body[body.index('id="dlg-settings"') :]
+    settings = body[body.index('id="view-settings"') : body.index('id="dlg-newkb"')]
     for node in ("fmt-groups", "fmt-max", "btn-save-fmt", "btn-fmt-all", "fmt-note"):
         assert 'id="' + node + '"' in settings, node
     assert "Format berkas" in settings
 
 
 # --------------------------------------------------------------------------- #
-# Pengaturan sebagai dialog + panel Kunci API
+# Pengaturan sebagai halaman + panel Kunci API
 # --------------------------------------------------------------------------- #
-def test_settings_is_one_model_dialog_with_panels(client):
-    """Satu tempat untuk semua konfigurasi, dibuka di atas chat - bukan halaman kedua."""
+def test_settings_is_a_scrollable_page_with_panels(client):
+    """Pengaturan adalah halaman (bisa digulir sampai bawah), bukan dialog modal.
+
+    Dialog modal lama memotong panel yang panjang: isinya tidak bisa digulir di layar kecil.
+    """
     body = client.get("/ui/").text
-    assert '<dialog id="dlg-settings"' in body
-    assert 'id="view-settings"' not in body, "halaman Pengaturan lama harus sudah tidak ada"
+    assert 'id="view-settings"' in body
+    assert 'id="dlg-settings"' not in body, "dialog Pengaturan lama harus sudah tidak ada"
     for panel in ("conn", "keys", "llm", "jev", "fmt", "retr"):
         assert 'data-panel="' + panel + '"' in body, panel
-    # hanya satu panel yang tampil; sisanya disembunyikan
     assert body.count('data-panel="conn" hidden') == 0
 
     script = client.get("/ui/app.js").text
-    assert "showModal" in script and "selectPanel" in script
+    assert "selectPanel" in script and '"#/settings"' in script
     for panel in ("conn", "keys", "llm", "jev", "fmt", "retr"):
         assert panel in script
 
 
-def test_the_settings_dialog_manages_api_keys(client):
+def test_every_knowledge_base_is_listed_and_can_be_opened(client):
+    """Halaman Knowledge base: semua KB organisasi, bisa dicari dan dibuka satu per satu."""
+    body = client.get("/ui/").text
+    for node in ("view-kbs", "kb-grid", "kb-search", "btn-kb-new", "dlg-newkb", "kb-current"):
+        assert 'id="' + node + '"' in body, node
+    script = client.get("/ui/app.js").text
+    assert 'api("GET", "/knowledge-bases")' in script
+    assert '"#/kb/"' in script and "openKnowledgeBase" in script
+
+
+def test_the_settings_page_manages_api_keys(client):
     """Panel Kunci API: buat, lihat, cabut - dan nilainya tidak bisa dibaca ulang."""
     body = client.get("/ui/").text
-    settings = body[body.index('id="dlg-settings"') :]
+    settings = body[body.index('id="view-settings"') : body.index('id="dlg-newkb"')]
     for node in ("key-label", "key-expiry", "key-perm-read", "key-perm-write", "key-perm-admin",
                  "btn-create-key", "keys-rows", "key-value", "btn-copy-key", "btn-keys-refresh",
                  "keys-note", "keys-status"):

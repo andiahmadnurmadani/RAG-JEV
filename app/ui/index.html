@@ -2,52 +2,47 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RAG Chat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RAG Console</title>
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261010a">
+<link rel="stylesheet" href="style.css?v=20261010b">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M14 3v5h5"/><path d="M19 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9l6 6v11a1 1 0 0 1-1 1z"/>
-  </symbol>
-  <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
-  </symbol>
-  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
-  </symbol>
-  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="3"/>
-    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 2.6 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9.5 4.1a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21.4 11a2 2 0 1 1 0 4z"/>
-  </symbol>
-  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-  </symbol>
-  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M15 18l-6-6 6-6"/>
-  </symbol>
-  <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M10.3 4.3 2.6 17.3A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.7L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>
-  </symbol>
-  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="m5 13 4 4L19 7"/>
-  </symbol>
-  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M6 6l12 12"/><path d="M18 6 6 18"/>
-  </symbol>
-  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2"/><path d="m17 6 2 2"/><path d="m14.5 8.5 2 2"/>
-  </symbol>
-  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v2"/>
-  </symbol>
-  <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8 6 12l4 4"/><path d="M6 12h9"/>
-  </symbol>
+  <symbol id="i-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5"/><path d="M12 12v9"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V5.5"/><path d="M4.5 12v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V12"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12.5a7.5 7.5 0 0 1-11.2 6.5L4 20l1.1-4.4A7.5 7.5 0 1 1 20 12.5z"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 2.6 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9.5 4.1a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21.4 11a2 2 0 1 1 0 4z"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5"/><path d="M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2"/><path d="m17 6 2 2"/><path d="m14.5 8.5 2 2"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9.5 9.5h5v5h-5z"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9l6 6v11a1 1 0 0 1-1 1z"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 19.5V4.5"/><path d="M8 7h8"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8"/><path d="M4 3.5V8h4.5"/><path d="M4 13a8 8 0 0 0 14.6 4.5L20 16"/><path d="M20 20.5V16h-4.5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></symbol>
+  <symbol id="i-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h9"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.2-1.2"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.3 2.6 17.3A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.7L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4L19 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"/><path d="M18 6 6 18"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8 6 12l4 4"/><path d="M6 12h9"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9l6 6v11a1 1 0 0 1-1 1z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+  <symbol id="i-chat-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12.5a7.5 7.5 0 0 1-11.2 6.5L4 20l1.1-4.4A7.5 7.5 0 1 1 20 12.5z"/><path d="M12 9v6M9 12h6"/></symbol>
 </svg>
 
 <!-- ============================ gerbang kode akses =========================== -->
@@ -72,23 +67,71 @@
 </main>
 
 <div class="app" id="app-shell">
-  <header class="bar">
-    <span class="brand"><span class="mark"><svg><use href="#i-doc"/></svg></span>RAG Chat</span>
-    <span class="spacer"></span>
-    <span class="pill" id="conn-pill" title="Status layanan"><span class="dot" id="conn-dot"></span><span id="conn-text">belum tersambung</span></span>
-    <button class="btn ghost icon" id="btn-logout" type="button" title="Keluar dari sesi ini" aria-label="Keluar" hidden><svg><use href="#i-logout"/></svg></button>
-    <a class="btn ghost icon" id="link-docs" href="/guide/" target="_blank" rel="noopener" title="Dokumentasi" aria-label="Dokumentasi" style="text-decoration:none"><svg><use href="#i-doc"/></svg></a>
-    <button class="btn ghost icon" id="btn-settings" title="Pengaturan" aria-label="Pengaturan"><svg><use href="#i-gear"/></svg></button>
-  </header>
-
-  <!-- ================================ chat view =============================== -->
-  <main class="main view" id="view-chat">
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Dokumen</h2>
-        <span class="count" id="docs-count">0</span>
+  <!-- ============================== navigasi utama ============================= -->
+  <aside class="rail" aria-label="Navigasi utama">
+    <a class="brand" href="#/kbs" aria-label="RAG Console">
+      <span class="mark"><svg class="ico"><use href="#i-logo"/></svg></span>
+      <span class="brand-text">RAG Console</span>
+    </a>
+    <nav class="rail-nav">
+      <a href="#/kbs" data-route="kbs"><svg class="ico"><use href="#i-db"/></svg><span>Knowledge base</span></a>
+      <a href="#/kb" data-route="chat" id="nav-chat"><svg class="ico"><use href="#i-chat"/></svg><span>Chat</span></a>
+      <a href="#/eval" data-route="eval"><svg class="ico"><use href="#i-target"/></svg><span>Uji akurasi</span></a>
+      <a href="#/settings" data-route="settings" id="btn-settings"><svg class="ico"><use href="#i-gear"/></svg><span>Pengaturan</span></a>
+    </nav>
+    <div class="rail-foot">
+      <span class="pill" id="conn-pill" title="Status layanan"><span class="dot" id="conn-dot"></span><span id="conn-text">belum tersambung</span></span>
+      <div class="rail-actions">
+        <a class="btn ghost icon" id="link-docs" href="/guide/" target="_blank" rel="noopener" title="Dokumentasi" aria-label="Dokumentasi"><svg class="ico"><use href="#i-book"/></svg></a>
+        <button class="btn ghost icon" id="btn-logout" type="button" title="Keluar dari sesi ini" aria-label="Keluar" hidden><svg class="ico"><use href="#i-logout"/></svg></button>
       </div>
-      <div class="panel-body">
+    </div>
+  </aside>
+
+  <div class="stage">
+    <!-- ============================= daftar knowledge base ============================ -->
+    <main class="view" id="view-kbs" hidden>
+      <div class="page">
+        <header class="page-head">
+          <div>
+            <h1>Knowledge base</h1>
+            <p>Semua knowledge base yang sudah dibuat di layanan ini. Buka satu untuk melihat dokumennya, mengunggah, dan bertanya.</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn" id="btn-kbs-refresh" type="button"><svg class="ico"><use href="#i-refresh"/></svg><span>Muat ulang</span></button>
+            <button class="btn primary" id="btn-kb-new" type="button"><svg class="ico"><use href="#i-plus"/></svg><span>Knowledge base baru</span></button>
+          </div>
+        </header>
+        <div class="kb-stats" id="kb-stats"></div>
+        <div class="toolbar">
+          <label class="search">
+            <svg class="ico"><use href="#i-search"/></svg>
+            <input type="search" id="kb-search" placeholder="Cari knowledge base..." aria-label="Cari knowledge base">
+          </label>
+          <span class="seg" role="group" aria-label="Urutkan">
+            <button type="button" data-kb-sort="recent" aria-pressed="true">Terbaru</button>
+            <button type="button" data-kb-sort="name" aria-pressed="false">Nama</button>
+            <button type="button" data-kb-sort="size" aria-pressed="false">Terbesar</button>
+          </span>
+        </div>
+        <div id="kbs-status"></div>
+        <div class="kb-grid" id="kb-grid"></div>
+        <p class="empty" id="kbs-empty" hidden>Belum ada knowledge base. Klik <b>Knowledge base baru</b>, lalu unggah dokumen pertama.</p>
+      </div>
+    </main>
+
+    <!-- ================================ ruang kerja KB ================================ -->
+    <main class="view workspace" id="view-chat" hidden>
+      <section class="panel">
+        <div class="panel-head">
+          <a class="btn ghost icon sm" href="#/kbs" title="Semua knowledge base" aria-label="Kembali ke daftar knowledge base"><svg class="ico"><use href="#i-back"/></svg></a>
+          <div class="kb-title">
+            <span class="eyebrow">Knowledge base</span>
+            <h2 id="kb-current" class="mono">-</h2>
+          </div>
+          <span class="count" id="docs-count" title="Jumlah dokumen">0</span>
+        </div>
+        <div class="panel-body">
         <div class="drop" id="dropzone">
           <div class="title">Tarik berkas ke sini</div>
           <div class="sub" id="drop-hint">PDF, DOCX, TXT, MD, HTML, JSON</div>
@@ -105,10 +148,10 @@
         <div class="row" id="docs-tools" hidden style="margin-top:12px">
           <button class="btn ghost sm" id="btn-select-none" type="button">Lepas semua centang</button>
         </div>
-      </div>
-    </section>
+        </div>
+      </section>
 
-    <section class="chat">
+      <section class="chat">
       <div class="thread" id="thread">
         <div class="thread-inner" id="thread-inner">
           <p class="empty" id="thread-empty">Tanyakan apa pun tentang dokumen Anda. Jawaban hanya memakai isi dokumen, dan menolak bila tidak ada dasarnya.</p>
@@ -132,32 +175,77 @@
           </div>
         </div>
       </form>
-    </section>
-  </main>
+      </section>
+    </main>
 
-  <!-- ============================ settings dialog ============================= -->
-  <dialog id="dlg-settings" class="sheet" aria-labelledby="settings-title">
-    <div class="sheet-head">
-      <div class="lead">
-        <h1 id="settings-title">Pengaturan</h1>
-        <p>Kunci API layanan ini disimpan di browser Anda. Model, Jev, dan format berkas berlaku untuk seluruh layanan, jadi hanya kunci berizin admin yang dapat membacanya.</p>
+    <!-- ================================== uji akurasi ================================== -->
+    <main class="view" id="view-eval" hidden>
+      <div class="page narrow">
+        <header class="page-head">
+          <div>
+            <h1>Uji akurasi</h1>
+            <p>Daftar pertanyaan uji dengan jawaban yang diharapkan &mdash; untuk memastikan RAG tetap tepat setelah knowledge bertambah.</p>
+          </div>
+        </header>
+      <section class="group page-card">
+        <div class="group-head">
+          <h2>Daftar pertanyaan uji</h2>
+          <p>Jalankan ulang setiap kali menambah dokumen untuk memastikan kualitas tidak turun walau knowledge makin banyak. Daftar tersimpan di browser ini.</p>
+        </div>
+        <div class="field">
+          <label for="eval-kb-select">Knowledge base yang diuji</label>
+          <select id="eval-kb-select"></select>
+          <span class="help">Sedang aktif: <b id="eval-kb">-</b></span>
+        </div>
+        <div class="field">
+          <label for="eval-cases">Pertanyaan uji (satu per baris)</label>
+          <textarea id="eval-cases" rows="8" spellcheck="false" placeholder="Berapa jatah cuti tahunan? => SOP Cuti&#10;Siapa yang menyetujui lembur? => SOP Lembur&#10;Berapa harga saham tahun 2030? => -"></textarea>
+          <span class="help">Tambahkan <span class="mono">=&gt; nama dokumen</span> untuk dokumen yang seharusnya menjawab (cukup sebagian namanya). <span class="mono">=&gt; -</span> berarti pertanyaan ini <b>seharusnya ditolak</b> (di luar knowledge). Tanpa <span class="mono">=&gt;</span> hanya dilihat hasilnya.</span>
+        </div>
+        <div class="row" style="align-items:center;gap:14px;flex-wrap:wrap">
+          <span class="seg" role="group" aria-label="Cara uji">
+            <button type="button" id="btn-eval-mode-search" aria-pressed="true">Cepat (pencarian saja)</button>
+            <button type="button" id="btn-eval-mode-answer" aria-pressed="false">Lengkap (dengan jawaban model)</button>
+          </span>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-eval-run" type="button">Jalankan uji</button>
+          <button class="btn ghost" id="btn-eval-stop" type="button" hidden>Hentikan</button>
+          <span id="eval-status"></span>
+        </div>
+        <div id="eval-summary"></div>
+        <div class="key-list">
+          <table class="key-table eval-table" id="eval-table" hidden>
+            <thead><tr><th>#</th><th>Pertanyaan</th><th>Hasil teratas</th><th>Diharapkan</th><th>Skor</th><th>Status</th></tr></thead>
+            <tbody id="eval-rows"></tbody>
+          </table>
+        </div>
+      </section>
       </div>
-      <button class="btn ghost icon" id="btn-settings-close" type="button" title="Tutup" aria-label="Tutup pengaturan"><svg><use href="#i-x"/></svg></button>
-    </div>
-    <div class="sheet-body">
-      <nav class="sheet-nav" id="settings-nav" aria-label="Bagian pengaturan">
-        <button type="button" data-panel="conn" aria-selected="true">Koneksi</button>
-        <button type="button" data-panel="access" aria-selected="false"><svg><use href="#i-lock"/></svg>Akses &amp; Sesi</button>
-        <button type="button" data-panel="keys" aria-selected="false"><svg><use href="#i-key"/></svg>Kunci API</button>
-        <button type="button" data-panel="llm" aria-selected="false">Model AI</button>
-        <button type="button" data-panel="jev" aria-selected="false">Jev</button>
-        <button type="button" data-panel="fmt" aria-selected="false">Format berkas</button>
-        <button type="button" data-panel="retr" aria-selected="false">Kualitas jawaban</button>
-        <button type="button" data-panel="eval" aria-selected="false">Uji akurasi</button>
-        <button type="button" data-panel="web" aria-selected="false">Sumber web</button>
-        <button type="button" data-panel="summary" aria-selected="false">Ringkasan</button>
-      </nav>
-      <div class="sheet-panels" id="settings-panels">
+    </main>
+
+    <!-- =================================== pengaturan =================================== -->
+    <main class="view" id="view-settings" hidden>
+      <div class="page settings-page">
+        <header class="page-head">
+          <div>
+            <h1>Pengaturan</h1>
+            <p>Kunci API layanan disimpan di browser ini. Model, Jev, kualitas jawaban, dan format berkas berlaku untuk seluruh layanan.</p>
+          </div>
+        </header>
+        <div class="settings-layout">
+        <nav class="settings-nav" id="settings-nav" aria-label="Bagian pengaturan">
+          <button type="button" data-panel="conn" aria-selected="true"><svg class="ico"><use href="#i-plug"/></svg><span>Koneksi</span></button>
+          <button type="button" data-panel="access" aria-selected="false"><svg class="ico"><use href="#i-lock"/></svg><span>Akses &amp; Sesi</span></button>
+          <button type="button" data-panel="keys" aria-selected="false"><svg class="ico"><use href="#i-key"/></svg><span>Kunci API</span></button>
+          <button type="button" data-panel="llm" aria-selected="false"><svg class="ico"><use href="#i-cpu"/></svg><span>Model AI</span></button>
+          <button type="button" data-panel="jev" aria-selected="false"><svg class="ico"><use href="#i-route"/></svg><span>Jev</span></button>
+          <button type="button" data-panel="retr" aria-selected="false"><svg class="ico"><use href="#i-sliders"/></svg><span>Kualitas jawaban</span></button>
+          <button type="button" data-panel="fmt" aria-selected="false"><svg class="ico"><use href="#i-file"/></svg><span>Format berkas</span></button>
+          <button type="button" data-panel="web" aria-selected="false"><svg class="ico"><use href="#i-globe"/></svg><span>Sumber web</span></button>
+          <button type="button" data-panel="summary" aria-selected="false"><svg class="ico"><use href="#i-list"/></svg><span>Ringkasan</span></button>
+        </nav>
+        <div class="settings-panels" id="settings-panels">
       <section class="group" data-panel="conn">
         <div class="group-head">
           <h2>Koneksi</h2>
@@ -186,7 +274,6 @@
           <span id="conn-status"></span>
         </div>
       </section>
-
       <section class="group" data-panel="access" hidden>
         <div class="group-head">
           <h2>Akses &amp; Sesi</h2>
@@ -234,7 +321,77 @@
           <span class="help">Setelah dimatikan, konsol hanya bisa dibuka dengan API key lagi.</span>
         </div>
       </section>
-
+      <section class="group" data-panel="keys" hidden>
+        <div class="group-head">
+          <h2>Kunci API</h2>
+          <p>Kunci untuk memanggil layanan ini. Nilainya hanya tampil sekali saat dibuat, setelah itu tersimpan sebagai hash.</p>
+        </div>
+        <div id="keys-note"></div>
+        <div id="keys-bootstrap"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="key-label">Label</label>
+            <input type="text" id="key-label" spellcheck="false" placeholder="mis. Bot WhatsApp CS">
+            <span class="help">Untuk mengenali kunci ini di daftar.</span>
+          </div>
+          <div class="field">
+            <label for="key-expiry">Masa berlaku (hari)</label>
+            <input type="number" id="key-expiry" min="1" max="3650" step="1" placeholder="kosong = tanpa batas">
+            <span class="help">Setelah lewat, kunci berhenti berlaku sendiri.</span>
+          </div>
+        </div>
+        <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
+          <label class="switch" for="key-perm-read"><input type="checkbox" id="key-perm-read" checked disabled><span class="track"></span><span>read</span></label>
+          <label class="switch" for="key-perm-write"><input type="checkbox" id="key-perm-write" checked><span class="track"></span><span>write</span></label>
+          <label class="switch" for="key-perm-admin"><input type="checkbox" id="key-perm-admin"><span class="track"></span><span>admin</span></label>
+          <span class="help">read selalu ikut; admin hanya bila kunci ini memang dipakai mengurus layanan.</span>
+        </div>
+        <div class="field">
+          <label for="key-kbs">Batasi ke knowledge base (opsional)</label>
+          <input type="text" id="key-kbs" spellcheck="false" placeholder="mis. kb_proyek_pamjaya, kb_proyek_tirtamusi">
+          <span class="help">Untuk kunci per proyek/klien: kunci hanya bisa mencari, mengunggah, dan menghapus di knowledge base ini, walau organisasinya sama. Kosong = semua knowledge base organisasinya.</span>
+        </div>
+        <details class="adv">
+          <summary>Tenant kunci (opsional)</summary>
+          <div class="grid-3">
+            <div class="field">
+              <label for="key-org">organization_id</label>
+              <input type="text" id="key-org" spellcheck="false">
+            </div>
+            <div class="field">
+              <label for="key-user">user_id</label>
+              <input type="text" id="key-user" spellcheck="false">
+            </div>
+            <div class="field">
+              <label for="key-app">application_id</label>
+              <input type="text" id="key-app" spellcheck="false">
+            </div>
+          </div>
+          <span class="help" id="key-tenant-help">Kosong = ikut konteks kunci yang Anda pakai sekarang.</span>
+        </details>
+        <div class="key-result" id="key-result" hidden>
+          <label for="key-value">Kunci baru: tampil sekali</label>
+          <div class="row">
+            <input type="text" id="key-value" readonly spellcheck="false">
+            <button class="btn sm" id="btn-copy-key" type="button">Salin</button>
+          </div>
+          <span class="help" id="key-result-help">Simpan sekarang; setelah ditutup, nilainya tidak bisa ditampilkan lagi.</span>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-create-key" type="button">Buat kunci</button>
+          <button class="btn" id="btn-keys-refresh" type="button">Muat ulang daftar</button>
+          <span id="keys-status"></span>
+        </div>
+        <div class="key-list">
+          <table class="key-table">
+            <thead>
+              <tr><th>Label</th><th>Kunci</th><th>Tenant</th><th>Knowledge base</th><th>Izin</th><th>Dibuat</th><th>Dipakai</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="keys-rows"></tbody>
+          </table>
+          <p class="empty" id="keys-empty">Belum ada kunci. Hanya kunci dari layar ini yang bisa dicabut; kunci API_KEYS_JSON diubah lewat env.</p>
+        </div>
+      </section>
       <section class="group" data-panel="llm" hidden>
         <div class="group-head">
           <h2>Model AI</h2>
@@ -307,7 +464,6 @@
           <span id="llm-status"></span>
         </div>
       </section>
-
       <section class="group" data-panel="jev" hidden>
         <div class="group-head">
           <h2>Jev</h2>
@@ -349,28 +505,6 @@
           <span id="jev-status"></span>
         </div>
       </section>
-
-      <section class="group" data-panel="fmt" hidden>
-        <div class="group-head">
-          <h2>Format berkas</h2>
-          <p>Jenis berkas yang boleh jadi knowledge, berlaku untuk semua tenant dan untuk halaman utama.</p>
-        </div>
-        <div id="fmt-note"></div>
-        <div id="fmt-groups"></div>
-        <div class="grid-2">
-          <div class="field">
-            <label for="fmt-max">Batas ukuran berkas (MB)</label>
-            <input type="number" id="fmt-max" min="1" max="512" step="1" value="25">
-            <span class="help" id="fmt-max-help">Ditolak sebelum diunggah.</span>
-          </div>
-        </div>
-        <div class="group-foot">
-          <button class="btn" id="btn-fmt-all" type="button">Pilih semua yang tersedia</button>
-          <button class="btn primary" id="btn-save-fmt" type="button">Simpan format</button>
-          <span id="fmt-status"></span>
-        </div>
-      </section>
-
       <section class="group" data-panel="retr" hidden>
         <div class="group-head">
           <h2>Kualitas jawaban</h2>
@@ -510,37 +644,26 @@
           </div>
         </details>
       </section>
-
-      <section class="group" data-panel="eval" hidden>
+      <section class="group" data-panel="fmt" hidden>
         <div class="group-head">
-          <h2>Uji akurasi</h2>
-          <p>Daftar pertanyaan uji untuk knowledge base <b id="eval-kb">-</b>. Jalankan ulang setiap kali menambah dokumen untuk memastikan kualitas tidak turun walau knowledge makin banyak.</p>
+          <h2>Format berkas</h2>
+          <p>Jenis berkas yang boleh jadi knowledge, berlaku untuk semua tenant dan untuk halaman utama.</p>
         </div>
-        <div class="field">
-          <label for="eval-cases">Pertanyaan uji (satu per baris)</label>
-          <textarea id="eval-cases" rows="8" spellcheck="false" placeholder="Berapa jatah cuti tahunan? => SOP Cuti&#10;Siapa yang menyetujui lembur? => SOP Lembur&#10;Berapa harga saham tahun 2030? => -"></textarea>
-          <span class="help">Tambahkan <span class="mono">=&gt; nama dokumen</span> untuk dokumen yang seharusnya menjawab (cukup sebagian namanya). <span class="mono">=&gt; -</span> berarti pertanyaan ini <b>seharusnya ditolak</b> (di luar knowledge). Tanpa <span class="mono">=&gt;</span> hanya dilihat hasilnya.</span>
-        </div>
-        <div class="row" style="align-items:center;gap:14px;flex-wrap:wrap">
-          <span class="seg" role="group" aria-label="Cara uji">
-            <button type="button" id="btn-eval-mode-search" aria-pressed="true">Cepat (pencarian saja)</button>
-            <button type="button" id="btn-eval-mode-answer" aria-pressed="false">Lengkap (dengan jawaban model)</button>
-          </span>
+        <div id="fmt-note"></div>
+        <div id="fmt-groups"></div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="fmt-max">Batas ukuran berkas (MB)</label>
+            <input type="number" id="fmt-max" min="1" max="512" step="1" value="25">
+            <span class="help" id="fmt-max-help">Ditolak sebelum diunggah.</span>
+          </div>
         </div>
         <div class="group-foot">
-          <button class="btn primary" id="btn-eval-run" type="button">Jalankan uji</button>
-          <button class="btn ghost" id="btn-eval-stop" type="button" hidden>Hentikan</button>
-          <span id="eval-status"></span>
-        </div>
-        <div id="eval-summary"></div>
-        <div class="key-list">
-          <table class="key-table eval-table" id="eval-table" hidden>
-            <thead><tr><th>#</th><th>Pertanyaan</th><th>Hasil teratas</th><th>Diharapkan</th><th>Skor</th><th>Status</th></tr></thead>
-            <tbody id="eval-rows"></tbody>
-          </table>
+          <button class="btn" id="btn-fmt-all" type="button">Pilih semua yang tersedia</button>
+          <button class="btn primary" id="btn-save-fmt" type="button">Simpan format</button>
+          <span id="fmt-status"></span>
         </div>
       </section>
-
       <section class="group" data-panel="web" hidden>
         <div class="group-head">
           <h2>Sumber web</h2>
@@ -571,7 +694,6 @@
           <span id="web-svc-status"></span>
         </div>
       </section>
-
       <section class="group" data-panel="summary" hidden>
         <div class="group-head">
           <h2>Ringkasan dokumen</h2>
@@ -603,84 +725,30 @@
           <span id="summary-svc-status"></span>
         </div>
       </section>
-
-      <section class="group" data-panel="keys" hidden>
-        <div class="group-head">
-          <h2>Kunci API</h2>
-          <p>Kunci untuk memanggil layanan ini. Nilainya hanya tampil sekali saat dibuat, setelah itu tersimpan sebagai hash.</p>
         </div>
-        <div id="keys-note"></div>
-        <div id="keys-bootstrap"></div>
-        <div class="grid-2">
-          <div class="field">
-            <label for="key-label">Label</label>
-            <input type="text" id="key-label" spellcheck="false" placeholder="mis. Bot WhatsApp CS">
-            <span class="help">Untuk mengenali kunci ini di daftar.</span>
-          </div>
-          <div class="field">
-            <label for="key-expiry">Masa berlaku (hari)</label>
-            <input type="number" id="key-expiry" min="1" max="3650" step="1" placeholder="kosong = tanpa batas">
-            <span class="help">Setelah lewat, kunci berhenti berlaku sendiri.</span>
-          </div>
         </div>
-        <div class="row" style="align-items:center;gap:18px;flex-wrap:wrap">
-          <label class="switch" for="key-perm-read"><input type="checkbox" id="key-perm-read" checked disabled><span class="track"></span><span>read</span></label>
-          <label class="switch" for="key-perm-write"><input type="checkbox" id="key-perm-write" checked><span class="track"></span><span>write</span></label>
-          <label class="switch" for="key-perm-admin"><input type="checkbox" id="key-perm-admin"><span class="track"></span><span>admin</span></label>
-          <span class="help">read selalu ikut; admin hanya bila kunci ini memang dipakai mengurus layanan.</span>
-        </div>
-        <div class="field">
-          <label for="key-kbs">Batasi ke knowledge base (opsional)</label>
-          <input type="text" id="key-kbs" spellcheck="false" placeholder="mis. kb_proyek_pamjaya, kb_proyek_tirtamusi">
-          <span class="help">Untuk kunci per proyek/klien: kunci hanya bisa mencari, mengunggah, dan menghapus di knowledge base ini, walau organisasinya sama. Kosong = semua knowledge base organisasinya.</span>
-        </div>
-        <details class="adv">
-          <summary>Tenant kunci (opsional)</summary>
-          <div class="grid-3">
-            <div class="field">
-              <label for="key-org">organization_id</label>
-              <input type="text" id="key-org" spellcheck="false">
-            </div>
-            <div class="field">
-              <label for="key-user">user_id</label>
-              <input type="text" id="key-user" spellcheck="false">
-            </div>
-            <div class="field">
-              <label for="key-app">application_id</label>
-              <input type="text" id="key-app" spellcheck="false">
-            </div>
-          </div>
-          <span class="help" id="key-tenant-help">Kosong = ikut konteks kunci yang Anda pakai sekarang.</span>
-        </details>
-        <div class="key-result" id="key-result" hidden>
-          <label for="key-value">Kunci baru: tampil sekali</label>
-          <div class="row">
-            <input type="text" id="key-value" readonly spellcheck="false">
-            <button class="btn sm" id="btn-copy-key" type="button">Salin</button>
-          </div>
-          <span class="help" id="key-result-help">Simpan sekarang; setelah ditutup, nilainya tidak bisa ditampilkan lagi.</span>
-        </div>
-        <div class="group-foot">
-          <button class="btn primary" id="btn-create-key" type="button">Buat kunci</button>
-          <button class="btn" id="btn-keys-refresh" type="button">Muat ulang daftar</button>
-          <span id="keys-status"></span>
-        </div>
-        <div class="key-list">
-          <table class="key-table">
-            <thead>
-              <tr><th>Label</th><th>Kunci</th><th>Tenant</th><th>Knowledge base</th><th>Izin</th><th>Dibuat</th><th>Dipakai</th><th>Status</th><th></th></tr>
-            </thead>
-            <tbody id="keys-rows"></tbody>
-          </table>
-          <p class="empty" id="keys-empty">Belum ada kunci. Hanya kunci dari layar ini yang bisa dicabut; kunci API_KEYS_JSON diubah lewat env.</p>
-        </div>
-      </section>
       </div>
-    </div>
-  </dialog>
+    </main>
+  </div>
 </div>
 
-<dialog id="dlg-paste">
+<dialog id="dlg-newkb" class="modal">
+  <form method="dialog" class="modal-body">
+    <h2>Knowledge base baru</h2>
+    <p class="help">Knowledge base adalah wadah dokumen (mis. satu per proyek/klien). Ia tersimpan begitu dokumen pertama diunggah.</p>
+    <div class="field">
+      <label for="newkb-name">Nama / ID</label>
+      <input type="text" id="newkb-name" spellcheck="false" placeholder="mis. kb_proyek_pamjaya" autocomplete="off">
+      <span class="help" id="newkb-preview">Huruf kecil, angka, garis bawah, dan tanda hubung.</span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" value="cancel" type="submit">Batal</button>
+      <button class="btn primary" value="ok" type="submit" id="newkb-ok">Buat &amp; buka</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-paste" class="modal">
   <form method="dialog" class="field" style="gap:12px;min-width:min(560px,86vw)">
     <label for="paste-name">Nama dokumen</label>
     <input type="text" id="paste-name" placeholder="SOP Cuti 2026">
@@ -693,7 +761,7 @@
   </form>
 </dialog>
 
-<dialog id="dlg-url">
+<dialog id="dlg-url" class="modal">
   <form method="dialog" class="field" style="gap:12px;min-width:min(560px,86vw)">
     <label for="url-value">URL berkas publik atau halaman web</label>
     <input type="text" id="url-value" spellcheck="false" placeholder="https://contoh.id/dokumen.pdf atau https://contoh.id/panduan">
@@ -726,7 +794,7 @@
   </form>
 </dialog>
 
-<dialog id="dlg-summary">
+<dialog id="dlg-summary" class="modal">
   <form method="dialog" class="field" style="gap:12px;min-width:min(640px,88vw)">
     <h3 id="summary-title" style="margin:0">Ringkasan</h3>
     <div id="summary-body" class="markdown" style="max-height:60vh;overflow:auto;margin:0"></div>
@@ -736,7 +804,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261010a"></script>
-<script src="app.js?v=20261010a"></script>
+<script src="markdown.js?v=20261010b"></script>
+<script src="app.js?v=20261010b"></script>
 </body>
 </html>

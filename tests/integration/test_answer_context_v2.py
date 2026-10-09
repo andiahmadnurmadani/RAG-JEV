@@ -109,3 +109,21 @@ def test_kunci_proyek_tidak_bisa_menghapus_dokumen_kb_lain(client):
     assert listed["count"] == 0, "kunci proyek B tidak boleh melihat dokumen proyek A"
     still = client.get("/api/v1/knowledge/doc_bersama", headers=auth(TENANT_A_KEY))
     assert still.status_code == 200 and still.json()["data"]["status"] == "completed"
+
+
+def test_daftar_knowledge_base_organisasi(client):
+    _index(client, "doc_a1", "# A\nIsi proyek A.", kb="kb_proyek_a")
+    _index(client, "doc_a2", "# A2\nIsi kedua proyek A.", kb="kb_proyek_a")
+    _index(client, "doc_b1", "# B\nIsi proyek B.", kb="kb_proyek_b")
+    data = client.get("/api/v1/knowledge-bases", headers=auth(TENANT_A_KEY)).json()["data"]
+    bases = {item["knowledge_base_id"]: item for item in data["knowledge_bases"]}
+    assert bases["kb_proyek_a"]["documents"] == 2 and bases["kb_proyek_a"]["chunks"] >= 2
+    assert bases["kb_proyek_b"]["documents"] == 1
+
+    created = client.post(
+        "/api/v1/settings/api-keys",
+        json={"label": "B", "permissions": ["read"], "knowledge_base_ids": ["kb_proyek_b"]},
+        headers=auth(TENANT_A_KEY),
+    ).json()["data"]["key"]
+    only = client.get("/api/v1/knowledge-bases", headers=auth(created)).json()["data"]
+    assert [item["knowledge_base_id"] for item in only["knowledge_bases"]] == ["kb_proyek_b"]

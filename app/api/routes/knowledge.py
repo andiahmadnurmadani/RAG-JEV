@@ -159,6 +159,26 @@ def list_knowledge(
         ).model_dump()
         for record in records
     ]
+    if knowledge_base_id and not include_deleted:
+        # Dokumen lama yang catatan pengindeksannya sudah tidak ada, tetapi isinya masih bisa
+        # dicari: tetap ditampilkan supaya isi knowledge base terlihat utuh.
+        known = {item["document_id"] for item in documents}
+        for document_id, chunks in services.sparse.document_chunk_counts(
+            context.organization_id, knowledge_base_id
+        ).items():
+            if document_id in known or len(documents) >= limit:
+                continue
+            documents.append(
+                DocumentStatusOut(
+                    document_id=document_id,
+                    document_name=document_id,
+                    status="completed",
+                    stage="completed",
+                    knowledge_base_id=knowledge_base_id,
+                    chunks=chunks,
+                    vectors_in_store=chunks,
+                ).model_dump()
+            )
     logger.info(
         "knowledge listed org=%s kb=%s documents=%d",
         context.organization_id,
@@ -166,6 +186,63 @@ def list_knowledge(
         len(documents),
     )
     return ok({"documents": documents, "count": len(documents), "knowledge_base_id": knowledge_base_id})
+
+
+@router.get("/knowledge-bases")
+def list_knowledge_bases(
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+) -> Dict[str, Any]:
+    """Semua knowledge base organisasi pemanggil, dengan jumlah dokumen/potongan dan status.
+
+    Knowledge base tidak dibuat terpisah - ia muncul begitu dokumen pertamanya diindeks. Daftar
+    ini menggabungkan catatan pengindeksan (status, waktu) dengan indeks kata kunci (jumlah
+    potongan yang benar-benar bisa dicari), sehingga KB lama yang catatan job-nya sudah tidak
+    lengkap tetap terlihat. Kunci yang diikat ke KB tertentu hanya melihat KB miliknya.
+    """
+    _rate_limit(request)
+    context.require("read")
+    services = services_from_request(request)
+    bases: Dict[str, Dict[str, Any]] = {}
+
+    def entry(knowledge_base_id: str) -> Dict[str, Any]:
+        return bases.setdefault(
+            knowledge_base_id,
+            {
+                "knowledge_base_id": knowledge_base_id,
+                "documents": 0,
+                "chunks": 0,
+                "tokens": 0,
+                "completed": 0,
+                "processing": 0,
+                "failed": 0,
+                "updated_at": "",
+            },
+        )
+
+    for record in services.jobs.list_documents(context.organization_id, limit=100_000):
+        item = entry(record.knowledge_base_id or "")
+        item["documents"] += 1
+        item["chunks"] += int(record.chunks or 0)
+        item["tokens"] += int(record.tokens or 0)
+        bucket = record.status if record.status in ("completed", "failed") else "processing"
+        item[bucket] += 1
+        item["updated_at"] = max(item["updated_at"], record.updated_at or record.created_at or "")
+
+    for knowledge_base_id, counts in services.sparse.knowledge_bases(context.organization_id).items():
+        item = entry(knowledge_base_id)
+        # Indeks kata kunci = yang benar-benar bisa dicari; catatan job bisa sudah terpangkas.
+        item["documents"] = max(item["documents"], counts["documents"])
+        item["chunks"] = counts["chunks"] or item["chunks"]
+        if not item["completed"] and not item["processing"] and not item["failed"]:
+            item["completed"] = counts["documents"]
+
+    items = [
+        item for key, item in bases.items()
+        if key and context.allows_knowledge_base(key) and (item["documents"] or item["processing"])
+    ]
+    items.sort(key=lambda item: (item["updated_at"] or "", item["knowledge_base_id"]), reverse=True)
+    return ok({"knowledge_bases": items, "count": len(items)})
 
 
 @router.put("/knowledge/{document_id}", status_code=status.HTTP_202_ACCEPTED)

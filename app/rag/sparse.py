@@ -293,6 +293,46 @@ class SparseIndex:
         with self._lock:
             return sorted({entry.document_id for entry in scope_obj.entries})
 
+    def document_chunk_counts(self, organization_id: str, knowledge_base_id: str) -> Dict[str, int]:
+        """``{document_id: jumlah potongan isi}`` di satu scope."""
+        scope_obj = self._scope(organization_id, knowledge_base_id)
+        counts: Dict[str, int] = {}
+        with self._lock:
+            for entry in scope_obj.entries:
+                if not entry.is_summary:
+                    counts[entry.document_id] = counts.get(entry.document_id, 0) + 1
+        return counts
+
+    def knowledge_bases(self, organization_id: str) -> Dict[str, Dict[str, int]]:
+        """``{knowledge_base_id: {"documents", "chunks"}}`` milik satu organisasi (isi, bukan ringkasan)."""
+        prefix = self.scope_key(organization_id, "")
+        found: Dict[str, Dict[str, int]] = {}
+        for path in sorted(self._root.glob("*.json")):
+            if not path.stem.startswith(prefix):
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            if str(payload.get("organization_id") or "") != organization_id:
+                continue
+            knowledge_base_id = str(payload.get("knowledge_base_id") or "")
+            if not knowledge_base_id:
+                continue
+            with self._lock:
+                loaded = self._scopes.get(path.stem)
+                if loaded is not None:
+                    rows = [(entry.document_id, entry.is_summary) for entry in loaded.entries]
+                else:
+                    rows = [
+                        (str(item.get("document_id") or ""),
+                         bool(item.get("is_summary")) or item.get("chunk_id") == SUMMARY_CHUNK_ID)
+                        for item in payload.get("entries", [])
+                    ]
+            content = [document_id for document_id, summary in rows if not summary]
+            found[knowledge_base_id] = {"documents": len(set(content)), "chunks": len(content)}
+        return found
+
     def stats(self) -> Dict[str, int]:
         with self._lock:
             return {scope: len(scope_obj.entries) for scope, scope_obj in self._scopes.items()}

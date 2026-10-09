@@ -86,7 +86,20 @@ peringkat 1 naik dari 80% menjadi **93%**, termasuk untuk pertanyaan parafrase.
 * Probe model/Jev hanya mengirim kunci tersimpan ke URL tersimpan.
 * Percobaan kode akses dibatasi juga secara global (header IP palsu tidak bisa mengakalinya).
 
-## Konsol
+## Konsol (tampilan baru)
+
+Konsol kini aplikasi satu halaman dengan navigasi samping (bilah bawah di ponsel):
+
+| Halaman | Alamat | Isi |
+|---|---|---|
+| Knowledge base | `/ui/#/kbs` | Semua KB organisasi (jumlah dokumen, potongan, status, aktivitas terakhir); cari, urutkan, buat KB baru |
+| Chat | `/ui/#/kb/<id>` | Ruang kerja satu KB: unggah, daftar dokumen, tanya-jawab |
+| Uji akurasi | `/ui/#/eval` | Pertanyaan uji per KB |
+| Pengaturan | `/ui/#/settings/<panel>` | Halaman biasa (bisa digulir), bukan dialog modal |
+
+Daftar KB diambil dari `GET /api/v1/knowledge-bases` (kunci yang diikat ke KB hanya melihat KB
+miliknya). KB lama yang catatan pengindeksannya terpangkas tetap terlihat lewat indeks kata kunci.
+
 
 * **Pengaturan → Kualitas jawaban**: preset *Akurat / Seimbang / Dokumen lengkap*, ambang "tidak
   ditemukan", tetangga, dokumen utuh, mesin penilai.
