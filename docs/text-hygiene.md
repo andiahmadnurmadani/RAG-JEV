@@ -129,3 +129,5 @@ Hasil suite: **484 lulus, 1 dilewati**.
   menghapus potongan adalah operasi destruktif pada data produksi dan harus disetujui dulu.
   Potongan baru sudah bersih; potongan lama akan tergantikan saat dokumennya diunggah ulang.
 * **Dokumen beraksara asing** — sengaja dibiarkan utuh.
+
+<!-- webhook-check: 2026-10-09T06:59Z, verifikasi auto-deploy Dokploy dari push GitHub -->
