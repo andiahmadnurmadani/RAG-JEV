@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261010e">
+<link rel="stylesheet" href="style.css?v=20261011a">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -576,6 +576,23 @@
           <p>Mengatur kapan layanan menjawab, kapan menolak dengan "tidak ditemukan", dan seberapa banyak isi dokumen yang dibaca model. Berlaku untuk seluruh layanan (semua aplikasi yang memakai API ini), tanpa redeploy.</p>
         </div>
         <div id="retr-engine-note"></div>
+        <div class="engine-card">
+          <div class="engine-head">
+            <div>
+              <h3 class="mini-head" style="margin:0">Mesin pencarian makna (embedding)</h3>
+              <p class="help">Model yang memahami makna &amp; sinonim ("jatah libur pegawai" = "kuota cuti karyawan"). Mengganti model meng-embed ulang seluruh knowledge di latar belakang &mdash; tanpa unggah ulang; selama proses, hasil pencarian bisa belum lengkap.</p>
+            </div>
+          </div>
+          <div class="row" style="align-items:flex-end">
+            <div class="field grow">
+              <label for="s-embedding">Model</label>
+              <select id="s-embedding"><option value="hash">hash (hanya kata, tanpa makna)</option></select>
+            </div>
+            <button class="btn primary" id="btn-save-embedding" type="button">Terapkan</button>
+          </div>
+          <div id="emb-status"></div>
+          <div class="progress" id="emb-progress" hidden><span id="emb-bar"></span></div>
+        </div>
         <div class="preset-row" role="group" aria-label="Preset kualitas">
           <button class="preset" type="button" data-preset="accurate"><b>Akurat</b><span>Disarankan. Menolak pertanyaan di luar knowledge, membaca bagian sekitar jawaban.</span></button>
           <button class="preset" type="button" data-preset="balanced"><b>Seimbang</b><span>Lebih jarang menolak; cocok bila pertanyaan pengguna sering memakai istilah lain.</span></button>
@@ -950,7 +967,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261010e"></script>
-<script src="app.js?v=20261010e"></script>
+<script src="markdown.js?v=20261011a"></script>
+<script src="app.js?v=20261011a"></script>
 </body>
 </html>

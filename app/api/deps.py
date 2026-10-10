@@ -16,6 +16,7 @@ from app.jev.router import JevRouter
 from app.jev.tools import JevClient
 from app.qdrant import client as qdrant_client
 from app.rag.embedder import EmbedderService
+from app.rag.embedding_migration import EmbeddingMigrator
 from app.rag.generator import Generator, build_llm_client
 from app.rag.pipeline import RagPipeline
 from app.rag.reranker import RerankerService
@@ -31,6 +32,7 @@ logger = get_logger(__name__)
 class Services:
     settings: Settings
     embedder: EmbedderService
+    migrator: EmbeddingMigrator
     reranker: RerankerService
     sparse: SparseIndex
     retriever: Retriever
@@ -50,6 +52,10 @@ class Services:
             await asyncio.to_thread(qdrant_client.get_client, self.settings)
         except Exception as exc:  # noqa: BLE001
             logger.warning("qdrant not reachable at startup: %s", exc)
+        try:
+            await asyncio.to_thread(self.migrator.activate)
+        except Exception as exc:  # noqa: BLE001 - layanan tetap jalan dengan koleksi saat ini
+            logger.warning("aktivasi embedding gagal: %s", exc)
         recovered = self.jobs.recover_interrupted()
         if recovered:
             logger.warning("%d job yang terputus oleh restart ditutup (lihat statusnya di daftar dokumen)", recovered)
@@ -90,6 +96,7 @@ _lock = threading.Lock()
 def build_services(settings: Optional[Settings] = None) -> Services:
     settings = settings or get_settings()
     embedder = EmbedderService(settings)
+    migrator = EmbeddingMigrator(settings, embedder)
     reranker = RerankerService(settings)
     sparse = SparseIndex(settings)
     retriever = Retriever(settings, embedder, reranker, sparse)
@@ -104,6 +111,7 @@ def build_services(settings: Optional[Settings] = None) -> Services:
     return Services(
         settings=settings,
         embedder=embedder,
+        migrator=migrator,
         reranker=reranker,
         sparse=sparse,
         retriever=retriever,

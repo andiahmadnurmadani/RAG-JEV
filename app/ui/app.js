@@ -1535,6 +1535,7 @@ async function loadSettings() {
       clearNote("fmt-note");
     }
     if (data.sections.retrieval) renderRetrievalService(data.sections.retrieval);
+    renderEmbedding(data.embedding_status);
     loadEngineNote();
     if (data.sections.web) renderWebService(data.sections.web);
     if (data.sections.summary) renderSummaryService(data.sections.summary);
@@ -1839,14 +1840,75 @@ function markPreset() {
   });
 }
 
+let embeddingTimer = null;
+
+function renderEmbedding(status, current) {
+  if (!status) return;
+  const select = $("s-embedding");
+  const models = status.models || {};
+  const options = ['<option value="hash">hash (hanya kata, tanpa makna)</option>'].concat(
+    Object.keys(models).map((id) => '<option value="' + escapeHtml(id) + '"' + (status.semantic_available ? "" : " disabled") + ">" +
+      escapeHtml(models[id]) + "</option>"));
+  select.innerHTML = options.join("");
+  select.value = status.provider === "fastembed" ? status.model : "hash";
+  const total = Number(status.total || 0);
+  const done = Number(status.done || 0);
+  const running = status.state === "running";
+  $("emb-progress").hidden = !running;
+  $("emb-bar").style.width = total ? Math.round((100 * done) / total) + "%" : "8%";
+  if (running) {
+    note("emb-status", "info", "Meng-embed ulang knowledge: <b>" + done.toLocaleString("id-ID") + "</b> dari " +
+      total.toLocaleString("id-ID") + " potongan&hellip;");
+  } else if (status.state === "failed") {
+    note("emb-status", "err", "Migrasi gagal: " + escapeHtml(status.error || "-"));
+  } else if (status.provider === "fastembed") {
+    note("emb-status", "ok", "Aktif: <span class=\"mono\">" + escapeHtml(status.model) + "</span>" +
+      (status.state === "done" && total ? " &middot; " + total.toLocaleString("id-ID") + " potongan sudah di-embed ulang." : "."));
+  } else if (!status.semantic_available) {
+    note("emb-status", "warn", "Image ini belum memuat pustaka embedding semantik (fastembed).");
+  } else {
+    clearNote("emb-status");
+  }
+  clearTimeout(embeddingTimer);
+  if (running && state.view === "settings") {
+    embeddingTimer = setTimeout(async () => {
+      try {
+        const data = await api("GET", "/settings");
+        renderEmbedding(data.embedding_status);
+        if (data.embedding_status && data.embedding_status.state !== "running") loadEngineNote();
+      } catch (err) {
+        /* coba lagi pada render berikutnya */
+      }
+    }, 3000);
+  }
+}
+
+async function saveEmbedding() {
+  const value = $("s-embedding").value;
+  const payload = value === "hash" ? { provider: "hash" } : { provider: "fastembed", model: value };
+  const sure = await confirmDialog("Ganti mesin pencarian makna?",
+    "Seluruh knowledge akan di-embed ulang ke model <b class=\"mono\">" + escapeHtml(value) + "</b> di latar belakang. " +
+    "Selama proses berjalan, pencarian bisa belum menemukan semua dokumen. Data lama tidak dihapus.", "Ganti");
+  if (!sure) return;
+  try {
+    const data = await api("PUT", "/settings", { embedding: payload });
+    renderEmbedding(data.embedding_status);
+    loadEngineNote();
+  } catch (err) {
+    note("emb-status", "err", escapeHtml(err.message || "gagal mengganti embedding"));
+  }
+}
+
 async function loadEngineNote() {
   try {
     const ready = await api("GET", "/ready");
     const detail = ready.detail || {};
     const provider = detail.embedding_provider || "";
     if (!provider) return;
-    if (provider === "hash") {
-      note("retr-engine-note", "warn", "Pencarian makna: <span class=\"mono\">hash</span> &mdash; layanan mencari berdasarkan <b>kata</b> (dengan bentuk dasar kata Indonesia), belum memahami sinonim seperti <i>karyawan/pegawai</i>. Pertanyaan yang memakai istilah lain dari dokumen bisa tidak ditemukan; pasang embedder semantik untuk mengatasinya.");
+    if (detail.embedding_migration && detail.embedding_migration.state === "running") {
+      note("retr-engine-note", "info", "Knowledge sedang di-embed ulang ke model baru; hasil pencarian bisa belum lengkap sampai selesai.");
+    } else if (provider === "hash") {
+      note("retr-engine-note", "warn", "Pencarian makna: <span class=\"mono\">hash</span> &mdash; layanan mencari berdasarkan <b>kata</b> (dengan bentuk dasar kata Indonesia), belum memahami sinonim seperti <i>karyawan/pegawai</i>. Pertanyaan yang memakai istilah lain dari dokumen bisa tidak ditemukan; pilih model mpnet di bawah untuk mengatasinya.");
     } else {
       note("retr-engine-note", "ok", "Pencarian makna aktif: <span class=\"mono\">" + escapeHtml(detail.embedding_model || provider) + "</span>.");
     }
@@ -2444,6 +2506,7 @@ function wire() {
   $("btn-unans-more").addEventListener("click", () => { state.unans.limit += 50; loadUnanswered(true); });
   $("dlg-note").addEventListener("close", () => { if ($("dlg-note").returnValue === "ok") saveNote(); });
   $("btn-save-unans").addEventListener("click", saveUnansweredService);
+  $("btn-save-embedding").addEventListener("click", saveEmbedding);
   $("btn-kb-new").addEventListener("click", newKbDialog);
   $("btn-kb-delete").addEventListener("click", () => openDeleteKb(state.kb));
   $("delkb-confirm").addEventListener("input", () => {

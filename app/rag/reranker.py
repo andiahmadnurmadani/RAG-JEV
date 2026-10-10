@@ -217,7 +217,12 @@ class FastEmbedReranker(BaseReranker):
         if not documents:
             return []
         model = self._load()
-        return [_sigmoid(float(value)) for value in model.rerank(query, list(documents))]
+        # Batch kecil + teks dipotong: cross-encoder memakai memori sebanding (batch x panjang^2);
+        # 30 pasangan panjang sekaligus pernah memakan >7 GB RAM.
+        limit = max(200, int(getattr(self._settings, "reranker_max_chars", 2000)))
+        batch = max(1, int(getattr(self._settings, "reranker_batch_size", 8)))
+        texts = [str(document)[:limit] for document in documents]
+        return [_sigmoid(float(value)) for value in model.rerank(query, texts, batch_size=batch)]
 
     def unload(self) -> None:
         self._model = None

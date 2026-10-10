@@ -55,6 +55,7 @@ class SettingsUpdateRequest(BaseModel):
     web: Optional[Dict[str, Any]] = None
     summary: Optional[Dict[str, Any]] = None
     unanswered: Optional[Dict[str, Any]] = None
+    embedding: Optional[Dict[str, Any]] = None
 
 
 class ModelsProbeRequest(BaseModel):
@@ -184,6 +185,48 @@ def _probe_secret(given: Optional[str], url: str, stored_key: str, stored_url: s
         return given.strip()
     same = url.rstrip("/") == str(stored_url or "").strip().rstrip("/")
     return (stored_key or "") if same else ""
+
+
+def _validate_embedding(updates: Dict[str, Dict[str, Any]]) -> None:
+    section = updates.get("embedding") or {}
+    if not section:
+        return
+    from app.rag.embedding_migration import SUPPORTED_MODELS
+
+    provider = str(section.get("provider") or "").strip().lower()
+    if provider and provider not in ("hash", "fastembed"):
+        raise AppError("VALIDATION_ERROR", "embedding.provider harus 'hash' atau 'fastembed'")
+    if provider:
+        section["provider"] = provider
+    model = str(section.get("model") or "").strip()
+    if model and model not in SUPPORTED_MODELS:
+        raise AppError(
+            "VALIDATION_ERROR", "model embedding tidak didukung", details={"allowed": sorted(SUPPORTED_MODELS)}
+        )
+    if provider == "fastembed":
+        try:
+            import fastembed  # noqa: F401
+        except Exception as exc:  # noqa: BLE001
+            raise AppError(
+                "VALIDATION_ERROR", "pustaka fastembed tidak terpasang di image ini; embedding semantik tidak tersedia"
+            ) from exc
+
+
+def _decorate_embedding(body: Dict[str, Any], services: Services) -> Dict[str, Any]:
+    from app.rag.embedding_migration import SUPPORTED_MODELS
+
+    try:
+        import fastembed  # noqa: F401
+
+        available = True
+    except Exception:  # noqa: BLE001
+        available = False
+    body["embedding_status"] = {
+        **services.migrator.status(),
+        "models": SUPPORTED_MODELS,
+        "semantic_available": available,
+    }
+    return body
 
 
 def _decorate_uploads(body: Dict[str, Any], settings) -> Dict[str, Any]:
@@ -409,7 +452,7 @@ def read_settings(
     _require_admin(context, services_from_request(request).settings)
     services = services_from_request(request)
     body = settings_store.describe(services.settings, _settings_path(services))
-    return ok(_decorate_uploads(body, services.settings))
+    return ok(_decorate_embedding(_decorate_uploads(body, services.settings), services))
 
 
 @router.put("/settings")
@@ -428,6 +471,8 @@ def update_settings(
         raise AppError("VALIDATION_ERROR", "no known settings field in the request")
     _validate_uploads(updates)
     _validate_retrieval(updates)
+    _validate_embedding(updates)
+    before = (services.settings.embedding_provider, services.settings.embedding_fastembed_model)
 
     merged = settings_store.merge(settings_store.read_overrides(path), updates)
     settings_store.write_overrides(path, merged)
@@ -436,11 +481,17 @@ def update_settings(
     # Rebind the objects that cached configuration at construction time.
     services.generator.rebind_llm_client(build_llm_client(services.settings))
     services.jev.reset_health_cache()
+    if (services.settings.embedding_provider, services.settings.embedding_fastembed_model) != before:
+        # Model makna berganti: embedder dibangun ulang dan knowledge di-embed ulang di latar
+        # belakang ke koleksi milik model baru (tanpa unggah ulang).
+        services.embedder.reset()
+        services.migrator.activate()
+        logger.warning("embedding diganti %s -> %s", before, services.settings.embedding_fastembed_model)
     logger.info("runtime settings updated fields=%s", ",".join(applied))
 
     body = _decorate_uploads(settings_store.describe(services.settings, path), services.settings)
     body["applied"] = applied
-    return ok(body)
+    return ok(_decorate_embedding(body, services))
 
 
 # --------------------------------------------------------------------------- #

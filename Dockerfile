@@ -3,9 +3,9 @@
 #   docker build -t rag-service .                                   # ramping (disarankan)
 #   docker build --build-arg WITH_LOCAL_MODELS=1 -t rag-service:full .
 #
-# WITH_LOCAL_MODELS=0 (default) -> tanpa torch/sentence-transformers/fastembed, jadi pakai:
-#     EMBEDDING_PROVIDER=http   (Ollama / gateway OpenAI-compatible: /embeddings)
-#     RERANKER_PROVIDER=none
+# WITH_LOCAL_MODELS=0 (default) -> tanpa torch/sentence-transformers, tetapi DENGAN fastembed
+#     (ONNX) + model embedding multibahasa mpnet di /models: EMBEDDING_PROVIDER=fastembed.
+#     Reranker: lexical (bawaan, digabung dengan skor makna).
 # WITH_LOCAL_MODELS=1 -> memasang requirements.txt penuh (torch CPU + bge-m3/reranker lokal);
 #     image beberapa GB lebih besar dan butuh RAM lebih.
 #
@@ -34,6 +34,13 @@ RUN if [ "$WITH_LOCAL_MODELS" = "1" ]; then \
     else \
       pip install -r requirements-base.txt; \
     fi
+
+# --- model embedding semantik (diunduh saat build, bukan saat layanan menyala) ---
+# mpnet multibahasa: paling akurat untuk pertanyaan berbahasa Indonesia pada evaluasi kami
+# (sinonim "jatah libur pegawai" -> "kuota cuti karyawan"). Ganti lewat build-arg bila perlu.
+ARG EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-mpnet-base-v2
+ENV FASTEMBED_CACHE_PATH=/models
+RUN python -c "from fastembed import TextEmbedding; m = TextEmbedding('${EMBEDDING_MODEL}'); print(len(list(m.embed(['siap']))[0]))"
 
 # --- aplikasi --------------------------------------------------------------
 COPY pyproject.toml README.md ./
@@ -64,7 +71,9 @@ ENV QDRANT_URL="" \
     SESSIONS_PATH=/data/sessions.json \
     DOCS_SITE_DIR=/srv/site \
     RERANKER_PROVIDER=lexical \
-    RERANKER_ENABLED=true
+    RERANKER_ENABLED=true \
+    EMBEDDING_PROVIDER=fastembed \
+    EMBEDDING_FASTEMBED_MODEL=${EMBEDDING_MODEL}
 
 VOLUME ["/data"]
 

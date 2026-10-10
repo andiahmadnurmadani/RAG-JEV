@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # http                  -> external OpenAI-compatible /embeddings endpoint
     embedding_provider: Literal["sentence_transformers", "fastembed", "http", "hash"] = "fastembed"
     embedding_model: str = "BAAI/bge-m3"
-    embedding_fastembed_model: str = "intfloat/multilingual-e5-large"
+    embedding_fastembed_model: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
     embedding_dim: int = 0                    # 0 => detected from the model
     embedding_batch_size: int = 16
     embedding_device: str = "cpu"             # cpu | cuda
@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # fastembed has no ONNX port of bge-reranker-v2-m3; this is its multilingual equivalent
     reranker_fastembed_model: str = "jinaai/jina-reranker-v2-base-multilingual"
     reranker_device: str = "cpu"
+    # Reranker neural: pasangan per batch & batas karakter per potongan (hemat memori/latensi).
+    reranker_batch_size: int = 8
+    reranker_max_chars: int = 2000
     # Bila provider neural diminta tetapi pustakanya tidak ada di image, jangan gagal: turun ke
     # reranker leksikal dan laporkan penggantinya (agar operator tahu kualitasnya bukan neural).
     reranker_fallback_to_lexical: bool = True
@@ -111,8 +114,13 @@ class Settings(BaseSettings):
     # Ambang ABSOLUT kandidat terbaik (skor reranker 0..1): di bawah ini layanan menjawab "tidak
     # ditemukan" tanpa memanggil LLM. 0 = matikan. Dengan embedder semantik, kemiripan vektor
     # >= semantic_min_similarity juga dianggap cukup relevan.
-    min_relevance: float = 0.3
+    min_relevance: float = 0.28
     semantic_min_similarity: float = 0.45
+    # Penggabungan skor bila embedder semantik: bobot makna vs kata kunci, dan kalibrasi kosinus
+    # (di bawah floor = tak berhubungan, di atas ceil = sangat mirip). Dikalibrasi untuk mpnet.
+    semantic_weight: float = 0.6
+    semantic_floor: float = 0.25
+    semantic_ceil: float = 0.80
     reranker_enabled: bool = True
     reranker_candidates: int = 60
     # Berapa banyak potongan dari SATU dokumen yang boleh masuk konteks. Batas kecil membuat

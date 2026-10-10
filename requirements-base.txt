@@ -17,6 +17,8 @@ qdrant-client==1.19.1
 
 # Retrieval
 rank-bm25==0.2.2
+# Embedding semantik lokal (ONNX, tanpa torch): paraphrase-multilingual-mpnet-base-v2.
+fastembed==0.7.3
 numpy==2.4.6
 
 # Parsing (PRD 10)

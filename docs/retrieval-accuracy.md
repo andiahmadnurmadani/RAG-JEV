@@ -134,3 +134,33 @@ miliknya). KB lama yang catatan pengindeksannya terpangkas tetap terlihat lewat 
 * **Embedder semantik.** Produksi masih `hash`: sinonim (karyawan/pegawai, jatah/kuota) belum tertangkap.
   Menggantinya berarti **semua potongan di-embed ulang** (operasi pada data produksi).
 * Knowledge lama tetap memakai hasil parsing lama sampai diunggah ulang (tabel DOCX/XLSX, HTML).
+
+## Embedding semantik (mpnet) + penilaian gabungan
+
+Embedding `hash` hanya menghitung kata, jadi pertanyaan dengan istilah lain dari dokumen
+("jatah libur pegawai" vs "kuota cuti karyawan") tidak ditemukan. Image kini memuat
+**`sentence-transformers/paraphrase-multilingual-mpnet-base-v2`** (ONNX via fastembed, diunduh saat
+build ke `/models`, tanpa torch).
+
+Hasil benchmark (32 dokumen campur pengalih; 16 pertanyaan sinonim tanpa kata yang sama, 23 fakta,
+8 pertanyaan di luar knowledge):
+
+| | hash | MiniLM | **mpnet + gabungan** | mpnet + reranker jina |
+|---|---|---|---|---|
+| Sinonim peringkat 1 | 3/16 | 12/16 | **15/16** | 13/16 |
+| Fakta sampai ke konteks | 23/23 | – | **23/23 (semua di blok pertama)** | – |
+| Di luar knowledge ditolak | 6/8 | 5/8 | **7/8** | – |
+| Waktu per pertanyaan | 0,02 dtk | – | **0,3 dtk** | 26 dtk |
+
+Reranker neural (jina-reranker-v2) diuji dan **tidak dipakai**: tidak lebih akurat, 80x lebih lambat.
+
+**Penilaian gabungan** (`semantic_weight` 0,6, kalibrasi kosinus `semantic_floor` 0,25 →
+`semantic_ceil` 0,80, `min_relevance` 0,28): skor akhir = makna + kata kunci. Reranker leksikal saja
+membuang kandidat yang cocok maknanya tetapi tidak berbagi kata.
+
+**Mengganti model** (Pengaturan → Kualitas jawaban → Mesin pencarian makna, atau
+`PUT /settings {"embedding": {"provider": "fastembed", "model": ...}}`): setiap model punya koleksi
+Qdrant sendiri (`knowledge_chunks__<model>`); seluruh potongan koleksi aktif sebelumnya di-embed ulang
+di latar belakang dari isi yang tersimpan, tanpa unggah ulang. Progres di `GET /settings`
+(`embedding_status`) dan `/ready`. Koleksi lama tidak dihapus. Setelan dari layar mengalahkan env
+`EMBEDDING_PROVIDER`.

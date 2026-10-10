@@ -365,6 +365,7 @@ def get_chunks_by_ids(
     organization_id: str,
     knowledge_base_id: Optional[str] = None,
     document_ids: Optional[Sequence[str]] = None,
+    with_vectors: bool = False,
 ) -> Dict[str, Dict[str, Any]]:
     """Fetch payloads for specific chunks, always inside the tenant boundary.
 
@@ -410,7 +411,7 @@ def get_chunks_by_ids(
             limit=256,
             offset=offset,
             with_payload=True,
-            with_vectors=False,
+            with_vectors=with_vectors,
         )
         for record in records:
             payload = dict(record.payload or {})
@@ -420,6 +421,12 @@ def get_chunks_by_ids(
                 continue
             key = f"{payload.get('document_id', '')}::{payload.get('chunk_id', '')}"
             if key in wanted_keys:
+                if with_vectors and record.vector is not None:
+                    # Vektor ikut diambil untuk skor makna per kandidat (tanpa embed ulang).
+                    vector = record.vector
+                    if isinstance(vector, dict):
+                        vector = next(iter(vector.values()), None)
+                    payload["__vector"] = vector
                 out.setdefault(key, payload)
         if offset is None or not records:
             break

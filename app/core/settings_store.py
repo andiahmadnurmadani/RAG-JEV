@@ -88,6 +88,11 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "max_tokens": ("summary_max_tokens", "int"),
         "max_documents": ("summary_max_documents", "int"),
     },
+    # Mesin pencarian makna. Mengganti model memicu embed ulang knowledge di latar belakang.
+    "embedding": {
+        "provider": ("embedding_provider", "str"),
+        "model": ("embedding_fastembed_model", "str"),
+    },
     # Pertanyaan yang tidak terjawab: apa yang dicatat dan berapa lama disimpan.
     "unanswered": {
         "enabled": ("unanswered_enabled", "bool"),

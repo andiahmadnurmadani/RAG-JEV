@@ -219,6 +219,13 @@ class EmbedderService:
             if self._embedder is not None:
                 self._embedder.unload()
 
+    def reset(self) -> None:
+        """Bangun ulang embedder dari setelan terkini (dipakai saat model diganti dari Pengaturan)."""
+        with self._lock:
+            if self._embedder is not None:
+                self._embedder.unload()
+            self._embedder = None
+
     def health(self) -> str:
         try:
             self.encode(["health probe"], is_query=True)

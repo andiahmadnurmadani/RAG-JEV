@@ -40,6 +40,7 @@ def ready(request: Request, response: Response) -> Dict[str, Any]:
         "collection": qdrant_collections.collection_info(settings),
         "embedding_provider": settings.embedding_provider,
         "embedding_model": services.embedder.name,
+        "embedding_migration": services.migrator.status(),
         "reranker_provider": settings.reranker_provider,
         "reranker_model": services.reranker.name,
         "llm_provider": settings.llm_provider,

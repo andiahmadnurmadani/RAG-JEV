@@ -43,6 +43,10 @@ class Candidate:
     sparse_score: Optional[float] = None
     fused_score: Optional[float] = None
     rerank_score: Optional[float] = None
+    # Kemiripan makna kueri-potongan (kosinus vektor) dan skor kata kunci (reranker leksikal),
+    # sebelum digabung. Hanya terisi dengan embedder semantik.
+    semantic_score: Optional[float] = None
+    lexical_score: Optional[float] = None
     # Bagian dokumen yang DISERTAKAN untuk melengkapi dokumen (bukan hasil pencarian baris
     # teratas). Dipakai perender konteks untuk menandai urutan dokumen + menyusun catatan
     # kelengkapan, bukan untuk mengubah skor.
@@ -103,6 +107,27 @@ def effective_dense_weight(settings: Settings) -> float:
     if is_semantic(settings):
         return float(settings.dense_weight)
     return min(float(settings.dense_weight), float(settings.hash_dense_weight))
+
+
+def _cosine(query_vector: Optional[Sequence[float]], vector: Optional[Sequence[float]]) -> Optional[float]:
+    """Kosinus dua vektor yang sudah dinormalkan (embedder selalu menormalkan)."""
+    if not query_vector or not vector or len(query_vector) != len(vector):
+        return None
+    return float(sum(a * b for a, b in zip(query_vector, vector)))
+
+
+def blended_score(settings: Settings, lexical: float, semantic: Optional[float]) -> float:
+    """Skor akhir 0..1: kemiripan makna (dikalibrasi ke 0..1) + kata kunci, berbobot.
+
+    Kosinus mentah tidak pernah 0 untuk teks tak berhubungan, jadi dipetakan linear dari
+    ``semantic_floor`` (=0, tak berhubungan) ke ``semantic_ceil`` (=1, sangat mirip).
+    """
+    if semantic is None:
+        return float(lexical)
+    floor, ceil = float(settings.semantic_floor), float(settings.semantic_ceil)
+    meaning = min(1.0, max(0.0, (semantic - floor) / max(1e-6, ceil - floor)))
+    weight = min(1.0, max(0.0, float(settings.semantic_weight)))
+    return round(weight * meaning + (1.0 - weight) * float(lexical), 6)
 
 
 def chunk_position(chunk_id: str, payload: Optional[Dict[str, Any]] = None) -> int:
@@ -167,8 +192,10 @@ class Retriever:
         result.hybrid_used = bool(hybrid and knowledge_base_id)
 
         dense_hits: List[Tuple[str, float]] = []
+        query_vector: Optional[List[float]] = None
         if settings.retrieval_dense_enabled:
             vector = self._embedder.encode([query], is_query=True)[0]
+            query_vector = list(vector)
             for hit in repository.search_dense(
                 settings,
                 vector=vector,
@@ -208,6 +235,7 @@ class Retriever:
             organization_id=organization_id,
             knowledge_base_id=knowledge_base_id,
             document_ids=scope,
+            with_vectors=bool(query_vector) and is_semantic(settings),
         )
 
         candidates: List[Candidate] = []
@@ -246,6 +274,7 @@ class Retriever:
                     fused_score=fused_score,
                     is_summary=bool(payload.get("is_summary")),
                     document_order=chunk_position(chunk_id, payload),
+                    semantic_score=_cosine(query_vector, payload.get("__vector")),
                 )
             )
 
@@ -292,9 +321,7 @@ class Retriever:
         if minimum <= 0:
             return True, "gate_off"
         if result.best_score >= minimum:
-            return True, "lexical"
-        if is_semantic(settings) and result.best_dense >= float(settings.semantic_min_similarity):
-            return True, "semantic"
+            return True, "semantic" if is_semantic(settings) else "lexical"
         return False, "below_min_relevance"
 
     def _apply_rerank(
@@ -332,6 +359,14 @@ class Retriever:
             # NoopReranker returns descending pseudo-scores preserving fusion order;
             # filtering on them would silently drop relevant chunks, so do not.
             return ordered
+        if is_semantic(self._settings):
+            # Gabungkan makna + kata kunci. Reranker leksikal saja membuang kandidat yang cocok
+            # MAKNANYA tetapi tidak berbagi kata (sinonim: "jatah libur" vs "kuota cuti").
+            for candidate in ordered:
+                candidate.lexical_score = candidate.score
+                candidate.score = blended_score(self._settings, candidate.score, candidate.semantic_score)
+                candidate.rerank_score = candidate.score
+            ordered.sort(key=lambda item: item.score, reverse=True)
         best = max((candidate.score for candidate in ordered), default=0.0)
         if best <= 0:
             # Tidak ada satu pun kata kueri di kandidat. Dengan embedder semantik, kecocokan
