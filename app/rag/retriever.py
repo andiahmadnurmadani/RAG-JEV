@@ -213,6 +213,7 @@ class Retriever:
         use_reranker: Optional[bool] = None,
         threshold: Optional[float] = None,
         document_ids: Optional[Sequence[str]] = None,
+        focus: bool = True,
     ) -> RetrievalResult:
         settings = self._settings
         scope = [str(item) for item in (document_ids or []) if item] or None
@@ -331,7 +332,9 @@ class Retriever:
             result.reranker_used = self._reranker.name
 
         candidates = _dedupe_by_document(candidates, settings.max_chunks_per_document)
-        if rerank and settings.reranker_provider != "none":
+        # Fokus dokumen hanya untuk jalur JAWABAN: /search dan ekstraksi memang meminta daftar
+        # luas, dan dokumen yang dipilih pemakai secara eksplisit tidak boleh dibuang.
+        if focus and rerank and settings.reranker_provider != "none" and not (scope and len(scope) > 1):
             ratio = float(settings.document_focus_ratio)
             limit = int(settings.max_context_documents)
             if wants_multiple_documents(query):

@@ -36,6 +36,12 @@ from app.rag.textnorm import STOPWORDS, keywords, sparse_text, term_forms, uniqu
 logger = get_logger(__name__)
 
 INDEX_VERSION = 2
+# Scope besar tidak ditulis ulang utuh di setiap unggahan (KB 30 ribu potongan = berkas 50 MB,
+# ~0,6 dtk per dokumen, dan pencarian ikut menunggu). Perubahannya ditambahkan ke jurnal kecil,
+# dan berkas utama dipadatkan setiap JOURNAL_COMPACT_OPS perubahan.
+JOURNAL_MIN_ENTRIES = 5000
+JOURNAL_COMPACT_OPS = 300
+JOURNAL_COMPACT_BYTES = 16 * 1024 * 1024
 K1 = 1.2
 B = 0.75
 
@@ -70,6 +76,9 @@ class _Scope:
     total_length: int = 0
     organization_id: str = ""
     knowledge_base_id: str = ""
+    # Jumlah perubahan di jurnal sejak berkas utama terakhir ditulis.
+    journal_ops: int = 0
+    journal_bytes: int = 0
 
     @property
     def avgdl(self) -> float:
@@ -111,6 +120,66 @@ class SparseIndex:
 
     def _path(self, scope: str) -> Path:
         return self._root / f"{scope}.json"
+
+    def _journal(self, scope: str) -> Path:
+        return self._root / f"{scope}.journal"
+
+    @staticmethod
+    def _entry_dict(entry: SparseEntry) -> Dict[str, object]:
+        return dict(chunk_id=entry.chunk_id, document_id=entry.document_id, tokens=entry.tokens,
+                    is_summary=entry.is_summary)
+
+    def _replay(self, scope_obj: _Scope, path: Path) -> None:
+        """Terapkan jurnal di atas berkas utama. Baris terakhir yang terpotong (mati saat menulis)
+        diabaikan - perubahan sebelumnya tetap berlaku."""
+        if not path.exists():
+            return
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as exc:
+            logger.warning("jurnal BM25 %s tidak terbaca: %s", path.name, exc)
+            return
+        for line in lines:
+            try:
+                op = json.loads(line)
+            except ValueError:
+                break
+            if op.get("op") == "upsert":
+                for item in op.get("entries", []):
+                    entry = SparseEntry(
+                        chunk_id=str(item.get("chunk_id") or ""),
+                        document_id=str(item.get("document_id") or ""),
+                        tokens=list(item.get("tokens") or []),
+                        is_summary=bool(item.get("is_summary")),
+                    )
+                    existing = scope_obj.keys.get((entry.document_id, entry.chunk_id))
+                    if existing is not None:
+                        self._remove_entry(scope_obj, existing)
+                    self._add_entry(scope_obj, entry)
+            elif op.get("op") == "remove":
+                document_id = str(op.get("document_id") or "")
+                for entry_id in [i for i, e in scope_obj.entries.items() if e.document_id == document_id]:
+                    self._remove_entry(scope_obj, entry_id)
+            scope_obj.journal_ops += 1
+            scope_obj.journal_bytes += len(line) + 1
+
+    def _record(self, organization_id: str, knowledge_base_id: str, scope_obj: _Scope, op: Dict[str, object]) -> None:
+        """Simpan satu perubahan: scope kecil ditulis utuh, scope besar lewat jurnal."""
+        scope = self.scope_key(organization_id, knowledge_base_id)
+        if (
+            len(scope_obj.entries) < JOURNAL_MIN_ENTRIES
+            or scope_obj.legacy
+            or scope_obj.journal_ops + 1 >= JOURNAL_COMPACT_OPS
+            or scope_obj.journal_bytes >= JOURNAL_COMPACT_BYTES
+            or not self._path(scope).exists()
+        ):
+            self._persist(organization_id, knowledge_base_id, scope_obj)
+            return
+        line = json.dumps(op, ensure_ascii=False) + "\n"
+        with self._journal(scope).open("a", encoding="utf-8") as handle:
+            handle.write(line)
+        scope_obj.journal_ops += 1
+        scope_obj.journal_bytes += len(line)
 
     def _next_generation(self) -> int:
         self._generations += 1
@@ -172,6 +241,9 @@ class SparseIndex:
                 ),
             )
         loaded.legacy = version < INDEX_VERSION
+        loaded.organization_id = str(payload.get("organization_id") or "")
+        loaded.knowledge_base_id = str(payload.get("knowledge_base_id") or "")
+        self._replay(loaded, path.with_suffix(".journal"))
         return loaded
 
     def _scope(self, organization_id: str, knowledge_base_id: str) -> _Scope:
@@ -197,6 +269,11 @@ class SparseIndex:
         tmp = self._path(scope).with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self._path(scope))
+        journal = self._journal(scope)
+        if journal.exists():
+            journal.unlink()
+        scope_obj.journal_ops = 0
+        scope_obj.journal_bytes = 0
 
     def _changed(self, scope_obj: _Scope) -> None:
         scope_obj.generation = self._next_generation()
@@ -251,7 +328,8 @@ class SparseIndex:
                     self._remove_entry(scope_obj, existing)
                 self._add_entry(scope_obj, entry)
             self._changed(scope_obj)
-            self._persist(organization_id, knowledge_base_id, scope_obj)
+            self._record(organization_id, knowledge_base_id, scope_obj,
+                         {"op": "upsert", "entries": [self._entry_dict(entry) for entry in prepared]})
         return len(prepared)
 
     def remove_document(self, organization_id: str, knowledge_base_id: str, document_id: str) -> int:
@@ -262,7 +340,8 @@ class SparseIndex:
                 self._remove_entry(scope_obj, entry_id)
             if ids:
                 self._changed(scope_obj)
-                self._persist(organization_id, knowledge_base_id, scope_obj)
+                self._record(organization_id, knowledge_base_id, scope_obj,
+                             {"op": "remove", "document_id": document_id})
         return len(ids)
 
     def drop_scope(self, organization_id: str, knowledge_base_id: str) -> None:
@@ -275,9 +354,9 @@ class SparseIndex:
                 organization_id=organization_id, knowledge_base_id=knowledge_base_id,
             )
             self._file_meta.pop(scope, None)
-            path = self._path(scope)
-            if path.exists():
-                path.unlink()
+            for path in (self._path(scope), self._journal(scope)):
+                if path.exists():
+                    path.unlink()
 
     def search(
         self,
@@ -380,6 +459,13 @@ class SparseIndex:
             scope = path.stem
             if not scope.startswith(prefix) or scope in in_memory:
                 continue
+            if self._journal(scope).exists():
+                # Berkas utama belum memuat perubahan terbaru: hitung dari scope yang dimuat.
+                loaded = self._load(path)
+                content = [entry.document_id for entry in loaded.entries.values() if not entry.is_summary]
+                if loaded.organization_id == organization_id and loaded.knowledge_base_id and content:
+                    found[loaded.knowledge_base_id] = {"documents": len(set(content)), "chunks": len(content)}
+                continue
             try:
                 mtime = path.stat().st_mtime
             except OSError:
@@ -413,6 +499,31 @@ class SparseIndex:
     def stats(self) -> Dict[str, int]:
         with self._lock:
             return {scope: len(scope_obj.entries) for scope, scope_obj in self._scopes.items()}
+
+    def warm(self) -> int:
+        """Muat semua scope dan bangun postingnya di LUAR kunci global (saat layanan menyala).
+
+        Tanpa ini, pertanyaan pertama ke KB besar setelah restart/deploy menunggu indeksnya
+        dimuat dan dibangun (~5 dtk untuk 30 ribu potongan), dan selama itu pencarian KB lain
+        ikut tertahan oleh kunci yang sama.
+        """
+        warmed = 0
+        for path in sorted(self._root.glob("*.json")):
+            scope = path.stem
+            with self._lock:
+                if scope in self._scopes:
+                    continue
+            loaded = self._load(path)
+            if not loaded.organization_id or not loaded.knowledge_base_id or loaded.legacy:
+                continue
+            self._ensure_postings(loaded)
+            with self._lock:
+                if scope in self._scopes:
+                    continue
+                loaded.generation = self._next_generation()
+                self._scopes[scope] = loaded
+                warmed += 1
+        return warmed
 
     # ------------------------------------------------------------------ #
     # Pembangunan ulang indeks lama

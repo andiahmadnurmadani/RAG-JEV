@@ -119,6 +119,7 @@ class RagPipeline:
         use_reranker: Optional[bool] = None,
         threshold: Optional[float] = None,
         document_ids: Optional[Sequence[str]] = None,
+        focus: bool = True,
     ) -> RetrievalResult:
         started = time.perf_counter()
         result = self._retriever.retrieve(
@@ -130,6 +131,7 @@ class RagPipeline:
             use_reranker=use_reranker,
             threshold=threshold,
             document_ids=document_ids,
+            focus=focus,
         )
         elapsed = time.perf_counter() - started
         result.elapsed_ms = round(elapsed * 1000, 2)
@@ -791,6 +793,7 @@ class RagPipeline:
             use_reranker=use_reranker,
             threshold=threshold,
             document_ids=document_ids,
+            focus=False,
         )
 
     # ------------------------------------------------------------------ #

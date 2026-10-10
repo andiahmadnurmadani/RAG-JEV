@@ -202,3 +202,52 @@ Perubahan:
 Batas yang tersisa: 3 dari 8 pertanyaan di luar knowledge lolos gerbang skor pada korpus 1000
 dokumen (topiknya mirip pengalih, mis. "kendaraan dinas"). Itu tetap dijawab "tidak ditemukan"
 oleh model karena aturan strict grounding, tetapi memakai satu panggilan LLM.
+
+## Audit production (putaran 3)
+
+Tiga tinjauan kode independen (jalur jawaban, indexing/penyimpanan, keamanan) + pengukuran.
+Setiap temuan diverifikasi di kode sebelum diperbaiki; semuanya punya tes regresi.
+
+**Keamanan / multi-tenant**
+
+- Pengaturan global (model, URL LLM, kunci, kode akses) kini hanya untuk kunci *tulis* atau
+  admin milik organisasi operator, atau sesi konsol. Kunci yang diikat ke KB, kunci hanya-baca
+  (yang dipasang di aplikasi chat), dan kunci admin tenant lain ditolak. Dulu kunci hanya-baca
+  organisasi operator bisa mengganti URL LLM - dan konteks semua tenant ikut terkirim ke sana.
+- `GET /tables` menghormati ikatan KB; `document_id` yang dipakai KB lain tidak bisa ditimpa.
+- `/metrics` butuh kredensial operator (memuat nama org/KB semua tenant); cek LLM di `/ready`
+  di-cache 60 dtk; `/auth/gate` tidak lagi memberi potongan kode akses; IP klien untuk pembatas
+  login dari `CF-Connecting-IP`; tag pembatas konteks di isi dokumen dijinakkan; header
+  `nosniff`, `X-Frame-Options`, `Referrer-Policy`.
+
+**Data / indexing**
+
+- Dokumen yang dihapus saat job-nya masih antre tidak lagi hidup kembali; tabelnya ikut dibuang.
+- Migrasi embedding: hapus selama migrasi diterapkan juga ke koleksi sumber, potongan yang
+  sudah ditulis ulang tidak ditimpa isi lama, migrasi gagal dilanjutkan (dulu dianggap selesai),
+  koleksi target lama yang basi dibangun ulang, scroll 512 per halaman (dulu 16 = kuadratik).
+- Bom zip (docx/xlsx/pptx/odt) ditolak sebelum dibuka; antrean pengindeksan dibatasi
+  (`INDEXING_MAX_QUEUED`, `INDEXING_MAX_QUEUED_MB`) - lewat batas dijawab 429.
+- Setelan ngawur (model embedding kosong, angka sampah) ditolak 422, bukan disimpan.
+
+**Jawaban**
+
+- Kueri tanpa kata bermakna ("Apa itu?") tidak lagi mendapat skor palsu 1,0 dan lolos gerbang.
+- Jawaban sebagian ("12 hari [1]. Info cuti besar tidak ditemukan.") tidak lagi dibuang
+  sebagai penolakan; sitasi jawaban hasil perbaikan ikut dibersihkan; alamat situs tidak lagi
+  dianggap "kata rusak" (panggilan LLM sia-sia).
+- Fokus dokumen hanya di jalur jawaban: `/search` dan dokumen yang dipilih eksplisit tidak dipangkas.
+
+**Skala (KB 30 ribu potongan)**
+
+| | Sebelum | Sesudah |
+|---|---|---|
+| Pertanyaan pertama setelah restart/deploy | 13,7 dtk | 0,02 dtk (indeks dipanaskan di latar belakang) |
+| Simpan indeks kata kunci per dokumen baru | 0,58 dtk (tulis ulang 50 MB) | 0,001 dtk (jurnal) |
+| Daftar 500 dokumen | 500 pemindaian Qdrant | 1 pemindaian |
+
+**Batas yang tersisa: Qdrant tertanam.** Pencarian vektor pada 30 ribu potongan = 0,6 dtk dan
+dikunci satu per satu (Qdrant sendiri menyarankan server di atas 20 ribu titik). Production saat
+ini 1.683 potongan (~0,03 dtk). Sebelum mencapai ribuan dokumen, jalankan Qdrant sebagai layanan
+terpisah dan set `QDRANT_URL`. Setel juga `stop_grace_period` layanan ke >= 60 dtk agar job yang
+sedang berjalan selesai saat redeploy.

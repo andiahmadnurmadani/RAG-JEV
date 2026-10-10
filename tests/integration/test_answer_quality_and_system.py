@@ -126,7 +126,7 @@ def test_stored_prompt_injection_is_flagged_not_obeyed(client):
     )
     body = response.text
     assert "ignore previous instructions" not in body.lower() or response.status_code == 200
-    metrics = client.get("/api/v1/metrics").json()
+    metrics = client.get("/api/v1/metrics", headers=auth(TENANT_A_KEY)).json()
     assert metrics["counters"].get("prompt_injection_flags", 0) >= 1
 
 
@@ -188,7 +188,7 @@ def test_metrics_expose_retrieval_and_indexing_counters(client):
         json={"query": "prosedur cuti tahunan", "knowledge_base_id": "kb_hr"},
         headers=auth(TENANT_A_KEY),
     )
-    metrics = client.get("/api/v1/metrics").json()
+    metrics = client.get("/api/v1/metrics", headers=auth(TENANT_A_KEY)).json()
     assert metrics["counters"]["documents_indexed"] >= 1
     assert metrics["counters"]["retrieval_requests"] >= 1
     assert "retrieval_latency" in metrics["latency"]
@@ -278,5 +278,5 @@ def test_two_documents_do_not_overwrite_each_others_vectors(client):
 
 
 def test_collection_reports_both_documents(client):
-    metrics = client.get("/api/v1/metrics").json()
+    metrics = client.get("/api/v1/metrics", headers=auth(TENANT_A_KEY)).json()
     assert metrics["collection"]["points"] >= 0  # collection info is reported, not guessed

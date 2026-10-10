@@ -141,6 +141,11 @@ class JobStore:
             record = self._jobs.get(job_id)
             if record is None:
                 return None
+            if record.status == STATUS_DELETED:
+                # Dokumen sudah dihapus (bisa saat job masih antre atau sedang berjalan): tidak
+                # ada tahap pengindeksan yang boleh mengubahnya kembali menjadi processing/
+                # completed/failed. Mengindeks ulang selalu membuat job BARU lewat create().
+                return record
             for key, value in changes.items():
                 setattr(record, key, value)
             record.updated_at = _now()
@@ -331,6 +336,9 @@ class IndexingPipeline:
         record = self._jobs.update(job_id, status=STATUS_PROCESSING, stage="parsing", attempts=(self._jobs.get(job_id).attempts + 1 if self._jobs.get(job_id) else 1))
         if record is None:
             raise AppError("INTERNAL_ERROR", f"unknown job {job_id}")
+        if record.status == STATUS_DELETED:
+            logger.info("job %s dilewati: dokumen %s sudah dihapus sebelum diproses", job_id, document_id)
+            return record
 
         try:
             # Sumber dari web: satu situs/halaman menjelajah menjadi SATU dokumen, dengan
@@ -865,6 +873,10 @@ class IndexingPipeline:
             return False
         repository.delete_document(self._settings, organization_id=organization_id, document_id=document_id)
         self._sparse.remove_document(organization_id, knowledge_base_id, document_id)
+        if self._tables is not None:
+            # Tabel ditulis saat parsing (sebelum upsert): tanpa ini jawaban agregat masih
+            # menghitung baris dokumen yang sudah dihapus.
+            self._tables.delete_document(organization_id=organization_id, document_id=document_id)
         logger.info("dokumen %s dihapus saat diindeks; hasil indeks dibuang", document_id)
         return True
 
@@ -1042,6 +1054,8 @@ class IndexingWorker:
         self._executor: Optional[ThreadPoolExecutor] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._running = False
+        self._backlog_lock = threading.Lock()
+        self._queued_bytes = 0
         # Jalur ringkasan dipisah supaya panggilan LLM yang panjang tidak menahan antrian
         # pengindeksan (lihat submit_summary).
         self._summary_queue: Optional[asyncio.Queue] = None
@@ -1115,7 +1129,23 @@ class IndexingWorker:
         self._queue = None
         self._summary_queue = None
 
+    def _check_backlog(self, payload: Dict[str, Any]) -> None:
+        if not self._running or self._queue is None:
+            return
+        size = len(payload.get("content_base64") or "") + len(payload.get("text") or "")
+        limit_jobs = int(getattr(self._settings, "indexing_max_queued", 0) or 0)
+        limit_bytes = int(getattr(self._settings, "indexing_max_queued_mb", 0) or 0) * 1024 * 1024
+        with self._backlog_lock:
+            if limit_jobs and self._queue.qsize() >= limit_jobs:
+                raise AppError("RATE_LIMITED", "antrean pengindeksan penuh; coba lagi beberapa saat lagi",
+                               details={"queued": self._queue.qsize()})
+            if limit_bytes and self._queued_bytes + size > limit_bytes and self._queued_bytes > 0:
+                raise AppError("RATE_LIMITED", "antrean pengindeksan sedang menampung banyak berkas; coba lagi nanti",
+                               details={"queued_mb": round(self._queued_bytes / 1024 / 1024)})
+            self._queued_bytes += size
+
     def submit(self, payload: Dict[str, Any]) -> JobRecord:
+        self._check_backlog(payload)
         record = self._jobs.create(**{key: payload[key] for key in _JOB_FIELDS if key in payload})
         self._jobs.update(
             record.job_id,
@@ -1132,6 +1162,9 @@ class IndexingWorker:
         assert self._queue is not None and self._executor is not None
         while True:
             job_id, payload = await self._queue.get()
+            with self._backlog_lock:
+                self._queued_bytes = max(0, self._queued_bytes - len(payload.get("content_base64") or "")
+                                         - len(payload.get("text") or ""))
             try:
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(

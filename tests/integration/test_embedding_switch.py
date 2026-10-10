@@ -60,3 +60,51 @@ def test_ganti_embedding_migrasi_otomatis(client, settings, monkeypatch):
     # kembali ke hash: koleksi lama dipakai lagi (tidak dihapus)
     back = client.put("/api/v1/settings", json={"embedding": {"provider": "hash"}}, headers=auth(TENANT_A_KEY))
     assert back.json()["data"]["embedding_status"]["collection"] == old_collection
+
+
+def test_migrasi_gagal_dilanjutkan_bukan_dianggap_selesai(client, settings):
+    """Migrasi yang gagal/terputus tidak boleh berstatus 'done' setelah restart, dan migrasi
+    yang belum selesai tidak pernah dijadikan sumber migrasi berikutnya."""
+    from app.rag.embedding_migration import collection_for
+
+    migrator = client.app.state.services.migrator
+    base = migrator.base_collection
+    target = collection_for(base, "fastembed", MODEL)
+    migrator._save(state="failed", source=base, target=target, active=target, done=1, total=3)
+    settings.embedding_provider, settings.embedding_fastembed_model = "fastembed", MODEL
+
+    response = client.post("/api/v1/knowledge/index", json={"document_id": "doc_x", "knowledge_base_id": "kb_emb",
+                                                            "document_name": "x.md", "text": "Kuota cuti 12 hari."},
+                           headers=auth(TENANT_A_KEY))
+    assert response.status_code == 202
+    wait_for_job(client, "doc_x")
+    settings.qdrant_collection = base
+    migrator.activate(start=False)
+    status = migrator.status()
+    assert status["state"] == "running" and status["source"] == base
+    assert settings.qdrant_migration_source == base
+
+    # model diganti lagi sebelum selesai: sumbernya tetap koleksi lengkap, bukan target parsial
+    settings.embedding_fastembed_model = "intfloat/multilingual-e5-large"
+    migrator.activate(start=False)
+    assert migrator.status()["source"] == base
+
+
+def test_hapus_selama_migrasi_ikut_menghapus_di_sumber(client, settings):
+    from app.qdrant import repository
+    from app.qdrant.client import get_client
+
+    response = client.post("/api/v1/knowledge/index", json={"document_id": "doc_hapus", "knowledge_base_id": "kb_emb",
+                                                            "document_name": "h.md", "text": "Kuota cuti 12 hari."},
+                           headers=auth(TENANT_A_KEY))
+    assert response.status_code == 202
+    wait_for_job(client, "doc_hapus")
+    source = settings.qdrant_collection
+    assert repository.count_document(settings, organization_id="org_a", document_id="doc_hapus") > 0
+    settings.qdrant_collection = source + "__lain"
+    settings.qdrant_migration_source = source
+    repository.delete_document(settings, organization_id="org_a", document_id="doc_hapus")
+    settings.qdrant_collection = source
+    settings.qdrant_migration_source = ""
+    assert repository.count_document(settings, organization_id="org_a", document_id="doc_hapus") == 0
+    assert get_client(settings).collection_exists(source)

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
 from app.api.deps import services_from_request
+from app.api.middleware.auth import TrustedContext, trusted_context
 from app.core.errors import ok
 from app.core.metrics import snapshot
 from app.parsing.formats import enabled_extensions
@@ -81,9 +82,15 @@ def ready(request: Request, response: Response) -> Dict[str, Any]:
 
 
 @router.get("/metrics")
-def metrics(request: Request) -> Dict[str, Any]:
-    """PRD 37 counters/latencies plus the honest state of the worker and indexes."""
+def metrics(request: Request, context: TrustedContext = Depends(trusted_context)) -> Dict[str, Any]:
+    """PRD 37 counters/latencies plus the honest state of the worker and indexes.
+
+    Butuh kredensial operator: ``sparse_scopes`` memuat nama organisasi dan knowledge base
+    SEMUA tenant."""
+    from app.api.routes.settings import _require_admin
+
     services = services_from_request(request)
+    _require_admin(context, services.settings)
     payload = snapshot()
     payload["worker"] = services.worker.stats()
     payload["sparse_scopes"] = services.sparse.stats()

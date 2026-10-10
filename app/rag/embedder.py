@@ -125,15 +125,23 @@ class FastEmbedEmbedder(BaseEmbedder):
         self.name = f"fastembed:{self._model_name}"
         self._model = None
         self.dim = settings.embedding_dim
+        # Pertanyaan pertama dan pengindeksan bisa memuat model BERSAMAAN: tanpa kunci, model
+        # ~1 GB dimuat dua kali (RAM ganda, start lambat).
+        self._load_lock = threading.Lock()
 
     def _load(self):
-        if self._model is None:
+        if self._model is not None:
+            return self._model
+        with self._load_lock:
+            if self._model is not None:
+                return self._model
             from fastembed import TextEmbedding
 
             started = time.perf_counter()
-            self._model = TextEmbedding(model_name=self._model_name)
-            probe = next(iter(self._model.embed(["dimension probe"])))
+            model = TextEmbedding(model_name=self._model_name)
+            probe = next(iter(model.embed(["dimension probe"])))
             self.dim = len(probe)
+            self._model = model
             logger.info("loaded fastembed %s (dim=%d) in %.1fs", self._model_name, self.dim, time.perf_counter() - started)
         return self._model
 

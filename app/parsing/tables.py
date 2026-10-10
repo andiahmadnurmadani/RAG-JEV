@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from app.parsing.sanitize import open_zip
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.parsing import sheet_dates, xls_binary
@@ -119,7 +120,7 @@ def extract_tables(content: bytes, document_name: str) -> List[TableData]:
 
 def _from_xlsx(content: bytes, document_name: str) -> List[TableData]:
     try:
-        archive = zipfile.ZipFile(io.BytesIO(content))
+        archive = open_zip(content)
     except Exception as exc:  # noqa: BLE001
         raise AppError("INDEXING_FAILED", f"Unreadable .xlsx: {exc}") from exc
 
@@ -290,7 +291,7 @@ def _decode(content: bytes) -> str:
 
 def _from_ods(content: bytes, document_name: str) -> List[TableData]:
     try:
-        archive = zipfile.ZipFile(io.BytesIO(content))
+        archive = open_zip(content)
     except Exception as exc:  # noqa: BLE001
         raise AppError("INDEXING_FAILED", f"Unreadable .ods: {exc}") from exc
 

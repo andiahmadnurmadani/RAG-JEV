@@ -372,13 +372,23 @@ class LLMClient:
         )
         return text.strip(), usage
 
+    # /ready bisa dipanggil tanpa kredensial: tanpa cache, setiap panggilan = satu panggilan LLM
+    # (kuota model terkuras, worker tertahan sampai 30 dtk).
+    _HEALTH_TTL = 60.0
+
     def health(self) -> str:
+        key = (self._settings.llm_base_url, self._settings.llm_model)
+        cached = getattr(self, "_health_cache", None)
+        if cached and cached[0] == key and time.monotonic() - cached[1] < self._HEALTH_TTL:
+            return cached[2]
         try:
             self.chat([{"role": "user", "content": "ping"}], max_tokens=4, temperature=0.0, timeout=30)
-            return "ok"
+            verdict = "ok"
         except Exception as exc:  # noqa: BLE001
             logger.warning("llm health check failed: %s", exc)
-            return "error"
+            verdict = "error"
+        self._health_cache = (key, time.monotonic(), verdict)
+        return verdict
 
 
 def build_llm_client(settings: Settings):
@@ -450,7 +460,10 @@ class Generator:
                     len(corrupted),
                     ", ".join(sorted(corrupted)[:5]),
                 )
+                if isinstance(context.used, (list, tuple)):
+                    cleaned = clean_citations(cleaned, len(context.used))
                 text, repaired = cleaned, True
+                grounded = not truncated and not self._looks_like_refusal(text)
 
         # Aksara asing yang model selipkan ("dokumen finals完整的"): faktanya benar, tapi pemakai
         # melihat aksara yang tidak bisa dibaca. Hanya dibuang bila TIDAK ada di konteks - kutipan
@@ -488,6 +501,9 @@ class Generator:
 
     # ------------------------------------------------------------------ #
     # Kata umum bahasa Indonesia/Inggris: boleh muncul di jawaban tanpa ada di konteks.
+    _DOMAIN_RE = re.compile(
+        r"(?i)^(?:www\.)|\.(?:com|net|org|id|co|go|ac|sch|or|my|web|info|biz|io|ai|app|dev|edu|gov|tech|site|online|xyz)$"
+    )
     _COMMON_WORDS = frozenset(
         """
         yang dan atau untuk dari pada dengan ini itu tidak ada adalah akan bila jika karena
@@ -537,6 +553,10 @@ class Generator:
         # (a) Kata yang mengandung titik DI TENGAH (mis. "pemb.cgiian"). Titik di akhir
         #     kalimat tidak dihitung: kita hanya melihat "huruf.huruf" tanpa spasi di sekitarnya.
         for token in re.findall(r"[A-Za-z\u00C0-\u024F]{2,}(?:\.[A-Za-z\u00C0-\u024F]{2,})+", text):
+            # Alamat situs/surel ("www.bandunginfra.co.id") dan bentuk yang memang tertulis
+            # begitu di dokumen bukan kata rusak.
+            if token.lower() in context_lower or self._DOMAIN_RE.search(token):
+                continue
             cleaned = token.replace(".", "")
             if cleaned.lower() in self._COMMON_WORDS or cleaned.lower() in context_words:
                 continue
@@ -758,7 +778,17 @@ class Generator:
                 return True
         cited = bool(extract_citation_numbers(text))
         if any(marker in lowered for marker in META_REFUSAL_MARKERS) and len(lowered) < 250:
-            return True
+            # Jawaban SEBAGIAN (aturan 3 prompt) bukan penolakan: ada kalimat bersitasi yang
+            # memuat fakta, lalu kalimat "bagian X tidak ditemukan". Hanya bila SEMUA kalimat
+            # bersitasi adalah kalimat "tidak ditemukan", jawabannya penolakan.
+            factual = [
+                sentence
+                for sentence in re.split(r"(?<=[.!?])\s+|\n+", lowered)
+                if extract_citation_numbers(sentence)
+                and len(_CITATION_RE.sub("", sentence).split()) >= 3
+                and not any(marker in sentence for marker in META_REFUSAL_MARKERS)
+            ]
+            return not factual
         if not cited and any(marker in lowered for marker in NOT_FOUND_MARKERS):
             return len(lowered) < 300
         return False

@@ -121,6 +121,10 @@ def list_tables(
 
     _limit(request, context)
     context.require("read")
+    # Kunci yang diikat ke KB tertentu hanya melihat tabel KB-nya (nama dokumen, judul kolom,
+    # dan jumlah baris KB lain tidak boleh bocor).
+    if context.knowledge_base_ids:
+        context.require_knowledge_base(knowledge_base_id)
     services = services_from_request(request)
     tables = services.tables.list_tables(
         organization_id=context.organization_id, knowledge_base_id=knowledge_base_id

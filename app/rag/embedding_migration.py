@@ -4,7 +4,10 @@ Setiap model punya koleksi Qdrant sendiri (``knowledge_chunks`` untuk ``hash``,
 ``knowledge_chunks__<model>`` untuk model semantik), karena vektor dari model berbeda tidak
 bisa dibandingkan dan dimensinya pun bisa berbeda. Saat model aktif berganti, seluruh
 potongan dari koleksi yang aktif SEBELUMNYA di-embed ulang ke koleksi baru di latar belakang,
-dari isi teks yang tersimpan di payload. Koleksi lama tidak dihapus (bisa dipakai kembali).
+dari isi teks yang tersimpan di payload. Koleksi sumber tidak dihapus; bila model lama dipilih
+lagi, koleksinya dibangun ulang dari koleksi aktif (isinya sudah basi sejak ditinggal).
+Selama migrasi, penghapusan dokumen/KB juga diterapkan ke koleksi sumber
+(``settings.qdrant_migration_source``) supaya salinan tidak menghidupkannya lagi.
 
 Status disimpan di ``embedding_state.json`` (volume data yang sama), sehingga migrasi yang
 terputus oleh restart dilanjutkan otomatis.
@@ -32,6 +35,10 @@ SUPPORTED_MODELS: Dict[str, str] = {
 }
 DEFAULT_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 BATCH = 16
+# Halaman scroll Qdrant. Qdrant tertanam memindai seluruh koleksi di SETIAP halaman, jadi halaman
+# kecil membuat migrasi kuadratik terhadap jumlah potongan.
+PAGE = 512
+INCOMPLETE = ("running", "failed", "interrupted")
 
 
 def _now() -> str:
@@ -81,39 +88,78 @@ class EmbeddingMigrator:
                 logger.warning("status migrasi embedding tidak tersimpan: %s", exc)
 
     def activate(self, *, start: bool = True) -> str:
-        """Pakai koleksi milik model aktif; migrasikan bila koleksinya belum berisi."""
+        """Pakai koleksi milik model aktif; migrasikan bila koleksinya belum lengkap.
+
+        * Sumber migrasi selalu koleksi LENGKAP terakhir. Migrasi yang belum selesai (gagal,
+          terputus, atau ditinggal karena model diganti lagi) tidak pernah dijadikan sumber.
+        * Migrasi yang belum selesai ke target yang sama dilanjutkan, bukan dianggap selesai.
+        * Koleksi target sisa pemakaian lama dibangun ulang: isinya basi (dokumen yang dihapus
+          atau diubah sejak itu akan muncul lagi bila dipakai apa adanya).
+        """
         from app.qdrant.client import get_client
 
         settings = self._settings
         target = collection_for(self._base, settings.embedding_provider, settings.embedding_fastembed_model)
         with self._lock:
-            previous = str(self._state.get("active") or self._base)
-            pending = self._state.get("state") == "running" and self._state.get("target") == target
+            state = dict(self._state)
+            incomplete = state.get("state") in INCOMPLETE
+            previous = str(state.get("active") or self._base)
+            source = str(state.get("source") or previous) if incomplete else previous
+            resume = incomplete and state.get("target") == target
             settings.qdrant_collection = target
             self._token += 1
             token = self._token
-        source = str(self._state.get("source") or previous) if pending else previous
         if source == target:
-            self._save(active=target)
+            # Kembali ke koleksi lengkap (sumber): migrasi yang belum selesai ditinggal, tetapi
+            # dicatat supaya bila model itu dipilih lagi, migrasinya dilanjutkan dari sumber ini.
+            settings.qdrant_migration_source = ""
+            self._save(active=target, state="interrupted" if incomplete else (state.get("state") or "idle"))
             return target
         try:
             client = get_client(settings)
             has_source = client.collection_exists(source) and client.count(collection_name=source, exact=True).count > 0
-            target_count = client.count(collection_name=target, exact=True).count if client.collection_exists(target) else 0
+            target_exists = client.collection_exists(target)
+            if has_source and target_exists and not resume:
+                client.delete_collection(target)
+                logger.info("koleksi %s sisa pemakaian lama dibangun ulang dari %s", target, source)
         except Exception as exc:  # noqa: BLE001
             logger.warning("cek koleksi untuk migrasi embedding gagal: %s", exc)
             self._save(active=target)
             return target
-        if not has_source or (target_count and not pending):
-            self._save(active=target, state="done" if target_count else "idle", source=source, target=target)
+        if not has_source:
+            settings.qdrant_migration_source = ""
+            self._save(active=target, state="idle", source=source, target=target)
             return target
-        self._save(active=target, state="running", source=source, target=target, done=0, total=0,
-                   started_at=_now(), finished_at=None, error=None)
+        settings.qdrant_migration_source = source
+        changes: Dict[str, Any] = dict(active=target, state="running", source=source, target=target, error=None,
+                                       finished_at=None)
+        if not resume:
+            changes.update(done=0, total=0, started_at=_now())
+        self._save(**changes)
         if start:
             self._thread = threading.Thread(target=self._run, args=(source, target, token),
                                             name="embedding-migration", daemon=True)
             self._thread.start()
         return target
+
+    @staticmethod
+    def _missing_in_target(client: Any, target: str, payloads: list) -> list:
+        from app.qdrant.repository import point_id
+
+        if not payloads:
+            return payloads
+        try:
+            if not client.collection_exists(target):
+                return payloads
+            ids = [point_id(p.get("chunk_id", ""), organization_id=p.get("organization_id", ""),
+                            knowledge_base_id=p.get("knowledge_base_id", ""), document_id=p.get("document_id", ""))
+                   for p in payloads]
+            present = {str(record.id) for record in client.retrieve(collection_name=target, ids=ids,
+                                                                     with_payload=False, with_vectors=False)}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cek potongan yang sudah ada di %s gagal: %s", target, exc)
+            return payloads
+        return [p for p, pid in zip(payloads, ids) if pid not in present]
 
     def _run(self, source: str, target: str, token: int) -> None:
         from app.qdrant import repository
@@ -133,21 +179,31 @@ class EmbeddingMigrator:
                     logger.info("migrasi embedding %s -> %s dihentikan (model berganti lagi)", source, target)
                     return
                 records, offset = client.scroll(
-                    collection_name=source, limit=BATCH, offset=offset, with_payload=True, with_vectors=False
+                    collection_name=source, limit=PAGE, offset=offset, with_payload=True, with_vectors=False
                 )
                 payloads = [dict(record.payload or {}) for record in records]
                 payloads = [payload for payload in payloads if payload.get("organization_id") and payload.get("chunk_id")]
-                if payloads:
-                    vectors = self._embedder.encode([_contextual_text_from_payload(p) for p in payloads])
+                # Potongan yang SUDAH ada di target ditulis oleh pengindeksan baru selama migrasi
+                # (atau oleh percobaan sebelumnya yang terputus): jangan ditimpa isi lama.
+                payloads = self._missing_in_target(client, target, payloads)
+                for begin in range(0, len(payloads), BATCH):
+                    if token != self._token:
+                        logger.info("migrasi embedding %s -> %s dihentikan (model berganti lagi)", source, target)
+                        return
+                    batch = payloads[begin : begin + BATCH]
+                    vectors = self._embedder.encode([_contextual_text_from_payload(p) for p in batch])
                     repository.upsert_chunks(
                         settings,
                         dim=len(vectors[0]),
-                        points=[{"chunk_id": p["chunk_id"], "vector": v, "payload": p} for p, v in zip(payloads, vectors)],
+                        points=[{"chunk_id": p["chunk_id"], "vector": v, "payload": p} for p, v in zip(batch, vectors)],
                     )
                 done += len(records)
                 self._save(done=done)
                 if offset is None or not records:
                     break
+            with self._lock:
+                if token == self._token:
+                    settings.qdrant_migration_source = ""
             self._save(state="done", finished_at=_now())
             logger.info("migrasi embedding %s -> %s selesai: %d potongan dalam %.0f dtk",
                         source, target, done, time.perf_counter() - started)

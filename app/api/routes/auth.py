@@ -37,9 +37,15 @@ class LoginRequest(BaseModel):
 
 def _client(request: Request) -> str:
     """Alamat klien untuk audit dan pembatasan percobaan (di belakang proxy: X-Forwarded-For)."""
-    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    # Di belakang Cloudflare, CF-Connecting-IP diisi Cloudflare sendiri. Nilai PERTAMA
+    # X-Forwarded-For dikirim klien apa adanya - bila dipercaya, pembatas percobaan login bisa
+    # diakali dengan mengganti header itu di setiap percobaan.
+    cloudflare = (request.headers.get("CF-Connecting-IP") or "").strip()
+    if cloudflare:
+        return cloudflare
+    forwarded = [part.strip() for part in (request.headers.get("X-Forwarded-For") or "").split(",") if part.strip()]
     if forwarded:
-        return forwarded
+        return forwarded[-1]
     return request.client.host if request.client else "unknown"
 
 
@@ -58,12 +64,11 @@ def read_gate(request: Request) -> Dict[str, Any]:
             "enabled": bool(status["enabled"]) and not settings.console_api_key_only,
             "code_set": bool(status["enabled"]),
             "api_key_only": bool(settings.console_api_key_only),
-            "hint": status["hint"] if status["enabled"] else None,
-            "set_at": status["set_at"] if status["enabled"] else None,
+            # Tanpa potongan kode, waktu ganti, atau jumlah sesi: endpoint ini publik, dan potongan
+            # kode (huruf awal/akhir + panjang) memperkecil ruang tebakan.
             "default_lifetime": default,
             "remember_lifetime": remember,
             "min_code_length": access.MIN_CODE_LENGTH,
-            "active_sessions": access.session_store(settings).active_count(status["generation"] or ""),
         }
     )
 

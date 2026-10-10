@@ -56,6 +56,20 @@ def validate_source_urls(payload, settings) -> None:
         raise AppError("VALIDATION_ERROR", "crawl web sedang dimatikan di setelan layanan (WEB_CRAWL_ENABLED=false)")
 
 
+def _guard_document_owner(services, organization_id: str, document_id: str, knowledge_base_id: str) -> None:
+    """``document_id`` unik per organisasi: mengindeks ulang ID yang dipakai KB LAIN akan menghapus
+    vektor dokumen di KB itu dan memindahkan catatannya. Ditolak - hapus dulu di KB asalnya."""
+    existing = services.jobs.by_document(organization_id, document_id)
+    if existing is None or existing.status == STATUS_DELETED:
+        return
+    if existing.knowledge_base_id and existing.knowledge_base_id != knowledge_base_id:
+        raise AppError(
+            "VALIDATION_ERROR",
+            "document_id ini sudah dipakai di knowledge base lain; pakai ID lain atau hapus dulu dokumen lamanya",
+            details={"document_id": document_id},
+        )
+
+
 @router.post("/knowledge/index", status_code=status.HTTP_202_ACCEPTED)
 def index_knowledge(
     payload: KnowledgeIndexRequest,
@@ -76,6 +90,7 @@ def index_knowledge(
     validate_display_label(payload.document_name or "", services.settings)
     validate_payload_size(services.settings, payload.content_base64, payload.text)
     validate_source_urls(payload, services.settings)
+    _guard_document_owner(services, organization_id, payload.document_id, payload.knowledge_base_id)
     job = services.worker.submit(
         {
             "document_id": payload.document_id,
@@ -132,6 +147,9 @@ def list_knowledge(
     )
     if context.knowledge_base_ids:
         records = [record for record in records if context.allows_knowledge_base(record.knowledge_base_id)][:limit]
+    in_store = repository.count_by_document(
+        services.settings, organization_id=context.organization_id, knowledge_base_id=knowledge_base_id
+    )
     documents = [
         DocumentStatusOut(
             document_id=record.document_id,
@@ -146,11 +164,7 @@ def list_knowledge(
             created_at=record.created_at,
             updated_at=record.updated_at,
             duration_ms=record.duration_ms,
-            vectors_in_store=repository.count_document(
-                services.settings,
-                organization_id=context.organization_id,
-                document_id=record.document_id,
-            ),
+            vectors_in_store=in_store.get(record.document_id, 0),
             tables=record.tables,
             source_url=record.source_url or "",
             summary=record.summary or "",
@@ -321,7 +335,9 @@ def update_knowledge(
     organization_id = assert_tenant_match(context, payload.organization_id, where="/knowledge/{id}")
 
     services = services_from_request(request)
+    validate_payload_size(services.settings, getattr(payload, "content_base64", "") or "", getattr(payload, "text", "") or "")
     validate_source_urls(payload, services.settings)
+    _guard_document_owner(services, organization_id, document_id, payload.knowledge_base_id)
     job = services.worker.submit(
         {
             "document_id": document_id,

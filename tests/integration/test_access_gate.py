@@ -169,9 +169,10 @@ def test_the_console_creates_an_api_key_from_a_session(client):
     assert client.get("/api/v1/knowledge", headers=auth(new_key)).status_code == 200
 
 
-def test_a_session_carries_the_tenant_configured_for_the_console(client):
+def test_a_session_carries_the_tenant_configured_for_the_console(client, settings):
     """Tenant sesi berasal dari konfigurasi server (UI_SESSION_ORGANIZATION_ID), bukan klien."""
     _set_code(client)
+    settings.ui_session_organization_id = "default"
     token = _token(client)
     created = client.post(
         KEYS, json={"label": "sesi", "permissions": ["read"]}, headers=auth(token)
@@ -265,11 +266,13 @@ def test_clearing_the_code_returns_the_console_to_api_keys(client):
 # --------------------------------------------------------------------------- #
 # Batas izin: hanya admin
 # --------------------------------------------------------------------------- #
-def test_any_valid_key_may_manage_the_code_in_api_key_only_mode(client, settings):
-    """Mode bawaan: kunci organisasi operator boleh mengelola kode akses (operator tunggal)."""
+def test_operator_write_keys_manage_the_code_in_api_key_only_mode(client, settings):
+    """Mode bawaan: kunci TULIS organisasi operator boleh mengelola kode akses (operator tunggal).
+    Kunci hanya-baca tidak - kunci itu yang dipasang di aplikasi chat dan paling mudah bocor."""
     settings.ui_session_organization_id = "org_a"
     _set_code(client)
-    assert client.get(ACCESS, headers=auth(READ_ONLY_KEY)).status_code == 200
+    assert client.get(ACCESS, headers=auth(TENANT_A_KEY)).status_code == 200
+    assert client.get(ACCESS, headers=auth(READ_ONLY_KEY)).status_code == 403
     assert client.get(ACCESS).status_code == 401, "tanpa kredensial tetap 401"
 
 

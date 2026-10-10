@@ -157,6 +157,20 @@ def collection_exists_guard(settings: Settings) -> bool:
         return False
 
 
+def _mirror_delete(settings: Settings, client, query_filter) -> None:
+    """Selama migrasi embedding, koleksi SUMBER masih disalin ke koleksi aktif. Penghapusan yang
+    hanya mengenai koleksi aktif akan "dihidupkan lagi" saat salinan sampai ke potongan itu -
+    jadi hapus juga di sumbernya."""
+    source = str(getattr(settings, "qdrant_migration_source", "") or "")
+    if not source or source == settings.qdrant_collection:
+        return
+    try:
+        if client.collection_exists(source):
+            client.delete(collection_name=source, points_selector=qmodels.FilterSelector(filter=query_filter), wait=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hapus di koleksi sumber migrasi %s gagal: %s", source, exc)
+
+
 def delete_document(
     settings: Settings,
     *,
@@ -170,8 +184,6 @@ def delete_document(
     dokumen ber-ID sama di KB lain organisasi yang sama tidak ikut terhapus.
     """
 
-    if not collection_exists_guard(settings):
-        return 0
     if not organization_id:
         raise AppError("TENANT_CONTEXT_MISSING", "organization_id is required for delete")
     conditions = [
@@ -184,12 +196,16 @@ def delete_document(
         )
     query_filter = qmodels.Filter(must=conditions)
     client = get_client(settings)
+    if not collection_exists_guard(settings):
+        _mirror_delete(settings, client, query_filter)
+        return 0
     before = count_document(settings, organization_id=organization_id, document_id=document_id)
     client.delete(
         collection_name=settings.qdrant_collection,
         points_selector=qmodels.FilterSelector(filter=query_filter),
         wait=True,
     )
+    _mirror_delete(settings, client, query_filter)
     logger.info("deleted document %s for org %s (%d chunks)", document_id, organization_id, before)
     return before
 
@@ -207,8 +223,6 @@ def delete_knowledge_base(
     """
     if not organization_id or not knowledge_base_id:
         raise AppError("TENANT_CONTEXT_MISSING", "organization_id dan knowledge_base_id wajib untuk hapus KB")
-    if not collection_exists_guard(settings):
-        return 0, []
     query_filter = qmodels.Filter(
         must=[
             qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
@@ -216,6 +230,9 @@ def delete_knowledge_base(
         ]
     )
     client = get_client(settings)
+    if not collection_exists_guard(settings):
+        _mirror_delete(settings, client, query_filter)
+        return 0, []
     found = 0
     documents: set = set()
     offset = None
@@ -242,11 +259,54 @@ def delete_knowledge_base(
         points_selector=qmodels.FilterSelector(filter=query_filter),
         wait=True,
     )
+    _mirror_delete(settings, client, query_filter)
     logger.info(
         "deleted knowledge base %s for org %s (%d chunks, %d documents)",
         knowledge_base_id, organization_id, found, len(documents),
     )
     return found, sorted(documents)
+
+
+def count_by_document(
+    settings: Settings,
+    *,
+    organization_id: str,
+    knowledge_base_id: Optional[str] = None,
+) -> Dict[str, int]:
+    """``{document_id: jumlah vektor}`` untuk satu organisasi (opsional satu KB) dalam SATU
+    pemindaian. Qdrant tertanam memindai seluruh koleksi pada setiap panggilan, jadi menghitung
+    per dokumen untuk daftar 500 dokumen = 500 pemindaian penuh."""
+    counts: Dict[str, int] = {}
+    if not organization_id or not collection_exists_guard(settings):
+        return counts
+    conditions = [qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id))]
+    if knowledge_base_id:
+        conditions.append(
+            qmodels.FieldCondition(key="knowledge_base_id", match=qmodels.MatchValue(value=knowledge_base_id))
+        )
+    client = get_client(settings)
+    offset = None
+    try:
+        while True:
+            records, offset = client.scroll(
+                collection_name=settings.qdrant_collection,
+                scroll_filter=qmodels.Filter(must=conditions),
+                limit=2048,
+                offset=offset,
+                with_payload=["document_id", "organization_id"],
+                with_vectors=False,
+            )
+            for record in records:
+                payload = record.payload or {}
+                if payload.get("organization_id") != organization_id:
+                    continue
+                document_id = str(payload.get("document_id") or "")
+                counts[document_id] = counts.get(document_id, 0) + 1
+            if offset is None or not records:
+                break
+    except Exception as exc:  # noqa: BLE001 - penghitung pelengkap, bukan sumber kebenaran
+        logger.warning("hitung vektor per dokumen gagal: %s", exc)
+    return counts
 
 
 def count_document(

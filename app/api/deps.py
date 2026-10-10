@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -74,6 +75,13 @@ class Services:
                 logger.info("pembangunan ulang BM25 selesai: %s", done)
         except Exception as exc:  # noqa: BLE001 - pemeliharaan, bukan jalur wajib
             logger.warning("pembangunan ulang BM25 gagal: %s", exc)
+        try:
+            started = time.perf_counter()
+            warmed = self.sparse.warm()
+            if warmed:
+                logger.info("indeks BM25 dipanaskan: %d KB dalam %.1f dtk", warmed, time.perf_counter() - started)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pemanasan indeks BM25 gagal: %s", exc)
 
     async def shutdown(self) -> None:
         await self.worker.stop()

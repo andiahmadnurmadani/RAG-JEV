@@ -143,3 +143,32 @@ def strip_foreign_tokens(text: str, tokens: Iterable[str]) -> str:
     cleaned = re.sub(r"\[\s*\]", "", cleaned)
     cleaned = re.sub(r"^[ \t]*[-*|]\s*$", "", cleaned, flags=re.MULTILINE)
     return clean_text(cleaned)
+
+
+# Batas isi arsip Office (docx/xlsx/pptx/odt) SETELAH dibuka. Arsip zip 32 MB bisa mengembang
+# ribuan kali lipat ("bom dekompresi") dan membuat satu-satunya container kehabisan memori.
+MAX_UNZIPPED_BYTES = 400 * 1024 * 1024
+MAX_COMPRESSION_RATIO = 200
+
+
+def open_zip(content: bytes):
+    """``zipfile.ZipFile`` dengan pemeriksaan ukuran isi sebelum satu byte pun dibuka."""
+    import io
+    import zipfile
+
+    from app.core.errors import AppError
+
+    archive = zipfile.ZipFile(io.BytesIO(content))
+    total = 0
+    for info in archive.infolist():
+        total += max(0, int(info.file_size))
+        ratio = info.file_size / max(1, info.compress_size)
+        if info.file_size > 10 * 1024 * 1024 and ratio > MAX_COMPRESSION_RATIO:
+            archive.close()
+            raise AppError("PAYLOAD_TOO_LARGE", "berkas terkompresi tidak wajar (rasio isi terlalu besar)",
+                           details={"member": info.filename})
+    if total > MAX_UNZIPPED_BYTES:
+        archive.close()
+        raise AppError("PAYLOAD_TOO_LARGE", "isi berkas setelah dibuka terlalu besar",
+                       details={"unzipped_mb": round(total / 1024 / 1024)})
+    return archive

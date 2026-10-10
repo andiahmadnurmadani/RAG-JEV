@@ -121,13 +121,24 @@ def _require_admin(context: TrustedContext, settings: Settings) -> None:
     Pengaturan membuat kunci biasa tidak bisa mengelola apa pun (termasuk membuat kunci baru).
     Setel ``CONSOLE_API_KEY_ONLY=false`` untuk kembali ke pemeriksaan izin ``admin``.
     """
-    if settings.console_api_key_only:
-        # Mode satu-operator: kunci milik organisasi operator (atau berizin admin) membuka
-        # Pengaturan. Kunci TENANT lain tidak: setelan ini global, jadi tenant mana pun yang bisa
-        # mengubahnya ikut mengubah model, prompt, dan kunci untuk semua tenant lain.
-        if context.has_permission("admin") or context.organization_id == settings.ui_session_organization_id:
-            return
-    context.require("admin")
+    forbidden = AppError("AUTH_FORBIDDEN", "Pengaturan hanya untuk operator layanan", details={"permission": "admin"})
+    # Kunci proyek (terikat ke KB tertentu) tidak pernah mengelola layanan: kunci itu dibagikan
+    # ke aplikasi, dan admin = bisa membuat kunci baru tanpa ikatan.
+    if getattr(context, "knowledge_base_ids", None):
+        raise forbidden
+    if _is_superuser(context):
+        return
+    # Setelan ini global (model, prompt, kunci untuk SEMUA tenant): kunci tenant lain - bahkan
+    # yang berizin admin di organisasinya sendiri - tidak boleh mengubahnya.
+    if context.organization_id != settings.ui_session_organization_id:
+        raise forbidden
+    if context.has_permission("admin"):
+        return
+    # Mode satu-operator: kunci tulis milik organisasi operator dianggap operator. Kunci
+    # hanya-baca (dipasang di aplikasi chat) tidak.
+    if settings.console_api_key_only and context.has_permission("write"):
+        return
+    raise forbidden
 
 
 def _is_superuser(context: TrustedContext) -> bool:
@@ -199,6 +210,10 @@ def _validate_embedding(updates: Dict[str, Dict[str, Any]]) -> None:
     if provider:
         section["provider"] = provider
     model = str(section.get("model") or "").strip()
+    if "model" in section and not model:
+        # Model kosong yang tersimpan = nama koleksi "...__model" dan embedder rusak di SETIAP
+        # permintaan dan setiap restart. Kosong berarti "tidak diubah".
+        section.pop("model")
     if model and model not in SUPPORTED_MODELS:
         raise AppError(
             "VALIDATION_ERROR", "model embedding tidak didukung", details={"allowed": sorted(SUPPORTED_MODELS)}
@@ -365,8 +380,15 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
                 details={"allowed": list(KNOWN_REASONS)},
             )
     for field, (low, high) in {"retention_days": (0, 3650), "max_entries": (100, 100_000)}.items():
-        if field in unanswered and not low <= int(unanswered[field]) <= high:
+        if field not in unanswered:
+            continue
+        try:
+            value = int(unanswered[field])
+        except (TypeError, ValueError) as exc:
+            raise AppError("VALIDATION_ERROR", f"{field} harus berupa angka bulat") from exc
+        if not low <= value <= high:
             raise AppError("VALIDATION_ERROR", f"{field} harus antara {low} dan {high}")
+        unanswered[field] = value
 
     llm = updates.get("llm") or {}
     if "max_tokens" in llm:

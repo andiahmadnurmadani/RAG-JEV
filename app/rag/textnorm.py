@@ -16,8 +16,10 @@ Tiga hal yang dulu membuat pencarian meleset:
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import re
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 
 # Kata yang tersusun dari huruf/angka, boleh disambung - . / , (kode, tanggal, nominal).
 _COMPOUND_RE = re.compile(r"\w+(?:[-./,]\w+)*", re.UNICODE)
@@ -204,9 +206,17 @@ def keywords(text: str) -> List[str]:
     ]
 
 
+@lru_cache(maxsize=200_000)
+def _term_forms_cached(token: str) -> Tuple[str, ...]:
+    return tuple([token] + stem_variants(token))
+
+
 def term_forms(token: str) -> List[str]:
-    """Token + bentuk dasarnya - satu "istilah" yang bisa cocok lewat bentuk mana pun."""
-    return [token] + stem_variants(token)
+    """Token + bentuk dasarnya - satu "istilah" yang bisa cocok lewat bentuk mana pun.
+
+    Di-cache: kosakata knowledge hanya puluhan ribu kata, tetapi membangun indeks KB besar
+    memanggil fungsi ini jutaan kali (30 ribu potongan x 180 kata)."""
+    return list(_term_forms_cached(token))
 
 
 def index_terms(text: str) -> List[str]:

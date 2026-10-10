@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.parsing.sanitize import open_zip
 from app.core.errors import AppError
 from app.parsing import doc_binary, ppt_binary, sheet_dates, xls_binary
 from app.parsing.formats import EXTENSION_MAP
@@ -263,7 +264,7 @@ def _docx_extra_parts(archive: "zipfile.ZipFile", names: set) -> List[tuple]:
 def parse_docx(content: bytes, document_name: str) -> ParsedDocument:
     """Baca seluruh bagian .docx (badan, header/footer, catatan, komentar) tanpa python-docx."""
     try:
-        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        with open_zip(content) as archive:
             names = set(archive.namelist())
             xml = archive.read("word/document.xml").decode("utf-8", "ignore")
             extras = _docx_extra_parts(archive, names)
@@ -429,7 +430,7 @@ def _sheet_extras(archive: "zipfile.ZipFile", names: set, member: str) -> List[s
 def parse_xlsx(content: bytes, document_name: str) -> ParsedDocument:
     """Excel modern (.xlsx/.xlsm): baca sharedStrings + setiap sheet, satu sheet satu halaman."""
     try:
-        archive = zipfile.ZipFile(io.BytesIO(content))
+        archive = open_zip(content)
     except Exception as exc:  # noqa: BLE001
         raise AppError("INDEXING_FAILED", f"Unreadable .xlsx: {exc}") from exc
     with archive:
@@ -496,7 +497,7 @@ def parse_xlsx(content: bytes, document_name: str) -> ParsedDocument:
 def parse_pptx(content: bytes, document_name: str) -> ParsedDocument:
     """PowerPoint modern (.pptx): teks per slide + catatan pembicara, satu slide satu halaman."""
     try:
-        archive = zipfile.ZipFile(io.BytesIO(content))
+        archive = open_zip(content)
     except Exception as exc:  # noqa: BLE001
         raise AppError("INDEXING_FAILED", f"Unreadable .pptx: {exc}") from exc
 
@@ -564,7 +565,7 @@ def _odf_cell_value(attributes: str, inner: str) -> str:
 def parse_odf(content: bytes, document_name: str) -> ParsedDocument:
     """OpenDocument (.odt/.ods/.odp): content.xml + gaya (header/footer) + meta."""
     try:
-        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        with open_zip(content) as archive:
             names = set(archive.namelist())
             raw = archive.read("content.xml").decode("utf-8", "ignore")
             styles_xml = archive.read("styles.xml").decode("utf-8", "ignore") if "styles.xml" in names else ""
@@ -708,7 +709,7 @@ def parse_rtf(content: bytes, document_name: str) -> ParsedDocument:
 def parse_epub(content: bytes, document_name: str) -> ParsedDocument:
     """EPUB: ikuti spine OPF supaya urutan bab benar; satu bab satu halaman."""
     try:
-        archive = zipfile.ZipFile(io.BytesIO(content))
+        archive = open_zip(content)
     except Exception as exc:  # noqa: BLE001
         raise AppError("INDEXING_FAILED", f"Unreadable .epub: {exc}") from exc
     with archive:

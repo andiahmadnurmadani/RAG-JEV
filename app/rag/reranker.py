@@ -100,8 +100,11 @@ class LexicalReranker(BaseReranker):
             return []
         query_tokens = unique(keywords(query))
         if not query_tokens:
-            total = len(documents)
-            return [1.0 - (index / max(1, total)) for index in range(total)]
+            # Kueri tanpa kata bermakna ("Apa itu?", "Contohnya?"): tidak ada bukti kecocokan kata.
+            # Dulu diberi skor menurun palsu (1,0; 0,99; ...) sehingga selalu lolos gerbang
+            # relevansi dan potongan acak dikirim ke model. Penentunya kini kemiripan makna (bila
+            # embedder semantik), atau riwayat percakapan untuk pertanyaan lanjutan.
+            return [0.0] * len(documents)
 
         forms = {token: term_forms(token) for token in query_tokens}
         doc_maps = [positions(document) for document in documents]

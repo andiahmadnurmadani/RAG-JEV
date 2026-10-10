@@ -55,6 +55,8 @@ def _configure_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "SESSIONS_PATH": str(tmp_path / "sessions.json"),
         "BOOTSTRAP_ADMIN_KEY_PATH": str(tmp_path / "bootstrap_admin_key.json"),
         "INDEXING_WORKERS": "1",
+        # org_a = organisasi operator di pengujian: kunci admin org_a mengelola setelan global.
+        "UI_SESSION_ORGANIZATION_ID": "org_a",
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)

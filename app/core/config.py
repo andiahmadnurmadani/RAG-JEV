@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     embedding_provider: Literal["sentence_transformers", "fastembed", "http", "hash"] = "fastembed"
     embedding_model: str = "BAAI/bge-m3"
     embedding_fastembed_model: str = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    # Diisi otomatis selama migrasi embedding: koleksi sumber yang masih disalin (penghapusan
+    # ikut diterapkan di sana). Bukan untuk disetel manual.
+    qdrant_migration_source: str = ""
     embedding_dim: int = 0                    # 0 => detected from the model
     embedding_batch_size: int = 16
     embedding_device: str = "cpu"             # cpu | cuda
@@ -300,6 +303,10 @@ class Settings(BaseSettings):
     worker_concurrency: int = 1
     worker_poll_seconds: float = 0.5
     indexing_workers: int = 1
+    # Batas antrean pengindeksan (jumlah job dan total isi base64 yang menunggu di RAM). Lewat
+    # batas, unggahan baru ditolak 429 "coba lagi" alih-alih membuat container kehabisan memori.
+    indexing_max_queued: int = 1000
+    indexing_max_queued_mb: int = 1024
     # Jalur terpisah untuk membuat ringkasan. Ringkasan memanggil LLM (puluhan kali untuk
     # dokumen besar), jadi kalau ia dikerjakan di worker indeks yang sama, unggahan lain
     # mengantri menunggu. Dengan jalur sendiri, isi dokumen tetap diproses berurutan cepat

@@ -36,10 +36,11 @@ def _entry_for(client, key_id: str) -> dict:
 # Siapa yang boleh menyentuh kunci
 # --------------------------------------------------------------------------- #
 def test_operator_org_keys_may_list_keys_in_api_key_only_mode(client, settings):
-    """Mode satu operator: kunci organisasi operator mengelola kunci walau tanpa izin admin;
-    kunci tenant lain (tanpa admin) tidak."""
+    """Mode satu operator: kunci TULIS organisasi operator mengelola kunci; kunci hanya-baca
+    (dipasang di aplikasi chat) dan kunci tenant lain tidak."""
     settings.ui_session_organization_id = "org_a"
-    assert _list(client, READ_ONLY_KEY).status_code == 200
+    assert _list(client, TENANT_A_KEY).status_code == 200
+    assert _list(client, READ_ONLY_KEY).status_code == 403
     assert _list(client, TENANT_B_KEY).status_code == 403
 
 
@@ -61,13 +62,15 @@ def test_a_key_of_another_org_cannot_be_revoked(client):
 
 
 def test_a_key_cannot_grant_more_than_it_has(client, settings):
-    """K1: kunci read tidak boleh membuat kunci '*' / admin (eskalasi dua langkah)."""
-    settings.ui_session_organization_id = "org_a"
-    for permissions in (["*"], ["admin"], ["read", "write"]):
-        response = _create(client, READ_ONLY_KEY, permissions=permissions)
+    """K1: kunci tanpa admin tidak boleh membuat kunci '*' / admin (eskalasi dua langkah)."""
+    settings.ui_session_organization_id = "org_b"
+    for permissions in (["*"], ["admin"]):
+        response = _create(client, TENANT_B_KEY, permissions=permissions)
         assert response.status_code == 403, (permissions, response.text)
-    assert _create(client, READ_ONLY_KEY, permissions=["read"]).status_code == 200
-    # Kunci admin pun tidak bisa membuat kunci '*'.
+    assert _create(client, TENANT_B_KEY, permissions=["read", "write"]).status_code == 200
+    # Kunci hanya-baca tidak mengelola kunci sama sekali; kunci admin pun tidak bisa membuat '*'.
+    settings.ui_session_organization_id = "org_a"
+    assert _create(client, READ_ONLY_KEY, permissions=["read"]).status_code == 403
     assert _create(client, TENANT_A_KEY, permissions=["*"]).status_code == 403
 
 

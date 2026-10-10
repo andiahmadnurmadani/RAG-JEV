@@ -154,6 +154,11 @@ def create_app() -> FastAPI:
         path = request.url.path
         if path == "/ui" or path.startswith(("/ui/", "/guide/")):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        # Konsol menyimpan kunci API di peramban: jangan bisa dibingkai situs lain (clickjacking),
+        # jangan biarkan peramban menebak tipe berkas, jangan kirim alamat lengkap ke situs luar.
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         return response
 
     @app.exception_handler(AppError)

@@ -321,6 +321,15 @@ def scan_injection(text: str) -> List[str]:
     return [marker for marker in INJECTION_MARKERS if marker in lowered]
 
 
+_FENCE_TAG_RE = re.compile(r"</?\s*retrieved_document\s*>", re.IGNORECASE)
+
+
+def _one_line(value: Any) -> str:
+    text = _FENCE_TAG_RE.sub("", str(value or ""))
+    text = text.replace("[CONTENT]", "(CONTENT)").replace("[DOCUMENT]", "(DOCUMENT)")
+    return " ".join(text.split())
+
+
 def fence_document(
     chunk_id: str,
     document_name: str,
@@ -335,6 +344,11 @@ def fence_document(
     Semua keterangan (bagian, halaman, posisi) ada di header SEBELUM isi, di dalam batas blok -
     model membaca "ini bagian apa" lebih dulu, dan tidak ada label yang tercecer di luar blok.
     """
+    # Isi dokumen tidak boleh bisa "menutup" bloknya sendiri lalu menyisipkan perintah di luar
+    # batas: tag pembatas di dalam isi dijinakkan, dan field header dibuat satu baris.
+    content = _FENCE_TAG_RE.sub(lambda m: m.group(0).replace("<", "\u2039").replace(">", "\u203a"), str(content or ""))
+    document_name = _one_line(document_name)
+    section = _one_line(section)
     header = [f"Name: {document_name}"]
     if section:
         header.append(f"Section: {section}")
