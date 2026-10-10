@@ -307,11 +307,13 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
         "context_neighbor_chunks": (0, 5),
         "context_full_document_tokens": (0, 50_000),
         "context_expand_max_documents": (1, 10),
+        "max_context_documents": (1, 20),
     }
     float_limits = {
         "min_relevance": (0.0, 1.0),
         "relevance_threshold": (0.0, 1.0),
         "hash_dense_weight": (0.0, 1.0),
+        "document_focus_ratio": (0.0, 1.0),
     }
     for field, (low, high) in float_limits.items():
         if not section or field not in section:

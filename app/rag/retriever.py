@@ -15,6 +15,7 @@ pipeline even if an index were poisoned.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -137,6 +138,39 @@ def chunk_position(chunk_id: str, payload: Optional[Dict[str, Any]] = None) -> i
         return index
     digits = str(chunk_id or "").rsplit("_", 1)[-1]
     return int(digits) if digits.isdigit() else 0
+
+
+# Pertanyaan yang memang meminta beberapa dokumen sekaligus: fokus dokumen dilonggarkan.
+_MULTI_DOCUMENT_RE = re.compile(
+    r"\b(banding\w*|perbandingan|bedanya|perbedaan|beda|persamaan|versus|vs|masing-masing|"
+    r"semua\s+(dokumen|cabang|unit|divisi|wilayah)|setiap\s+(dokumen|cabang|unit|divisi|wilayah)|"
+    r"compare|comparison|difference|each)\b",
+    re.IGNORECASE,
+)
+
+
+def wants_multiple_documents(query: str) -> bool:
+    return bool(_MULTI_DOCUMENT_RE.search(query or ""))
+
+
+def _focus_documents(candidates: Sequence[Candidate], ratio: float, limit: int) -> List[Candidate]:
+    """Hanya dokumen yang skor terbaiknya dekat dengan dokumen teratas, paling banyak ``limit``.
+
+    Saat knowledge berisi ribuan dokumen, potongan dari banyak dokumen yang "agak mirip" lolos
+    ambang per potongan: konteks berisi ~10 dokumen dan hanya ~16% darinya dokumen yang benar,
+    sehingga jawaban model rawan mencampur fakta. Penyaringan per DOKUMEN menjaga konteks fokus;
+    dokumen yang skornya setara tetap ikut (pertanyaan yang memang menyangkut beberapa dokumen).
+    """
+    best: Dict[str, float] = {}
+    for candidate in candidates:
+        if candidate.document_id not in best or candidate.score > best[candidate.document_id]:
+            best[candidate.document_id] = candidate.score
+    if not best:
+        return list(candidates)
+    top = max(best.values())
+    ranked = sorted(best.items(), key=lambda item: item[1], reverse=True)
+    keep = {document for document, score in ranked[: max(1, limit)] if score >= top * ratio}
+    return [candidate for candidate in candidates if candidate.document_id in keep]
 
 
 def _dedupe_by_document(candidates: Sequence[Candidate], max_per_document: int) -> List[Candidate]:
@@ -296,7 +330,14 @@ class Retriever:
             result.reranked = settings.reranker_provider != "none"
             result.reranker_used = self._reranker.name
 
-        candidates = _dedupe_by_document(candidates, settings.max_chunks_per_document)[:final_k]
+        candidates = _dedupe_by_document(candidates, settings.max_chunks_per_document)
+        if rerank and settings.reranker_provider != "none":
+            ratio = float(settings.document_focus_ratio)
+            limit = int(settings.max_context_documents)
+            if wants_multiple_documents(query):
+                ratio, limit = ratio * 0.6, max(limit, 6)
+            candidates = _focus_documents(candidates, ratio, limit)
+        candidates = candidates[:final_k]
         result.candidates = candidates
         result.best_score = max(
             ((candidate.rerank_score if candidate.rerank_score is not None else candidate.score) for candidate in candidates),

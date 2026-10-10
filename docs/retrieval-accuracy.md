@@ -164,3 +164,41 @@ Qdrant sendiri (`knowledge_chunks__<model>`); seluruh potongan koleksi aktif seb
 di latar belakang dari isi yang tersimpan, tanpa unggah ulang. Progres di `GET /settings`
 (`embedding_status`) dan `/ready`. Koleksi lama tidak dihapus. Setelan dari layar mengalahkan env
 `EMBEDDING_PROVIDER`.
+
+## Siap untuk ribuan dokumen: fokus dokumen
+
+Diuji dengan **1032 dokumen** dalam satu knowledge base: 32 dokumen asli + 1000 dokumen pengalih
+yang sengaja dibuat mirip (cuti melahirkan/cuti besar vs cuti tahunan, tunjangan shift vs lembur,
+kunjungan tamu vs absensi, dst.), embedder mpnet, reranker leksikal.
+
+| Ukuran | Sebelum | Sesudah |
+|---|---|---|
+| Dokumen berbeda di konteks (rata-rata) | 9,91 | **1,4** (maks 3) |
+| Porsi konteks dari dokumen yang benar | 0,16 | **0,85** |
+| Dokumen benar ada di konteks | 44/45 | 44/45 |
+| Dokumen benar di peringkat 1 | 41/45 | **42/45** |
+| Fakta jawaban sampai ke konteks / di blok pertama | 23/23 / 23/23 | 23/23 / 23/23 |
+| Pertanyaan yang datanya ada tapi ditolak | 0 | 0 |
+| Waktu per pertanyaan (tanpa LLM) | 0,46 dtk | 0,41 dtk |
+
+Masalah sebelumnya: setiap potongan dinilai sendiri-sendiri, sehingga dengan ribuan dokumen
+banyak potongan "agak mirip" lolos dan model membaca ~10 dokumen sekaligus, hanya 16% darinya
+dokumen yang benar - jawaban rawan bercampur.
+
+Perubahan:
+
+- **Fokus dokumen** (`document_focus_ratio` 0,8, `max_context_documents` 3): dokumen lain hanya
+  ikut dibaca bila skor terbaiknya >= 80% dokumen teratas, paling banyak 3 dokumen. Pertanyaan
+  perbandingan ("perbedaan", "bandingkan", "setiap cabang", ...) otomatis dilonggarkan
+  (rasio x 0,6, sampai 6 dokumen). Bisa disetel di Pengaturan -> Kualitas jawaban.
+- **Kolam kandidat lebih dalam**: pencarian vektor & kata kunci masing-masing 60 (dulu 30),
+  reranker menilai 120 kandidat. Dengan 1000 dokumen pengalih, dokumen SOP cuti untuk
+  "siapa yang menyetujui izin cuti" ada di peringkat 56 (vektor) / 64 (kata kunci) dan dulu
+  tidak pernah sampai ke reranker.
+- **Aturan prompt**: model dilarang menggabungkan fakta dari dokumen berbeda kecuali diminta
+  membandingkan; bila nilai berbeda antar cabang/unit/tahun, jawab dari dokumen yang sesuai
+  pertanyaan atau sebutkan masing-masing beserta nama dokumennya.
+
+Batas yang tersisa: 3 dari 8 pertanyaan di luar knowledge lolos gerbang skor pada korpus 1000
+dokumen (topiknya mirip pengalih, mis. "kendaraan dinas"). Itu tetap dijawab "tidak ditemukan"
+oleh model karena aturan strict grounding, tetapi memakai satu panggilan LLM.

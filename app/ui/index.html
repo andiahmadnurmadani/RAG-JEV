@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261011a">
+<link rel="stylesheet" href="style.css?v=20261011b">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -648,6 +648,16 @@
             <input type="number" id="s-expand-docs" min="1" max="10" step="1" value="3">
             <span class="help">Berapa dokumen teratas yang dilengkapi dengan bagian sekitarnya.</span>
           </div>
+          <div class="field">
+            <label for="s-max-docs">Maks. dokumen berbeda dalam satu jawaban</label>
+            <input type="number" id="s-max-docs" min="1" max="20" step="1" value="3">
+            <span class="help">Batas jumlah dokumen yang boleh dibaca model untuk satu pertanyaan. Kecil = jawaban tidak bercampur antar dokumen, penting saat knowledge berisi ratusan&ndash;ribuan file.</span>
+          </div>
+          <div class="field">
+            <label for="s-focus">Fokus dokumen <output class="val" id="s-focus-val"></output></label>
+            <input type="range" id="s-focus" min="0" max="1" step="0.05" value="0.8">
+            <span class="help">Dokumen lain hanya ikut dibaca bila skornya &ge; (skor dokumen teratas &times; nilai ini). Naikkan bila jawaban masih tercampur; turunkan bila jawaban sering hanya separuh karena datanya tersebar di beberapa dokumen. 0 = matikan.</span>
+          </div>
         </div>
         <div class="row">
           <label class="switch" for="s-expand"><input type="checkbox" id="s-expand" checked><span class="track"></span><span>Lengkapi hasil dengan bagian sekitarnya (dan dokumen utuh bila pertanyaan meminta "seluruh/daftar lengkap")</span></label>
@@ -967,7 +977,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261011a"></script>
-<script src="app.js?v=20261011a"></script>
+<script src="markdown.js?v=20261011b"></script>
+<script src="app.js?v=20261011b"></script>
 </body>
 </html>

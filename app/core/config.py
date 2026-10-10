@@ -102,8 +102,8 @@ class Settings(BaseSettings):
     rerank_threshold: float = 0.35
     strict_grounding: bool = True
     # aliases used by the retrieval module (env: RETRIEVAL_DENSE_TOP_K, ...)
-    retrieval_dense_top_k: int = 30
-    retrieval_sparse_top_k: int = 30
+    retrieval_dense_top_k: int = 60
+    retrieval_sparse_top_k: int = 60
     retrieval_hybrid: bool = True
     retrieval_dense_enabled: bool = True
     dense_weight: float = 1.0
@@ -122,7 +122,11 @@ class Settings(BaseSettings):
     semantic_floor: float = 0.25
     semantic_ceil: float = 0.80
     reranker_enabled: bool = True
-    reranker_candidates: int = 60
+    reranker_candidates: int = 120
+    # Fokus dokumen: hanya dokumen dengan skor terbaik >= (dokumen teratas x rasio), paling banyak
+    # N dokumen. Mencegah konteks bercampur saat knowledge berisi ribuan dokumen.
+    document_focus_ratio: float = 0.8
+    max_context_documents: int = 3
     # Berapa banyak potongan dari SATU dokumen yang boleh masuk konteks. Batas kecil membuat
     # pertanyaan "seluruh isi dokumen ini" mustahil dijawab: pertanyaan seperti itu butuh
     # dokumennya utuh, bukan tiga potongan paling mirip.

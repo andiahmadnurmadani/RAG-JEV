@@ -79,6 +79,9 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "context_full_document_tokens": ("context_full_document_tokens", "int"),
         "context_expand_max_documents": ("context_expand_max_documents", "int"),
         "hash_dense_weight": ("hash_dense_weight", "float"),
+        # Fokus dokumen: mencegah jawaban mencampur isi banyak dokumen saat knowledge besar.
+        "document_focus_ratio": ("document_focus_ratio", "float"),
+        "max_context_documents": ("max_context_documents", "int"),
     },
     # Ringkasan dokumen (knowledge turunan). Global seperti setelan lain: satu tenant yang
     # menyalakannya memakai kuota model bersama, dan ringkasannya tersimpan di indeks bersama.

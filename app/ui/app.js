@@ -22,13 +22,16 @@ const EVAL_KEY = "rag.console.eval.v1";
 const PRESETS = {
   accurate: { min_relevance: 0.3, relevance_threshold: 0.35, final_top_k: 12, context_neighbor_chunks: 1,
     context_full_document_tokens: 3000, context_max_tokens: 24000, max_chunks_per_document: 8,
-    context_expand_max_documents: 3, context_expand_documents: true, strict_grounding: true },
+    context_expand_max_documents: 3, context_expand_documents: true, strict_grounding: true,
+    max_context_documents: 3, document_focus_ratio: 0.8 },
   balanced: { min_relevance: 0.2, relevance_threshold: 0.25, final_top_k: 15, context_neighbor_chunks: 1,
     context_full_document_tokens: 3000, context_max_tokens: 24000, max_chunks_per_document: 8,
-    context_expand_max_documents: 3, context_expand_documents: true, strict_grounding: true },
+    context_expand_max_documents: 3, context_expand_documents: true, strict_grounding: true,
+    max_context_documents: 3, document_focus_ratio: 0.75 },
   complete: { min_relevance: 0.25, relevance_threshold: 0.3, final_top_k: 20, context_neighbor_chunks: 2,
     context_full_document_tokens: 8000, context_max_tokens: 48000, max_chunks_per_document: 12,
-    context_expand_max_documents: 4, context_expand_documents: true, strict_grounding: true },
+    context_expand_max_documents: 4, context_expand_documents: true, strict_grounding: true,
+    max_context_documents: 4, document_focus_ratio: 0.7 },
 };
 
 const state = {
@@ -1776,10 +1779,11 @@ function resetBrowserOptions() {
 }
 
 function syncRangeLabels() {
-  [["s-min-relevance", "s-min-relevance-val"], ["s-rel-threshold", "s-rel-threshold-val"], ["s-hash-weight", "s-hash-weight-val"]]
+  [["s-min-relevance", "s-min-relevance-val"], ["s-rel-threshold", "s-rel-threshold-val"], ["s-hash-weight", "s-hash-weight-val"], ["s-focus", "s-focus-val"]]
     .forEach((pair) => {
       const value = Number($(pair[0]).value);
-      $(pair[1]).textContent = pair[0] === "s-min-relevance" && value === 0 ? "mati" : value.toFixed(2);
+      const off = (pair[0] === "s-min-relevance" || pair[0] === "s-focus") && value === 0;
+      $(pair[1]).textContent = off ? "mati" : value.toFixed(2);
     });
 }
 
@@ -1797,6 +1801,8 @@ function renderRetrievalService(retrieval) {
   setNumber("s-fulldoc", retrieval.context_full_document_tokens);
   setNumber("s-expand-docs", retrieval.context_expand_max_documents);
   setNumber("s-hash-weight", retrieval.hash_dense_weight);
+  setNumber("s-max-docs", retrieval.max_context_documents);
+  setNumber("s-focus", retrieval.document_focus_ratio);
   $("s-expand").checked = retrieval.context_expand_documents !== false;
   $("s-reranker").checked = retrieval.reranker_enabled !== false;
   $("s-strict").checked = retrieval.strict_grounding !== false;
@@ -1816,6 +1822,8 @@ function collectRetrieval() {
     context_full_document_tokens: Number($("s-fulldoc").value),
     context_expand_max_documents: Number($("s-expand-docs").value) || 3,
     hash_dense_weight: Number($("s-hash-weight").value),
+    max_context_documents: Number($("s-max-docs").value) || 3,
+    document_focus_ratio: Number($("s-focus").value),
     context_expand_documents: $("s-expand").checked,
     reranker_enabled: $("s-reranker").checked,
     reranker_provider: $("s-reranker-provider").value,
@@ -2657,7 +2665,7 @@ function wire() {
   document.querySelectorAll("[data-preset]").forEach((button) => {
     button.addEventListener("click", () => applyPreset(button.dataset.preset));
   });
-  ["s-min-relevance", "s-rel-threshold", "s-hash-weight"].forEach((id) => $(id).addEventListener("input", () => { syncRangeLabels(); markPreset(); }));
+  ["s-min-relevance", "s-rel-threshold", "s-hash-weight", "s-focus"].forEach((id) => $(id).addEventListener("input", () => { syncRangeLabels(); markPreset(); }));
   ["s-topk", "s-neighbor", "s-fulldoc", "s-context-tokens", "s-maxchunks", "s-expand-docs", "s-expand", "s-strict"]
     .forEach((id) => $(id).addEventListener("change", markPreset));
   $("btn-new-chat").addEventListener("click", newConversation);

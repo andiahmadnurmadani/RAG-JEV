@@ -182,3 +182,29 @@ def test_kata_pembingkai_pertanyaan_tidak_menjatuhkan_skor():
     for query in ("Apa kaitan css dengan html", "Jelaskan pengertian css", "Apa perbedaan html dan css?"):
         assert max(reranker.score(query, docs)) >= 0.6, query
     assert "kaitan" not in keywords("Apa kaitan css dengan html")
+
+
+def test_fokus_dokumen_mencegah_konteks_bercampur():
+    from app.rag.retriever import Candidate, _focus_documents
+
+    def cand(doc, score, n=0):
+        return Candidate(chunk_id=f"{doc}::chunk_{n}", document_id=doc, content=f"{doc} {n}", score=score)
+
+    # dokumen teratas dan satu dokumen yang hampir sama kuat dipertahankan; ekor pengalih dibuang
+    candidates = [cand("sop_cuti", 0.74), cand("sop_cuti", 0.70, 1), cand("cuti_besar", 0.62),
+                  cand("cuti_melahirkan", 0.51), cand("tamu", 0.40)]
+    kept = _focus_documents(candidates, ratio=0.8, limit=3)
+    assert [c.document_id for c in kept] == ["sop_cuti", "sop_cuti", "cuti_besar"]
+    # batas jumlah dokumen berlaku walau skornya rapat
+    close = [cand(f"d{i}", 0.70 - i * 0.001) for i in range(10)]
+    assert len({c.document_id for c in _focus_documents(close, ratio=0.8, limit=3)}) == 3
+    # rasio 0 + batas besar = mati (perilaku lama)
+    assert len(_focus_documents(close, ratio=0.0, limit=99)) == 10
+
+
+def test_pertanyaan_perbandingan_melonggarkan_fokus():
+    from app.rag.retriever import wants_multiple_documents
+
+    assert wants_multiple_documents("Apa perbedaan cuti besar dan cuti melahirkan?")
+    assert wants_multiple_documents("Bandingkan tunjangan shift di setiap cabang")
+    assert not wants_multiple_documents("Siapa yang menyetujui pengajuan cuti?")
