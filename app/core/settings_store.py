@@ -88,6 +88,13 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "max_tokens": ("summary_max_tokens", "int"),
         "max_documents": ("summary_max_documents", "int"),
     },
+    # Pertanyaan yang tidak terjawab: apa yang dicatat dan berapa lama disimpan.
+    "unanswered": {
+        "enabled": ("unanswered_enabled", "bool"),
+        "reasons": ("unanswered_reasons", "list"),
+        "retention_days": ("unanswered_retention_days", "int"),
+        "max_entries": ("unanswered_max_entries", "int"),
+    },
     # Sumber dari web. Global karena crawl membebani jaringan keluar dan situs orang lain -
     # satu tenant yang menaikkannya akan memakai kuota bersama.
     "web": {

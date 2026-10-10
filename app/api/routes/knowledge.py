@@ -280,6 +280,7 @@ def delete_knowledge_base(
     tables = services.tables.delete_knowledge_base(
         organization_id=organization_id, knowledge_base_id=knowledge_base_id
     )
+    services.unanswered.delete_knowledge_base(organization_id=organization_id, knowledge_base_id=knowledge_base_id)
     documents = {record.document_id for record in records} | set(sparse_documents) | set(vector_documents)
     for record in records:
         # Pekerjaan yang masih berjalan melihat tanda ini dan membuang hasilnya (tidak hidup lagi).

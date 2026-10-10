@@ -60,6 +60,8 @@ def query(
         history=[turn.model_dump() for turn in payload.history or []],
     )
 
+    _record_unanswered(services, context, scope.get("knowledge_base_id") or "", payload.query, result)
+
     data = QueryDataOut(
         answer=result.answer,
         grounded=result.grounded,
@@ -81,6 +83,33 @@ def query(
         result.no_answer_reason,
     )
     return ok(data.model_dump())
+
+def _record_unanswered(services, context: TrustedContext, knowledge_base_id: str, query_text: str, result) -> None:
+    """Catat pertanyaan yang berakhir "tidak ditemukan" - bahan operator melengkapi knowledge.
+
+    Kegagalan mencatat tidak boleh menggagalkan jawaban.
+    """
+    settings = services.settings
+    if result.grounded or not settings.unanswered_enabled:
+        return
+    wanted = {item.strip() for item in str(settings.unanswered_reasons or "").split(",") if item.strip()}
+    reason = result.no_answer_reason or ""
+    if reason not in wanted:
+        return
+    try:
+        services.unanswered.record(
+            organization_id=context.organization_id,
+            knowledge_base_id=knowledge_base_id,
+            query=query_text,
+            reason=reason,
+            best_score=(result.usage or {}).get("best_score"),
+            application_id=context.application_id,
+            retention_days=int(settings.unanswered_retention_days or 0),
+            max_entries=int(settings.unanswered_max_entries or 0),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("gagal mencatat pertanyaan tak terjawab: %s", exc)
+
 
 @router.get("/tables")
 def list_tables(

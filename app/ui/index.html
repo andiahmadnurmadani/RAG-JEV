@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261010c">
+<link rel="stylesheet" href="style.css?v=20261010e">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -42,6 +42,9 @@
   <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8 6 12l4 4"/><path d="M6 12h9"/></symbol>
   <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M19 21H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9l6 6v11a1 1 0 0 1-1 1z"/></symbol>
   <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h5l2 3h4l2-3h5"/><path d="M5.5 5h13l2.5 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.6"/><path d="M20 4v4.6h-4.6"/></symbol>
   <symbol id="i-chat-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12.5a7.5 7.5 0 0 1-11.2 6.5L4 20l1.1-4.4A7.5 7.5 0 1 1 20 12.5z"/><path d="M12 9v6M9 12h6"/></symbol>
 </svg>
 
@@ -74,10 +77,11 @@
       <span class="brand-text">RAG Console</span>
     </a>
     <nav class="rail-nav">
-      <a href="#/kbs" data-route="kbs"><svg class="ico"><use href="#i-db"/></svg><span>Knowledge base</span></a>
-      <a href="#/kb" data-route="chat" id="nav-chat"><svg class="ico"><use href="#i-chat"/></svg><span>Chat</span></a>
-      <a href="#/eval" data-route="eval"><svg class="ico"><use href="#i-target"/></svg><span>Uji akurasi</span></a>
-      <a href="#/settings" data-route="settings" id="btn-settings"><svg class="ico"><use href="#i-gear"/></svg><span>Pengaturan</span></a>
+      <a href="#/kbs" data-route="kbs"><span class="nav-ico"><svg class="ico"><use href="#i-db"/></svg></span><span class="lbl-long">Knowledge base</span><span class="lbl-short">KB</span></a>
+      <a href="#/kb" data-route="chat" id="nav-chat"><span class="nav-ico"><svg class="ico"><use href="#i-chat"/></svg></span><span class="lbl-long">Chat</span><span class="lbl-short">Chat</span></a>
+      <a href="#/unanswered" data-route="unanswered"><span class="nav-ico"><svg class="ico"><use href="#i-inbox"/></svg><span class="nav-badge" id="unans-badge" hidden>0</span></span><span class="lbl-long">Tak terjawab</span><span class="lbl-short">Tak jawab</span><span class="nav-count" id="unans-count" hidden>0</span></a>
+      <a href="#/eval" data-route="eval"><span class="nav-ico"><svg class="ico"><use href="#i-target"/></svg></span><span class="lbl-long">Uji akurasi</span><span class="lbl-short">Uji</span></a>
+      <a href="#/settings" data-route="settings" id="btn-settings"><span class="nav-ico"><svg class="ico"><use href="#i-gear"/></svg></span><span class="lbl-long">Pengaturan</span><span class="lbl-short">Atur</span></a>
     </nav>
     <div class="rail-foot">
       <span class="pill" id="conn-pill" title="Status layanan"><span class="dot" id="conn-dot"></span><span id="conn-text">belum tersambung</span></span>
@@ -99,7 +103,7 @@
           </div>
           <div class="page-actions">
             <button class="btn" id="btn-kbs-refresh" type="button"><svg class="ico"><use href="#i-refresh"/></svg><span>Muat ulang</span></button>
-            <button class="btn primary" id="btn-kb-new" type="button"><svg class="ico"><use href="#i-plus"/></svg><span>Knowledge base baru</span></button>
+            <button class="btn primary" id="btn-kb-new" type="button"><svg class="ico"><use href="#i-plus"/></svg><span class="lbl-long">Knowledge base baru</span><span class="lbl-short">KB baru</span></button>
           </div>
         </header>
         <div class="kb-stats" id="kb-stats"></div>
@@ -121,7 +125,15 @@
     </main>
 
     <!-- ================================ ruang kerja KB ================================ -->
-    <main class="view workspace" id="view-chat" hidden>
+    <main class="view workspace ws-show-chat" id="view-chat" hidden>
+      <div class="ws-top">
+        <a class="btn ghost icon sm" href="#/kbs" aria-label="Kembali ke daftar knowledge base"><svg class="ico"><use href="#i-back"/></svg></a>
+        <div class="kb-title"><span class="eyebrow">Knowledge base</span><h2 class="mono" id="kb-current-m">-</h2></div>
+        <span class="seg" role="group" aria-label="Tampilan">
+          <button type="button" data-ws="chat" aria-pressed="true">Chat</button>
+          <button type="button" data-ws="docs" aria-pressed="false">Dokumen <b id="docs-count-m">0</b></button>
+        </span>
+      </div>
       <section class="panel">
         <div class="panel-head">
           <a class="btn ghost icon sm" href="#/kbs" title="Semua knowledge base" aria-label="Kembali ke daftar knowledge base"><svg class="ico"><use href="#i-back"/></svg></a>
@@ -177,6 +189,57 @@
         </div>
       </form>
       </section>
+    </main>
+
+    <!-- =============================== belum terjawab =============================== -->
+    <main class="view" id="view-unanswered" hidden>
+      <div class="page">
+        <header class="page-head">
+          <div>
+            <h1>Pertanyaan tak terjawab</h1>
+            <p>Pertanyaan yang dijawab "tidak ditemukan". Pakai daftar ini untuk melengkapi knowledge: unggah dokumen yang dicari, lalu tandai selesai.</p>
+          </div>
+          <div class="page-actions">
+            <a class="btn" href="#/settings/unans"><svg class="ico"><use href="#i-sliders"/></svg><span>Atur pencatatan</span></a>
+            <button class="btn" id="btn-unans-refresh" type="button"><svg class="ico"><use href="#i-refresh"/></svg><span>Muat ulang</span></button>
+          </div>
+        </header>
+        <div id="unans-recording"></div>
+        <div class="kb-stats compact3" id="unans-stats"></div>
+        <div class="toolbar">
+          <label class="search">
+            <svg class="ico"><use href="#i-search"/></svg>
+            <input type="search" id="unans-search" placeholder="Cari pertanyaan..." aria-label="Cari pertanyaan">
+          </label>
+          <select id="unans-kb" aria-label="Knowledge base" class="toolbar-select"><option value="">Semua knowledge base</option></select>
+        </div>
+        <div class="toolbar">
+          <span class="seg" role="group" aria-label="Status">
+            <button type="button" data-unans-status="open" aria-pressed="true">Terbuka</button>
+            <button type="button" data-unans-status="resolved" aria-pressed="false">Selesai</button>
+            <button type="button" data-unans-status="" aria-pressed="false">Semua</button>
+          </span>
+          <span class="seg" role="group" aria-label="Urutkan">
+            <button type="button" data-unans-sort="recent" aria-pressed="true">Terbaru</button>
+            <button type="button" data-unans-sort="frequent" aria-pressed="false">Tersering</button>
+          </span>
+        </div>
+        <div class="bulk-bar" id="unans-bulk" hidden>
+          <label class="bulk-check"><input type="checkbox" id="unans-all" aria-label="Pilih semua yang tampil"><span id="unans-selected">0 dipilih</span></label>
+          <span class="spacer"></span>
+          <button class="btn sm" type="button" id="btn-unans-resolve"><svg class="ico"><use href="#i-check"/></svg><span>Tandai selesai</span></button>
+          <button class="btn sm" type="button" id="btn-unans-reopen"><svg class="ico"><use href="#i-redo"/></svg><span>Buka lagi</span></button>
+          <button class="btn sm danger" type="button" id="btn-unans-delete"><svg class="ico"><use href="#i-trash"/></svg><span>Hapus</span></button>
+        </div>
+        <div id="unans-status"></div>
+        <ul class="uq-list" id="unans-list"></ul>
+        <p class="empty" id="unans-empty" hidden>Belum ada pertanyaan yang tak terjawab di sini.</p>
+        <div class="row" id="unans-foot" hidden>
+          <button class="btn ghost" type="button" id="btn-unans-more">Tampilkan lebih banyak</button>
+          <span class="spacer"></span>
+          <button class="btn ghost danger-ghost" type="button" id="btn-unans-clear"><svg class="ico"><use href="#i-trash"/></svg><span>Hapus semua yang tampil di filter ini</span></button>
+        </div>
+      </div>
     </main>
 
     <!-- ================================== uji akurasi ================================== -->
@@ -242,6 +305,7 @@
           <button type="button" data-panel="llm" aria-selected="false"><svg class="ico"><use href="#i-cpu"/></svg><span>Model AI</span></button>
           <button type="button" data-panel="jev" aria-selected="false"><svg class="ico"><use href="#i-route"/></svg><span>Jev</span></button>
           <button type="button" data-panel="retr" aria-selected="false"><svg class="ico"><use href="#i-sliders"/></svg><span>Kualitas jawaban</span></button>
+          <button type="button" data-panel="unans" aria-selected="false"><svg class="ico"><use href="#i-inbox"/></svg><span>Tak terjawab</span></button>
           <button type="button" data-panel="fmt" aria-selected="false"><svg class="ico"><use href="#i-file"/></svg><span>Format berkas</span></button>
           <button type="button" data-panel="web" aria-selected="false"><svg class="ico"><use href="#i-globe"/></svg><span>Sumber web</span></button>
           <button type="button" data-panel="summary" aria-selected="false"><svg class="ico"><use href="#i-list"/></svg><span>Ringkasan</span></button>
@@ -645,6 +709,43 @@
           </div>
         </details>
       </section>
+      <section class="group" data-panel="unans" hidden>
+        <div class="group-head">
+          <h2>Pertanyaan tak terjawab</h2>
+          <p>Apa yang dicatat ke halaman <a href="#/unanswered">Tak terjawab</a> dan berapa lama disimpan. Pertanyaan yang sama hanya dicatat sekali (hitungannya yang bertambah).</p>
+        </div>
+        <div class="row">
+          <label class="switch" for="u-enabled"><input type="checkbox" id="u-enabled" checked><span class="track"></span><span>Catat pertanyaan yang tidak terjawab</span></label>
+        </div>
+        <div class="field">
+          <span class="field-label">Catat bila jawabannya berakhir karena</span>
+          <div class="check-list" id="u-reasons">
+            <label><input type="checkbox" value="no_candidates" checked><span><b>Tidak ada dokumen yang cocok</b><small>tidak satu pun kata pertanyaan ada di knowledge</small></span></label>
+            <label><input type="checkbox" value="below_threshold" checked><span><b>Relevansi terlalu rendah</b><small>ada yang mirip, tapi di bawah ambang minimum</small></span></label>
+            <label><input type="checkbox" value="strict_grounding" checked><span><b>Model menyatakan tidak cukup informasi</b><small>dokumen ditemukan, tapi tidak menjawab pertanyaannya</small></span></label>
+            <label><input type="checkbox" value="context_empty" checked><span><b>Konteks kosong</b><small>potongan ditemukan tetapi tidak bisa dibaca</small></span></label>
+            <label><input type="checkbox" value="answer_truncated"><span><b>Jawaban terpotong</b><small>batas token keluaran terlalu kecil (masalah pengaturan, bukan knowledge)</small></span></label>
+            <label><input type="checkbox" value="table_plan_invalid"><span><b>Perhitungan tabel gagal</b><small>kolom yang ditanyakan tidak ada di tabel</small></span></label>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="u-retention">Simpan selama (hari)</label>
+            <input type="number" id="u-retention" min="0" max="3650" step="1" value="90">
+            <span class="help">Pertanyaan yang tidak ditanyakan lagi selama ini dihapus otomatis. 0 = simpan selamanya.</span>
+          </div>
+          <div class="field">
+            <label for="u-max">Maksimal catatan per organisasi</label>
+            <input type="number" id="u-max" min="100" max="100000" step="100" value="5000">
+            <span class="help">Bila penuh, yang paling lama tidak muncul dibuang lebih dulu.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-unans" type="button">Simpan</button>
+          <span id="unans-svc-status"></span>
+        </div>
+      </section>
+
       <section class="group" data-panel="fmt" hidden>
         <div class="group-head">
           <h2>Format berkas</h2>
@@ -732,6 +833,33 @@
     </main>
   </div>
 </div>
+
+<dialog id="dlg-confirm" class="modal">
+  <form method="dialog" class="modal-body">
+    <div class="modal-title danger"><svg class="ico"><use href="#i-warn"/></svg><h2 id="confirm-title">Yakin?</h2></div>
+    <p id="confirm-body"></p>
+    <div class="modal-actions">
+      <button class="btn" value="cancel" type="submit">Batal</button>
+      <button class="btn danger" value="ok" type="submit" id="confirm-ok">Hapus</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-note" class="modal">
+  <form method="dialog" class="modal-body">
+    <h2>Catatan</h2>
+    <p id="note-query" class="quote"></p>
+    <div class="field">
+      <label for="note-text">Catatan untuk pertanyaan ini</label>
+      <textarea id="note-text" rows="4" placeholder="mis. dokumen SOP saham sudah diunggah ke kb_keuangan"></textarea>
+    </div>
+    <label class="switch" for="note-resolve"><input type="checkbox" id="note-resolve"><span class="track"></span><span>Tandai selesai</span></label>
+    <div class="modal-actions">
+      <button class="btn" value="cancel" type="submit">Batal</button>
+      <button class="btn primary" value="ok" type="submit">Simpan catatan</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="dlg-delkb" class="modal">
   <form method="dialog" class="modal-body">
@@ -822,7 +950,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261010c"></script>
-<script src="app.js?v=20261010c"></script>
+<script src="markdown.js?v=20261010e"></script>
+<script src="app.js?v=20261010e"></script>
 </body>
 </html>

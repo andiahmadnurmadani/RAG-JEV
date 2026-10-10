@@ -54,6 +54,7 @@ class SettingsUpdateRequest(BaseModel):
     retrieval: Optional[Dict[str, Any]] = None
     web: Optional[Dict[str, Any]] = None
     summary: Optional[Dict[str, Any]] = None
+    unanswered: Optional[Dict[str, Any]] = None
 
 
 class ModelsProbeRequest(BaseModel):
@@ -306,6 +307,21 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
                 details={field: value},
             )
         section[field] = value
+
+    unanswered = updates.get("unanswered") or {}
+    if "reasons" in unanswered:
+        from app.api.routes.unanswered import KNOWN_REASONS
+
+        unknown = sorted(set(unanswered["reasons"]) - set(KNOWN_REASONS))
+        if unknown:
+            raise AppError(
+                "VALIDATION_ERROR",
+                "alasan tidak dikenal: " + ", ".join(unknown),
+                details={"allowed": list(KNOWN_REASONS)},
+            )
+    for field, (low, high) in {"retention_days": (0, 3650), "max_entries": (100, 100_000)}.items():
+        if field in unanswered and not low <= int(unanswered[field]) <= high:
+            raise AppError("VALIDATION_ERROR", f"{field} harus antara {low} dan {high}")
 
     llm = updates.get("llm") or {}
     if "max_tokens" in llm:

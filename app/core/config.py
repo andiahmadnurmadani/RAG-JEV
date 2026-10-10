@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     # ---- runtime overrides (settings screen) ----------------------------
     table_store_path: str = "data/tables.sqlite"
     table_analytics_enabled: bool = True
+    # ---- pertanyaan yang tidak terjawab (dikumpulkan untuk ditinjau operator) ----
+    unanswered_enabled: bool = True
+    # Alasan "tidak terjawab" yang dicatat (lihat no_answer_reason di /query).
+    unanswered_reasons: str = "no_candidates,below_threshold,strict_grounding,context_empty"
+    unanswered_retention_days: int = 90
+    unanswered_max_entries: int = 5000
+    # Kosong = di samping TABLE_STORE_PATH (volume data yang sama).
+    unanswered_store_path: str = ""
     settings_override_path: str = str(BASE_DIR / "data" / "settings.json")
     # Registry kunci API yang dibuat dari layar Pengaturan (lihat app/core/api_keys.py).
     # Berisi hash kunci, bukan kuncinya; mode 0600.

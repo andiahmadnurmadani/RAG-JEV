@@ -11,6 +11,7 @@ from fastapi import Request
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
+from app.core.unanswered import UnansweredStore, store_path as unanswered_store_path
 from app.jev.router import JevRouter
 from app.jev.tools import JevClient
 from app.qdrant import client as qdrant_client
@@ -37,6 +38,7 @@ class Services:
     jev: JevRouter
     jobs: JobStore
     tables: TableStore
+    unanswered: UnansweredStore
     indexing: IndexingPipeline
     worker: IndexingWorker
     rag: RagPipeline
@@ -75,6 +77,10 @@ class Services:
             self.tables.close()
         except Exception as exc:  # noqa: BLE001 - penutupan store tidak boleh menggagalkan shutdown
             logger.warning("tutup table store gagal: %s", exc)
+        try:
+            self.unanswered.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("tutup penyimpanan pertanyaan tak terjawab gagal: %s", exc)
 
 
 _services: Optional[Services] = None
@@ -91,6 +97,7 @@ def build_services(settings: Optional[Settings] = None) -> Services:
     jev = JevRouter(settings, JevClient(settings))
     jobs = JobStore(settings.job_store_path)
     tables = TableStore(settings.table_store_path)
+    unanswered = UnansweredStore(unanswered_store_path(settings))
     indexing = IndexingPipeline(settings, embedder, sparse, jobs, tables, generator=generator)
     worker = IndexingWorker(settings, indexing, jobs)
     rag = RagPipeline(settings, retriever, generator, jev, tables)
@@ -104,6 +111,7 @@ def build_services(settings: Optional[Settings] = None) -> Services:
         jev=jev,
         jobs=jobs,
         tables=tables,
+        unanswered=unanswered,
         indexing=indexing,
         worker=worker,
         rag=rag,

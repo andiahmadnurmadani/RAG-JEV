@@ -10,9 +10,9 @@
 const KEY = "rag.console.v3";
 const SESSION_KEY = "rag.session.v1";
 const DEFAULT_KB = "kb_chat";
-const PANELS = ["conn", "access", "keys", "llm", "jev", "retr", "fmt", "web", "summary"];
+const PANELS = ["conn", "access", "keys", "llm", "jev", "retr", "unans", "fmt", "web", "summary"];
 const RECENT_KB_KEY = "rag.console.kbs.v1";
-const VIEWS = ["kbs", "chat", "eval", "settings"];
+const VIEWS = ["kbs", "chat", "unanswered", "eval", "settings"];
 // Versi bentuk opsi uji di localStorage. Versi lama memaksa reranker MATI di setiap pertanyaan konsol,
 // sehingga hasil uji berbeda dari yang diterima aplikasi lewat API; opsi lama itu dibuang.
 const OPTS_VERSION = 2;
@@ -49,6 +49,7 @@ const state = {
   evalMode: "search",
   kbs: [],
   kbSort: "recent",
+  unans: { status: "open", sort: "recent", kb: "", q: "", items: [], selected: new Set(), limit: 50, total: 0 },
   view: "",
   evalStop: false,
   limits: { max_mb: null, allowed: [], allowed_ext: [] },
@@ -379,6 +380,7 @@ function parseRoute() {
   const head = parts[0] || "";
   if (head === "settings") return { view: "settings", arg: parts[1] || "" };
   if (head === "eval") return { view: "eval", arg: "" };
+  if (head === "unanswered") return { view: "unanswered", arg: "" };
   if (head === "kb") return { view: "chat", arg: parts.slice(1).join("/") };
   if (head === "chat") return { view: "chat", arg: "" };
   return { view: "kbs", arg: "" };
@@ -393,7 +395,7 @@ function showView(name, arg) {
     ? "#/settings" + (arg ? "/" + arg : "")
     : name === "chat"
       ? "#/kb/" + encodeURIComponent(arg || state.kb)
-      : name === "eval" ? "#/eval" : "#/kbs";
+      : name === "eval" ? "#/eval" : name === "unanswered" ? "#/unanswered" : "#/kbs";
   if (location.hash !== target) location.hash = target;
   else route();
 }
@@ -414,6 +416,8 @@ function route() {
     loadKbs();
   } else if (view === "eval") {
     renderEvalKbs();
+  } else if (view === "unanswered") {
+    loadUnanswered();
   } else if (view === "settings") {
     selectPanel(arg || state.panel, true);
     if (previous !== "settings") {
@@ -423,6 +427,7 @@ function route() {
     }
   }
   if (view !== "chat") window.scrollTo(0, 0);
+  if (view !== "unanswered") refreshUnansweredBadge();
 }
 
 function selectPanel(name, fromRoute) {
@@ -453,6 +458,254 @@ function applyConsoleMode() {
   if (accessPanel) accessPanel.hidden = apiKeyOnly || state.panel !== "access";
   const logout = $("btn-logout");
   if (logout) logout.hidden = apiKeyOnly || !state.session;
+}
+
+/* ----------------------------------------------------- pertanyaan tak terjawab */
+
+const REASON_LABELS = {
+  no_candidates: "tidak ada dokumen cocok",
+  below_threshold: "relevansi rendah",
+  strict_grounding: "konteks tidak cukup",
+  context_empty: "konteks kosong",
+  answer_truncated: "jawaban terpotong",
+  table_plan_invalid: "tabel tidak cocok",
+};
+
+function setUnansweredCount(count) {
+  const label = count > 99 ? "99+" : String(count || 0);
+  ["unans-badge", "unans-count"].forEach((id) => {
+    $(id).textContent = label;
+    $(id).hidden = !count;
+  });
+}
+
+function setWorkspaceTab(tab) {
+  const view = $("view-chat");
+  view.classList.toggle("ws-show-docs", tab === "docs");
+  view.classList.toggle("ws-show-chat", tab !== "docs");
+  document.querySelectorAll("[data-ws]").forEach((button) => {
+    button.setAttribute("aria-pressed", button.dataset.ws === tab ? "true" : "false");
+  });
+}
+
+function confirmDialog(title, html, okLabel) {
+  return new Promise((resolve) => {
+    const box = $("dlg-confirm");
+    $("confirm-title").textContent = title;
+    $("confirm-body").innerHTML = html;
+    $("confirm-ok").textContent = okLabel || "Hapus";
+    box.returnValue = "";
+    const done = () => {
+      box.removeEventListener("close", done);
+      resolve(box.returnValue === "ok");
+    };
+    box.addEventListener("close", done);
+    box.showModal();
+  });
+}
+
+async function refreshUnansweredBadge() {
+  if (!credential()) return;
+  try {
+    const data = await api("GET", "/unanswered?status=open&limit=1");
+    setUnansweredCount(data.open || 0);
+  } catch (err) {
+    setUnansweredCount(0);
+  }
+}
+
+async function loadUnanswered(append) {
+  if (!credential()) {
+    note("unans-status", "warn", "Masuk dengan kode akses, atau tempel <strong>API key</strong> di <a href=\"#/settings/conn\">Pengaturan &rsaquo; Koneksi</a>.");
+    return;
+  }
+  const u = state.unans;
+  if (!append) {
+    u.limit = 50;
+    u.selected.clear();
+  }
+  const params = new URLSearchParams({ sort: u.sort, limit: String(u.limit) });
+  if (u.status) params.set("status", u.status);
+  if (u.kb) params.set("knowledge_base_id", u.kb);
+  if (u.q) params.set("q", u.q);
+  try {
+    const data = await api("GET", "/unanswered?" + params.toString());
+    u.items = data.items || [];
+    u.total = data.total || 0;
+    clearNote("unans-status");
+    renderUnanswered(data);
+    if (!u.kb) setUnansweredCount(data.open || 0);
+  } catch (err) {
+    note("unans-status", "err", escapeHtml(err.message || "gagal memuat") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+}
+
+function renderUnanswered(data) {
+  const u = state.unans;
+  const recording = data.recording || {};
+  if (recording.enabled === false) {
+    note("unans-recording", "warn", "Pencatatan sedang <b>mati</b>: pertanyaan baru yang tidak terjawab tidak dicatat. Nyalakan di <a href=\"#/settings/unans\">Atur pencatatan</a>.");
+  } else {
+    clearNote("unans-recording");
+  }
+  $("unans-stats").innerHTML = [["Terbuka", data.open || 0], ["Selesai", data.resolved || 0], ["Tampil", u.total]]
+    .map((pair) => '<div class="stat"><span class="stat-v">' + escapeHtml(Number(pair[1]).toLocaleString("id-ID")) +
+      '</span><span class="stat-k">' + escapeHtml(pair[0]) + "</span></div>").join("");
+  const select = $("unans-kb");
+  const current = u.kb;
+  select.innerHTML = '<option value="">Semua knowledge base</option>' + (data.knowledge_bases || [])
+    .map((kb) => '<option value="' + escapeHtml(kb) + '"' + (kb === current ? " selected" : "") + ">" + escapeHtml(kb || "(tanpa KB)") + "</option>").join("");
+
+  $("unans-empty").hidden = u.items.length > 0;
+  $("unans-empty").textContent = u.q || u.kb || u.status
+    ? "Tidak ada pertanyaan yang cocok dengan filter ini."
+    : "Belum ada pertanyaan yang tak terjawab. Bagus!";
+  $("unans-foot").hidden = u.items.length === 0;
+  $("btn-unans-more").hidden = u.items.length >= u.total;
+  $("unans-list").innerHTML = u.items.map((item) => {
+    const picked = u.selected.has(item.id);
+    const resolved = item.status === "resolved";
+    const score = typeof item.best_score === "number" ? '<span class="chip mono" title="skor relevansi terbaik">skor ' + item.best_score.toFixed(2) + "</span>" : "";
+    return '<li class="uq-item' + (picked ? " picked" : "") + (resolved ? " resolved" : "") + '" data-id="' + item.id + '">' +
+      '<input type="checkbox" class="uq-check" data-pick="' + item.id + '"' + (picked ? " checked" : "") + ' aria-label="Pilih pertanyaan ini">' +
+      '<div class="uq-main">' +
+      '<p class="uq-query">' + escapeHtml(item.query) + "</p>" +
+      '<div class="uq-meta">' +
+      '<span class="chip"><svg class="ico"><use href="#i-db"/></svg>' + escapeHtml(item.knowledge_base_id || "-") + "</span>" +
+      '<span class="chip warn">' + escapeHtml(REASON_LABELS[item.reason] || item.reason || "-") + "</span>" +
+      (item.count > 1 ? '<span class="chip strong">ditanya ' + item.count + "&times;</span>" : "") +
+      score +
+      (resolved ? '<span class="chip ok"><svg class="ico"><use href="#i-check"/></svg>selesai</span>' : "") +
+      '<span class="uq-time">' + escapeHtml(relativeTime(item.last_seen)) + "</span>" +
+      "</div>" +
+      (item.note ? '<p class="uq-note"><svg class="ico"><use href="#i-note"/></svg>' + escapeHtml(item.note) + "</p>" : "") +
+      "</div>" +
+      '<div class="uq-actions">' +
+      '<button class="btn sm" type="button" data-act="ask" title="Tanya ulang di knowledge base ini"><svg class="ico"><use href="#i-chat"/></svg><span>Tanya ulang</span></button>' +
+      '<button class="btn sm icon" type="button" data-act="note" title="Catatan" aria-label="Catatan"><svg class="ico"><use href="#i-note"/></svg></button>' +
+      (resolved
+        ? '<button class="btn sm icon" type="button" data-act="reopen" title="Buka lagi" aria-label="Buka lagi"><svg class="ico"><use href="#i-redo"/></svg></button>'
+        : '<button class="btn sm icon" type="button" data-act="resolve" title="Tandai selesai" aria-label="Tandai selesai"><svg class="ico"><use href="#i-check"/></svg></button>') +
+      '<button class="btn sm icon danger-ghost" type="button" data-act="delete" title="Hapus" aria-label="Hapus"><svg class="ico"><use href="#i-trash"/></svg></button>' +
+      "</div></li>";
+  }).join("");
+  syncUnansweredSelection();
+}
+
+function syncUnansweredSelection() {
+  const u = state.unans;
+  const count = u.selected.size;
+  $("unans-bulk").hidden = u.items.length === 0;
+  $("unans-selected").textContent = count ? count + " dipilih" : "Pilih semua";
+  $("unans-all").checked = count > 0 && count === u.items.length;
+  $("unans-all").indeterminate = count > 0 && count < u.items.length;
+  ["btn-unans-resolve", "btn-unans-reopen", "btn-unans-delete"].forEach((id) => { $(id).disabled = count === 0; });
+}
+
+async function unansweredAction(ids, action) {
+  if (!ids.length) return;
+  try {
+    if (action === "delete") {
+      const data = await api("POST", "/unanswered/delete", { ids: ids });
+      note("unans-status", "ok", data.deleted + " pertanyaan dihapus.");
+    } else {
+      const status = action === "resolve" ? "resolved" : "open";
+      const data = await api("PATCH", "/unanswered", { ids: ids, status: status });
+      note("unans-status", "ok", data.updated + " pertanyaan " + (status === "resolved" ? "ditandai selesai." : "dibuka lagi."));
+    }
+    const keep = $("unans-status").innerHTML;
+    await loadUnanswered();
+    $("unans-status").innerHTML = keep;
+  } catch (err) {
+    note("unans-status", "err", escapeHtml(err.message || "gagal") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+  }
+}
+
+function askAgain(item) {
+  showView("chat", item.knowledge_base_id || state.kb);
+  setWorkspaceTab("chat");
+  setMode("answer");
+  $("prompt").value = item.query;
+  $("prompt").focus();
+}
+
+function openNote(item) {
+  state.noting = item;
+  $("note-query").textContent = item.query;
+  $("note-text").value = item.note || "";
+  $("note-resolve").checked = item.status === "resolved";
+  $("dlg-note").showModal();
+}
+
+async function saveNote() {
+  const item = state.noting;
+  if (!item) return;
+  try {
+    await api("PATCH", "/unanswered", {
+      ids: [item.id],
+      note: $("note-text").value.trim(),
+      status: $("note-resolve").checked ? "resolved" : "open",
+    });
+    note("unans-status", "ok", "Catatan disimpan.");
+    const keep = $("unans-status").innerHTML;
+    await loadUnanswered();
+    $("unans-status").innerHTML = keep;
+  } catch (err) {
+    note("unans-status", "err", escapeHtml(err.message || "gagal menyimpan catatan"));
+  }
+}
+
+async function clearUnanswered() {
+  const u = state.unans;
+  const scope = (u.kb ? "di <b class=\"mono\">" + escapeHtml(u.kb) + "</b>" : "di semua knowledge base") +
+    (u.status ? " dengan status <b>" + (u.status === "open" ? "terbuka" : "selesai") + "</b>" : "");
+  const sure = await confirmDialog("Hapus semua pertanyaan?",
+    "Semua pertanyaan tak terjawab " + scope + " akan dihapus" + (u.q ? " (filter pencarian tidak dipakai di sini)" : "") +
+    ". Tidak bisa dibatalkan.", "Hapus semua");
+  if (!sure) return;
+  const params = new URLSearchParams({ confirm: "hapus" });
+  if (u.kb) params.set("knowledge_base_id", u.kb);
+  if (u.status) params.set("status", u.status);
+  try {
+    const data = await api("DELETE", "/unanswered?" + params.toString());
+    note("unans-status", "ok", data.deleted + " pertanyaan dihapus.");
+    const keep = $("unans-status").innerHTML;
+    await loadUnanswered();
+    $("unans-status").innerHTML = keep;
+  } catch (err) {
+    note("unans-status", "err", escapeHtml(err.message || "gagal menghapus"));
+  }
+}
+
+function renderUnansweredService(section) {
+  if (!section) return;
+  $("u-enabled").checked = section.enabled !== false;
+  const reasons = section.reasons || [];
+  $("u-reasons").querySelectorAll("input[type=checkbox]").forEach((box) => { box.checked = reasons.indexOf(box.value) !== -1; });
+  if (section.retention_days != null) $("u-retention").value = section.retention_days;
+  if (section.max_entries != null) $("u-max").value = section.max_entries;
+}
+
+async function saveUnansweredService() {
+  const reasons = Array.from($("u-reasons").querySelectorAll("input[type=checkbox]:checked")).map((box) => box.value);
+  if (!reasons.length && $("u-enabled").checked) {
+    note("unans-svc-status", "err", "Pilih minimal satu alasan, atau matikan pencatatan.");
+    return;
+  }
+  try {
+    const data = await api("PUT", "/settings", {
+      unanswered: {
+        enabled: $("u-enabled").checked,
+        reasons: reasons,
+        retention_days: Number($("u-retention").value) || 0,
+        max_entries: Number($("u-max").value) || 5000,
+      },
+    });
+    renderUnansweredService((data.sections || {}).unanswered);
+    note("unans-svc-status", "ok", "Tersimpan dan langsung berlaku.");
+  } catch (err) {
+    note("unans-svc-status", err.code === "AUTH_FORBIDDEN" ? "warn" : "err", escapeHtml(err.message || "gagal menyimpan"));
+  }
 }
 
 /* --------------------------------------------------------- knowledge base */
@@ -492,6 +745,7 @@ function openKnowledgeBase(id) {
   $("set-kb").value = state.kb;
   $("kb-current").textContent = state.kb;
   $("kb-current").title = state.kb;
+  $("kb-current-m").textContent = state.kb;
   document.title = state.kb + " - RAG Console";
   $("nav-chat").setAttribute("href", "#/kb/" + encodeURIComponent(state.kb));
   rememberKb(state.kb);
@@ -741,6 +995,7 @@ function renderDocs(documents) {
   state.picked.forEach((id) => { if (!alive.has(id)) state.picked.delete(id); });
 
   $("docs-count").textContent = String(documents.length);
+  $("docs-count-m").textContent = String(documents.length);
   $("docs-empty").hidden = documents.length > 0;
   $("docs-tools").hidden = documents.length === 0;
 
@@ -1192,6 +1447,7 @@ async function ask(query) {
       renderHits(node, data);
     } else {
       renderAnswer(node, data);
+      if (!data.grounded) refreshUnansweredBadge();
       if (state.opts.memory) {
         state.history.push({ role: "user", content: query.slice(0, 2000) });
         if (data.grounded && data.answer) state.history.push({ role: "assistant", content: String(data.answer).slice(0, 2000) });
@@ -1280,6 +1536,7 @@ async function loadSettings() {
     loadEngineNote();
     if (data.sections.web) renderWebService(data.sections.web);
     if (data.sections.summary) renderSummaryService(data.sections.summary);
+    if (data.sections.unanswered) renderUnansweredService(data.sections.unanswered);
   } catch (err) {
     const forbidden = err.code === "AUTH_FORBIDDEN";
     const message = forbidden
@@ -2120,6 +2377,71 @@ async function revokeSession(sessionId) {
 
 function wire() {
   $("btn-kbs-refresh").addEventListener("click", loadKbs);
+  document.querySelectorAll("[data-ws]").forEach((button) => {
+    button.addEventListener("click", () => setWorkspaceTab(button.dataset.ws));
+  });
+  $("btn-unans-refresh").addEventListener("click", () => loadUnanswered());
+  let unansTimer = null;
+  $("unans-search").addEventListener("input", () => {
+    clearTimeout(unansTimer);
+    unansTimer = setTimeout(() => { state.unans.q = $("unans-search").value.trim(); loadUnanswered(); }, 300);
+  });
+  $("unans-kb").addEventListener("change", () => { state.unans.kb = $("unans-kb").value; loadUnanswered(); });
+  document.querySelectorAll("[data-unans-status]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.unans.status = button.dataset.unansStatus;
+      document.querySelectorAll("[data-unans-status]").forEach((other) => other.setAttribute("aria-pressed", other === button ? "true" : "false"));
+      loadUnanswered();
+    });
+  });
+  document.querySelectorAll("[data-unans-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.unans.sort = button.dataset.unansSort;
+      document.querySelectorAll("[data-unans-sort]").forEach((other) => other.setAttribute("aria-pressed", other === button ? "true" : "false"));
+      loadUnanswered();
+    });
+  });
+  $("unans-list").addEventListener("change", (event) => {
+    const box = event.target.closest("[data-pick]");
+    if (!box) return;
+    const id = Number(box.dataset.pick);
+    if (box.checked) state.unans.selected.add(id); else state.unans.selected.delete(id);
+    box.closest(".uq-item").classList.toggle("picked", box.checked);
+    syncUnansweredSelection();
+  });
+  $("unans-list").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-act]");
+    if (!button) return;
+    const row = button.closest(".uq-item");
+    const item = state.unans.items.find((entry) => entry.id === Number(row.dataset.id));
+    if (!item) return;
+    const act = button.dataset.act;
+    if (act === "ask") askAgain(item);
+    else if (act === "note") openNote(item);
+    else unansweredAction([item.id], act);
+  });
+  $("unans-all").addEventListener("change", () => {
+    const all = $("unans-all").checked;
+    state.unans.selected = all ? new Set(state.unans.items.map((item) => item.id)) : new Set();
+    $("unans-list").querySelectorAll("[data-pick]").forEach((box) => {
+      box.checked = all;
+      box.closest(".uq-item").classList.toggle("picked", all);
+    });
+    syncUnansweredSelection();
+  });
+  $("btn-unans-resolve").addEventListener("click", () => unansweredAction(Array.from(state.unans.selected), "resolve"));
+  $("btn-unans-reopen").addEventListener("click", () => unansweredAction(Array.from(state.unans.selected), "reopen"));
+  $("btn-unans-delete").addEventListener("click", async () => {
+    const ids = Array.from(state.unans.selected);
+    if (!ids.length) return;
+    if (await confirmDialog("Hapus " + ids.length + " pertanyaan?", "Pertanyaan yang dipilih akan dihapus dari daftar. Tidak bisa dibatalkan.", "Hapus")) {
+      unansweredAction(ids, "delete");
+    }
+  });
+  $("btn-unans-clear").addEventListener("click", clearUnanswered);
+  $("btn-unans-more").addEventListener("click", () => { state.unans.limit += 50; loadUnanswered(true); });
+  $("dlg-note").addEventListener("close", () => { if ($("dlg-note").returnValue === "ok") saveNote(); });
+  $("btn-save-unans").addEventListener("click", saveUnansweredService);
   $("btn-kb-new").addEventListener("click", newKbDialog);
   $("btn-kb-delete").addEventListener("click", () => openDeleteKb(state.kb));
   $("delkb-confirm").addEventListener("input", () => {

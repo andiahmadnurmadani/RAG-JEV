@@ -104,6 +104,19 @@ Yang dihapus: semua vektor KB itu di Qdrant, indeks kata kunci, tabel terstruktu
 ditandai `deleted` (pengindeksan yang sedang berjalan membuang hasilnya). Hanya KB organisasi pemanggil;
 kunci yang diikat ke KB hanya bisa menghapus KB miliknya. Tidak bisa dibatalkan.
 
+**Pertanyaan tak terjawab** (`/ui/#/unanswered`): setiap `/query` yang berakhir "tidak ditemukan"
+dicatat per organisasi + KB. Pertanyaan yang sama (huruf besar/kecil, spasi, tanda baca diabaikan)
+hanya menaikkan hitungan "ditanya N×". Operator bisa memfilter (KB, status, cari, terbaru/tersering),
+menulis catatan, menandai selesai (terbuka lagi otomatis bila ditanya lagi dan masih tak terjawab),
+"Tanya ulang" di KB-nya, menghapus satu/terpilih/semua sesuai filter. Bisa diatur di
+**Pengaturan → Tak terjawab**: nyala/mati, alasan yang dicatat, lama simpan (bawaan 90 hari), batas
+catatan per organisasi (bawaan 5000). API: `GET/PATCH /api/v1/unanswered`,
+`POST /api/v1/unanswered/delete`, `DELETE /api/v1/unanswered?confirm=hapus`. Disimpan di
+`unanswered.sqlite` di samping `tables.sqlite` (volume data). Menghapus KB ikut menghapus catatannya.
+
+**Tampilan HP**: navigasi bawah mengambang (kaca buram, item aktif disorot, badge jumlah pertanyaan
+tak terjawab), ruang kerja KB memakai tab Chat / Dokumen, input 16px (tidak memicu zoom iOS).
+
 Daftar KB diambil dari `GET /api/v1/knowledge-bases` (kunci yang diikat ke KB hanya melihat KB
 miliknya). KB lama yang catatan pengindeksannya terpangkas tetap terlihat lewat indeks kata kunci.
 
