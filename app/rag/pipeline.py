@@ -301,9 +301,7 @@ class RagPipeline:
             if computed is not None:
                 return computed
 
-        search_query = retrieval_query(query, turns)
-        retrieval = self.retrieve(
-            query=search_query,
+        retrieve_args = dict(
             context=context,
             knowledge_base_id=knowledge_base_id,
             final_k=max(top_k, 1),
@@ -312,6 +310,17 @@ class RagPipeline:
             threshold=threshold,
             document_ids=document_ids,
         )
+        # Pertanyaan dicari APA ADANYA lebih dulu. Riwayat hanya dipakai untuk rujukan pendek
+        # ("yang kedua?", "kalau lembur?") atau bila pencarian tanpa riwayat tidak menemukan apa
+        # pun - menggabungkan semua pertanyaan pendek dengan pertanyaan sebelumnya justru menarik
+        # pertanyaan topik baru ke dokumen topik lama.
+        search_query = query
+        retrieval = self.retrieve(query=query, **retrieve_args)
+        combined = retrieval_query(query, turns)
+        if combined != query and (is_follow_up(query) or not retrieval.relevant):
+            alternative = self.retrieve(query=combined, **retrieve_args)
+            if alternative.relevant and (not retrieval.relevant or alternative.best_score >= retrieval.best_score * 0.8):
+                retrieval, search_query = alternative, combined
         result.candidates = retrieval.candidates
         result.retrieval = retrieval
 
@@ -922,6 +931,18 @@ def clean_history(history: Optional[Sequence[Dict[str, str]]]) -> List[Dict[str,
         if role in ("user", "assistant") and content:
             turns.append({"role": role, "content": content[:2000]})
     return turns
+
+
+_REFERENCE_RE = re.compile(
+    r"\b(itu|tersebut|tadi|sebelumnya|kalau|bagaimana dengan|yang (?:pertama|kedua|ketiga|terakhir|lain)|lainnya|"
+    r"that|those|it|them)\b",
+    re.IGNORECASE,
+)
+
+
+def is_follow_up(query: str) -> bool:
+    """Pertanyaan yang jelas merujuk ke percakapan sebelumnya."""
+    return len(keywords(query)) <= 3 or bool(_REFERENCE_RE.search(query or ""))
 
 
 def retrieval_query(query: str, turns: Sequence[Dict[str, str]]) -> str:

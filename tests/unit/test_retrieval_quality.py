@@ -142,3 +142,43 @@ def test_job_terputus_restart_tidak_macet(tmp_path):
     assert reloaded.recover_interrupted() == 2
     assert reloaded.get(indexing.job_id).status == "failed"
     assert reloaded.get(summarizing.job_id).status == "completed", "isi sudah tersimpan; hanya ringkasan tertunda"
+
+
+def test_penolakan_yang_ikut_mengutip_tetap_penolakan():
+    for text in (
+        "Informasi tersebut tidak ditemukan dalam knowledge base yang tersedia. [1]",
+        "Dokumen [1] tidak memuat informasi tentang gaji manajer.",
+        "Tidak ada informasi mengenai hal itu dalam konteks [2].",
+    ):
+        assert Generator._looks_like_refusal(text), text
+    assert Generator._looks_like_refusal("Jatah cuti 12 hari [1]; cuti besar tidak disebutkan.") is False
+
+
+def test_pertanyaan_baru_yang_pendek_tidak_dicampur_riwayat():
+    from app.rag.pipeline import is_follow_up
+
+    assert is_follow_up("yang kedua?") and is_follow_up("kalau lembur?")
+    assert not is_follow_up("Berapa upah lembur jam pertama?")
+    assert not is_follow_up("Siapa yang menyetujui pengadaan di atas seratus juta?")
+
+
+def test_hapus_banyak_dokumen_sekali_tulis(tmp_path):
+    import time
+
+    store = JobStore(str(tmp_path / "jobs.json"))
+    for number in range(1000):
+        store.create(document_id=f"doc_{number}", organization_id="o", knowledge_base_id="kb")
+    started = time.perf_counter()
+    assert store.mark_deleted_many("o", [f"doc_{number}" for number in range(1000)]) == 1000
+    assert time.perf_counter() - started < 2.0
+    assert store.list_documents("o", knowledge_base_id="kb") == []
+
+
+def test_kata_pembingkai_pertanyaan_tidak_menjatuhkan_skor():
+    """Kasus nyata production: "Apa kaitan css dengan html" ditolak (skor 0,25) karena "kaitan"
+    tidak pernah muncul di dokumen dan dihitung sebagai kata kunci langka yang tidak cocok."""
+    docs = ["HTML menyusun struktur halaman web; CSS mengatur tampilan elemen HTML.", "Basis data menyimpan tabel."]
+    reranker = LexicalReranker()
+    for query in ("Apa kaitan css dengan html", "Jelaskan pengertian css", "Apa perbedaan html dan css?"):
+        assert max(reranker.score(query, docs)) >= 0.6, query
+    assert "kaitan" not in keywords("Apa kaitan css dengan html")

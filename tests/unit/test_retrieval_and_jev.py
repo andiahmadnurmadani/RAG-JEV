@@ -69,7 +69,7 @@ def test_removing_a_document_purges_its_lexical_entries(settings):
     index.upsert("org_a", "kb_hr", [("chunk_1", "doc_1", "cuti"), ("chunk_2", "doc_2", "lembur")])
     removed = index.remove_document("org_a", "kb_hr", "doc_1")
     assert removed == 1
-    assert all(entry.document_id != "doc_1" for entry in index._scope("org_a", "kb_hr").entries)
+    assert all(entry.document_id != "doc_1" for entry in index._scope("org_a", "kb_hr").entries.values())
     assert index.document_ids("org_a", "kb_hr") == ["doc_2"]
 
 

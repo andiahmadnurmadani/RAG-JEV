@@ -46,6 +46,18 @@ STOPWORDS = frozenset(
     about into over under than then there here also only just not no yes
     please tell show give list explain
     """.split()
+) | frozenset(
+    # Kata pembingkai pertanyaan: hampir tidak pernah muncul di dokumen, jadi kalau dihitung ia
+    # dianggap "kata langka yang tidak cocok" dan menurunkan skor pertanyaan yang sebenarnya bisa
+    # dijawab ("Jelaskan pengertian css" ditolak padahal dokumen CSS ada).
+    """
+    kaitan keterkaitan hubungan hubungannya perbedaan beda bedanya perbandingan persamaan
+    pengertian definisi maksud dimaksud arti artinya makna penjelasan uraian uraikan
+    contoh contohnya misal misalnya gambaran seputar dijelaskan disebut gimana gmn bgmn
+    knp yg dgn utk dr tdk sih dong deh ya
+    relation relationship relations difference differences between meaning definition
+    define describe example examples mean means
+    """.split()
 )
 
 _VOWELS = set("aeiou")

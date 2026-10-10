@@ -32,6 +32,22 @@ logger = get_logger(__name__)
 NO_ANSWER_ID = "Informasi tersebut tidak ditemukan dalam knowledge base yang tersedia."
 NO_ANSWER_EN = "The requested information was not found in the available knowledge base."
 
+# Frasa yang menyatakan isi konteks tidak menjawab (bukan fakta dari dokumen).
+META_REFUSAL_MARKERS = (
+    "tidak ditemukan",
+    "informasi tersebut tidak",
+    "tidak ada informasi",
+    "tidak memuat informasi",
+    "tidak menyebutkan",
+    "tidak menjelaskan",
+    "tidak cukup informasi",
+    "tidak tersedia dalam",
+    "not found",
+    "no information",
+    "does not contain",
+    "does not mention",
+)
+
 NOT_FOUND_MARKERS = (
     "tidak ditemukan",
     "tidak terdapat",
@@ -721,19 +737,23 @@ class Generator:
     def _looks_like_refusal(text: str) -> bool:
         """Apakah jawaban model = "tidak ditemukan" (bukan jawaban yang kebetulan memuat frasa itu)?
 
-        Jawaban yang mengutip sumber adalah jawaban: "Tidak terdapat biaya pendaftaran [1]" berarti
-        biayanya NOL menurut dokumen, bukan datanya tidak ada. Dulu kalimat seperti itu diganti
-        "informasi tidak ditemukan" - kebalikan dari isinya.
+        * Kalimat penolakan baku di awal jawaban = penolakan, walau model menempelkan sitasi.
+        * Penanda "meta" (tidak ditemukan / tidak ada informasi / tidak memuat informasi ...) pada
+          jawaban pendek = penolakan, juga walau ada sitasi: model sering menolak sambil menunjuk
+          dokumen yang ia baca ("Dokumen [1] tidak memuat informasi tentang gaji").
+        * "Tidak terdapat biaya pendaftaran [1]" BUKAN penolakan: itu fakta dari dokumen (nol),
+          jadi frasa faktual seperti "tidak terdapat" hanya dihitung penolakan bila tanpa sitasi.
         """
         if not text or not text.strip():
             return True
-        if extract_citation_numbers(text):
-            return False
         lowered = " ".join(text.lower().split())
         for sentence in (NO_ANSWER_ID, NO_ANSWER_EN):
             if lowered.startswith(sentence.lower().rstrip(".")):
                 return True
-        if any(marker in lowered for marker in NOT_FOUND_MARKERS):
+        cited = bool(extract_citation_numbers(text))
+        if any(marker in lowered for marker in META_REFUSAL_MARKERS) and len(lowered) < 250:
+            return True
+        if not cited and any(marker in lowered for marker in NOT_FOUND_MARKERS):
             return len(lowered) < 300
         return False
 

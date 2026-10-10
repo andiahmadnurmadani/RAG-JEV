@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlparse
 
 from app.core.config import Settings
@@ -197,6 +197,24 @@ class JobStore:
                 record.stage = "deleted"
                 record.updated_at = _now()
                 self._persist()
+
+    def mark_deleted_many(self, organization_id: str, document_ids: Sequence[str]) -> int:
+        """Tandai banyak dokumen terhapus dengan SATU kali tulis (hapus KB besar tidak mengunci
+        job store puluhan detik karena menulis ulang berkas per dokumen)."""
+        marked = 0
+        now = _now()
+        with self._lock:
+            for document_id in document_ids:
+                job_id = self._by_document.get(_document_key(organization_id, document_id))
+                record = self._jobs.get(job_id) if job_id else None
+                if record is not None and record.status != STATUS_DELETED:
+                    record.status = STATUS_DELETED
+                    record.stage = "deleted"
+                    record.updated_at = now
+                    marked += 1
+            if marked:
+                self._persist()
+        return marked
 
     def update_unless_deleted(self, job_id: str, **changes) -> Optional[JobRecord]:
         """Perbarui pekerjaan, kecuali dokumennya sudah dihapus di tengah jalan.
@@ -770,12 +788,17 @@ class IndexingPipeline:
                 source_url=source_url,
                 metadata=metadata,
             )
+            if self._jobs.is_deleted(job_id):
+                # Dokumen/KB dihapus selama ringkasan dibuat: jangan tulis ringkasan yatim.
+                return self._jobs.get(job_id)
             repository.upsert_chunks(self._settings, dim=self._embedder.dim, points=points)
             self._sparse.upsert(
                 organization_id,
                 knowledge_base_id,
                 [(SUMMARY_CHUNK_ID, document_id, sparse_text(document_name, "Ringkasan dokumen", result.text), True)],
             )
+            if self._discard_if_deleted(job_id, organization_id, knowledge_base_id, document_id):
+                return self._jobs.get(job_id)
         except Exception as exc:  # noqa: BLE001 - gagal menyimpan ringkasan tidak fatal
             logger.warning("ringkasan dokumen %s gagal disimpan: %s", document_id, exc)
             self._jobs.update_unless_deleted(

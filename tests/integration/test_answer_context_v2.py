@@ -175,3 +175,20 @@ def test_kunci_proyek_tidak_bisa_menghapus_kb_lain(client):
     ).json()["data"]["key"]
     refused = client.delete("/api/v1/knowledge-bases/kb_proyek_x?confirm=kb_proyek_x", headers=auth(key))
     assert refused.status_code == 403
+
+
+def test_riwayat_tidak_menarik_pertanyaan_baru_ke_dokumen_lama(client, settings):
+    _lexical(settings)
+    _index(client, "doc_cuti", "# SOP Cuti\nJatah cuti tahunan adalah 12 hari kerja per tahun.")
+    _index(client, "doc_lembur", "# SOP Lembur\nUpah lembur jam pertama dibayar 1,5 kali upah per jam.")
+    data = client.post(
+        "/api/v1/query",
+        json={
+            "query": "Berapa upah lembur jam pertama?",
+            "knowledge_base_id": KB,
+            "history": [{"role": "user", "content": "Berapa jatah cuti tahunan?"}],
+        },
+        headers=auth(TENANT_A_KEY),
+    ).json()["data"]
+    assert data["usage"]["search_query"] is None, "pertanyaan lengkap dicari apa adanya"
+    assert data["sources"][0]["document_id"] == "doc_lembur"

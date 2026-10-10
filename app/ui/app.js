@@ -734,7 +734,9 @@ function rememberKb(id) {
 }
 
 function openKnowledgeBase(id) {
-  const kb = cleanKbId(id) || DEFAULT_KB;
+  // ID dipakai apa adanya: KB lama bisa bernama "KB_Utama" atau memuat karakter lain, dan
+  // menormalkannya akan membuka KB kosong yang berbeda. Normalisasi hanya untuk KB BARU.
+  const kb = String(id || "").trim().slice(0, 200) || DEFAULT_KB;
   if (kb !== state.kb) {
     state.kb = kb;
     state.picked.clear();

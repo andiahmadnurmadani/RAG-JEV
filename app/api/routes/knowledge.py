@@ -282,9 +282,8 @@ def delete_knowledge_base(
     )
     services.unanswered.delete_knowledge_base(organization_id=organization_id, knowledge_base_id=knowledge_base_id)
     documents = {record.document_id for record in records} | set(sparse_documents) | set(vector_documents)
-    for record in records:
-        # Pekerjaan yang masih berjalan melihat tanda ini dan membuang hasilnya (tidak hidup lagi).
-        services.jobs.mark_deleted(organization_id, record.document_id)
+    # Pekerjaan yang masih berjalan melihat tanda ini dan membuang hasilnya (tidak hidup lagi).
+    services.jobs.mark_deleted_many(organization_id, [record.document_id for record in records])
 
     if not documents and not chunks:
         raise AppError(
