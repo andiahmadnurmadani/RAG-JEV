@@ -523,7 +523,12 @@ async function loadKbs() {
   try {
     const data = await api("GET", "/knowledge-bases");
     state.kbs = data.knowledge_bases || [];
-    clearNote("kbs-status");
+    if (state.flash) {
+      note("kbs-status", "ok", state.flash);
+      state.flash = "";
+    } else {
+      clearNote("kbs-status");
+    }
   } catch (err) {
     state.kbs = [];
     note("kbs-status", "err", escapeHtml(err.message || "gagal memuat") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
@@ -573,10 +578,18 @@ function renderKbs() {
       '<div class="kb-card-actions"><button class="btn sm primary" type="button" data-open="' + escapeHtml(item.knowledge_base_id) +
       '"><svg class="ico"><use href="#i-arrow"/></svg><span>Buka</span></button>' +
       '<button class="btn sm" type="button" data-eval="' + escapeHtml(item.knowledge_base_id) +
-      '"><svg class="ico"><use href="#i-target"/></svg><span>Uji</span></button></div></article>';
+      '"><svg class="ico"><use href="#i-target"/></svg><span>Uji</span></button>' +
+      '<button class="btn sm icon danger-ghost" type="button" data-delete-kb="' + escapeHtml(item.knowledge_base_id) +
+      '" title="Hapus knowledge base" aria-label="Hapus knowledge base ' + escapeHtml(item.knowledge_base_id) +
+      '"><svg class="ico"><use href="#i-trash"/></svg></button></div></article>';
   }).join("");
   $("kb-grid").querySelectorAll(".kb-card").forEach((card) => {
     card.addEventListener("click", (event) => {
+      const deleteButton = event.target.closest("[data-delete-kb]");
+      if (deleteButton) {
+        openDeleteKb(deleteButton.dataset.deleteKb);
+        return;
+      }
       const evalButton = event.target.closest("[data-eval]");
       if (evalButton) {
         openKnowledgeBase(evalButton.dataset.eval);
@@ -589,6 +602,67 @@ function renderKbs() {
       if (event.key === "Enter") showView("chat", card.dataset.kb);
     });
   });
+}
+
+function forgetKb(id) {
+  try {
+    localStorage.setItem(RECENT_KB_KEY, JSON.stringify(recentKbs().filter((item) => item !== id)));
+  } catch (err) {
+    /* tidak bisa disimpan: daftar lokal tetap seperti semula */
+  }
+}
+
+function openDeleteKb(id) {
+  const item = state.kbs.find((entry) => entry.knowledge_base_id === id) ||
+    { knowledge_base_id: id, documents: id === state.kb ? state.docs.length : 0, chunks: 0, tables: 0, draft: true };
+  state.deleting = item;
+  $("delkb-name").textContent = id;
+  $("delkb-confirm").value = "";
+  $("delkb-confirm").placeholder = id;
+  $("delkb-ok").disabled = true;
+  clearNote("delkb-status");
+  $("delkb-stats").innerHTML = [["Dokumen", item.documents || 0], ["Potongan", item.chunks || 0], ["Sedang diproses", item.processing || 0]]
+    .map((pair) => '<div class="stat"><span class="stat-v">' + escapeHtml(Number(pair[1]).toLocaleString("id-ID")) +
+      '</span><span class="stat-k">' + escapeHtml(pair[0]) + "</span></div>").join("");
+  $("dlg-delkb").showModal();
+  $("delkb-confirm").focus();
+}
+
+async function confirmDeleteKb() {
+  const item = state.deleting;
+  if (!item || $("delkb-confirm").value.trim() !== item.knowledge_base_id) return;
+  const id = item.knowledge_base_id;
+  $("delkb-ok").disabled = true;
+  note("delkb-status", "info", "Menghapus...");
+  let summary = "tidak ada dokumen";
+  const onServer = state.kbs.some((entry) => entry.knowledge_base_id === id);
+  try {
+    if (onServer || !item.draft) {
+      const data = await api("DELETE", "/knowledge-bases/" + encodeURIComponent(id) + "?confirm=" + encodeURIComponent(id));
+      summary = data.deleted_documents + " dokumen beserta seluruh isinya" +
+        (data.deleted_tables ? " dan " + data.deleted_tables + " tabel" : "");
+    }
+  } catch (err) {
+    // KB yang baru dibuat di browser ini (belum ada dokumen) memang tidak ada di server.
+    if (err.code !== "DOCUMENT_NOT_FOUND") {
+      note("delkb-status", "err", escapeHtml(err.message || "gagal menghapus") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+      $("delkb-ok").disabled = false;
+      return;
+    }
+  }
+  forgetKb(id);
+  state.kbs = state.kbs.filter((entry) => entry.knowledge_base_id !== id);
+  if (state.kb === id) {
+    state.picked.clear();
+    state.docs = [];
+    renderDocs([]);
+    newConversation();
+  }
+  $("dlg-delkb").close();
+  state.deleting = null;
+  state.flash = "Knowledge base <span class=\"mono\">" + escapeHtml(id) + "</span> dihapus (" + escapeHtml(summary) + ").";
+  if (currentView() !== "kbs") showView("kbs");
+  else loadKbs();
 }
 
 function newKbDialog() {
@@ -2047,6 +2121,17 @@ async function revokeSession(sessionId) {
 function wire() {
   $("btn-kbs-refresh").addEventListener("click", loadKbs);
   $("btn-kb-new").addEventListener("click", newKbDialog);
+  $("btn-kb-delete").addEventListener("click", () => openDeleteKb(state.kb));
+  $("delkb-confirm").addEventListener("input", () => {
+    $("delkb-ok").disabled = !state.deleting || $("delkb-confirm").value.trim() !== state.deleting.knowledge_base_id;
+  });
+  $("delkb-confirm").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirmDeleteKb();
+    }
+  });
+  $("delkb-ok").addEventListener("click", confirmDeleteKb);
   $("kb-search").addEventListener("input", renderKbs);
   document.querySelectorAll("[data-kb-sort]").forEach((button) => {
     button.addEventListener("click", () => {

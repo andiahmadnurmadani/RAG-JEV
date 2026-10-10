@@ -194,6 +194,61 @@ def delete_document(
     return before
 
 
+def delete_knowledge_base(
+    settings: Settings,
+    *,
+    organization_id: str,
+    knowledge_base_id: str,
+) -> Tuple[int, List[str]]:
+    """Hapus SEMUA potongan satu knowledge base di dalam satu tenant.
+
+    Mengembalikan (jumlah potongan, daftar document_id yang terhapus). Filternya selalu
+    organisasi + KB: KB bernama sama milik organisasi lain tidak tersentuh.
+    """
+    if not organization_id or not knowledge_base_id:
+        raise AppError("TENANT_CONTEXT_MISSING", "organization_id dan knowledge_base_id wajib untuk hapus KB")
+    if not collection_exists_guard(settings):
+        return 0, []
+    query_filter = qmodels.Filter(
+        must=[
+            qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id)),
+            qmodels.FieldCondition(key="knowledge_base_id", match=qmodels.MatchValue(value=knowledge_base_id)),
+        ]
+    )
+    client = get_client(settings)
+    found = 0
+    documents: set = set()
+    offset = None
+    while True:
+        records, offset = client.scroll(
+            collection_name=settings.qdrant_collection,
+            scroll_filter=query_filter,
+            limit=512,
+            offset=offset,
+            with_payload=["document_id", "organization_id"],
+            with_vectors=False,
+        )
+        for record in records:
+            payload = dict(record.payload or {})
+            if payload.get("organization_id") != organization_id:
+                continue
+            found += 1
+            if payload.get("document_id"):
+                documents.add(str(payload["document_id"]))
+        if offset is None or not records:
+            break
+    client.delete(
+        collection_name=settings.qdrant_collection,
+        points_selector=qmodels.FilterSelector(filter=query_filter),
+        wait=True,
+    )
+    logger.info(
+        "deleted knowledge base %s for org %s (%d chunks, %d documents)",
+        knowledge_base_id, organization_id, found, len(documents),
+    )
+    return found, sorted(documents)
+
+
 def count_document(
     settings: Settings,
     *,

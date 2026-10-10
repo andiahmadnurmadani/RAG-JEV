@@ -720,3 +720,17 @@ textarea { resize: vertical; line-height: 1.55; }
 }
 
 .key-list:has(> table[hidden]) { display: none; }
+
+/* ---------- hapus knowledge base ---------- */
+.btn.danger { background: var(--err); border-color: transparent; color: #fff; }
+.btn.danger:hover { background: color-mix(in srgb, var(--err) 86%, #000); }
+.btn.danger[disabled] { background: var(--surface-3); color: var(--text-soft); }
+.btn.danger-ghost:hover { color: var(--err); background: var(--err-soft); }
+.kb-card-actions .btn.icon { flex: none; width: 32px; }
+.modal-title { display: flex; align-items: center; gap: 10px; }
+.modal-title.danger { color: var(--err); }
+.modal-title.danger h2 { color: var(--text); }
+dialog.modal p { font-size: 13.5px; color: var(--text-dim); line-height: 1.55; }
+.kb-stats.compact { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.kb-stats.compact .stat { padding: 10px 12px; }
+.kb-stats.compact .stat-v { font-size: 17px; }

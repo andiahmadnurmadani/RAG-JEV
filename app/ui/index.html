@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261010b">
+<link rel="stylesheet" href="style.css?v=20261010c">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -130,6 +130,7 @@
             <h2 id="kb-current" class="mono">-</h2>
           </div>
           <span class="count" id="docs-count" title="Jumlah dokumen">0</span>
+          <button class="btn ghost icon sm danger-ghost" id="btn-kb-delete" type="button" title="Hapus knowledge base ini" aria-label="Hapus knowledge base ini"><svg class="ico"><use href="#i-trash"/></svg></button>
         </div>
         <div class="panel-body">
         <div class="drop" id="dropzone">
@@ -732,6 +733,23 @@
   </div>
 </div>
 
+<dialog id="dlg-delkb" class="modal">
+  <form method="dialog" class="modal-body">
+    <div class="modal-title danger"><svg class="ico"><use href="#i-warn"/></svg><h2>Hapus knowledge base</h2></div>
+    <p>Knowledge base <b class="mono" id="delkb-name">-</b> dan <b>seluruh isinya</b> akan dihapus permanen: dokumen, potongan yang bisa dicari, ringkasan, dan tabel. Aplikasi yang masih memakai knowledge base ini tidak akan menemukan jawaban lagi. <b>Tidak bisa dibatalkan.</b></p>
+    <div class="kb-stats compact" id="delkb-stats"></div>
+    <div class="field">
+      <label for="delkb-confirm">Ketik nama knowledge base untuk konfirmasi</label>
+      <input type="text" id="delkb-confirm" spellcheck="false" autocomplete="off">
+    </div>
+    <div id="delkb-status"></div>
+    <div class="modal-actions">
+      <button class="btn" value="cancel" type="submit">Batal</button>
+      <button class="btn danger" type="button" id="delkb-ok" disabled><svg class="ico"><use href="#i-trash"/></svg><span>Hapus permanen</span></button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlg-newkb" class="modal">
   <form method="dialog" class="modal-body">
     <h2>Knowledge base baru</h2>
@@ -804,7 +822,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261010b"></script>
-<script src="app.js?v=20261010b"></script>
+<script src="markdown.js?v=20261010c"></script>
+<script src="app.js?v=20261010c"></script>
 </body>
 </html>

@@ -245,6 +245,66 @@ def list_knowledge_bases(
     return ok({"knowledge_bases": items, "count": len(items)})
 
 
+@router.delete("/knowledge-bases/{knowledge_base_id}")
+def delete_knowledge_base(
+    knowledge_base_id: str,
+    request: Request,
+    context: TrustedContext = Depends(trusted_context),
+    confirm: str = Query(default="", max_length=200),
+) -> Dict[str, Any]:
+    """Hapus satu knowledge base beserta SELURUH dokumennya (vektor, indeks kata kunci, tabel).
+
+    Tidak bisa dibatalkan, jadi pemanggil wajib mengulang nama KB di ``?confirm=`` - salah ketik
+    atau tombol yang terpencet tidak menghapus apa pun. Hanya KB milik organisasi pemanggil yang
+    tersentuh; kunci yang diikat ke KB tertentu hanya bisa menghapus KB miliknya.
+    """
+    _rate_limit(request)
+    context.require("write")
+    knowledge_base_id = knowledge_base_id.strip()
+    context.require_knowledge_base(knowledge_base_id)
+    if confirm.strip() != knowledge_base_id:
+        raise AppError(
+            "VALIDATION_ERROR",
+            "Konfirmasi tidak cocok: kirim ?confirm=<nama knowledge base> untuk menghapus",
+            details={"knowledge_base_id": knowledge_base_id},
+        )
+    services = services_from_request(request)
+    organization_id = context.organization_id
+
+    records = services.jobs.list_documents(organization_id, knowledge_base_id=knowledge_base_id, limit=100_000)
+    sparse_documents = services.sparse.document_ids(organization_id, knowledge_base_id)
+    chunks, vector_documents = repository.delete_knowledge_base(
+        services.settings, organization_id=organization_id, knowledge_base_id=knowledge_base_id
+    )
+    services.sparse.drop_scope(organization_id, knowledge_base_id)
+    tables = services.tables.delete_knowledge_base(
+        organization_id=organization_id, knowledge_base_id=knowledge_base_id
+    )
+    documents = {record.document_id for record in records} | set(sparse_documents) | set(vector_documents)
+    for record in records:
+        # Pekerjaan yang masih berjalan melihat tanda ini dan membuang hasilnya (tidak hidup lagi).
+        services.jobs.mark_deleted(organization_id, record.document_id)
+
+    if not documents and not chunks:
+        raise AppError(
+            "DOCUMENT_NOT_FOUND",
+            f"knowledge base '{knowledge_base_id}' tidak ditemukan di organisasi ini",
+        )
+    logger.warning(
+        "knowledge base dihapus org=%s kb=%s documents=%d chunks=%d tables=%d oleh=%s",
+        organization_id, knowledge_base_id, len(documents), chunks, tables, context.user_id,
+    )
+    return ok(
+        {
+            "knowledge_base_id": knowledge_base_id,
+            "status": STATUS_DELETED,
+            "deleted_documents": len(documents),
+            "deleted_chunks": chunks,
+            "deleted_tables": tables,
+        }
+    )
+
+
 @router.put("/knowledge/{document_id}", status_code=status.HTTP_202_ACCEPTED)
 def update_knowledge(
     document_id: str,

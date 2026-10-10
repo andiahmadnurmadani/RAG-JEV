@@ -167,6 +167,24 @@ class TableStore:
             self._connection.commit()
         return removed
 
+    def delete_knowledge_base(self, *, organization_id: str, knowledge_base_id: str) -> int:
+        """Hapus semua tabel terstruktur satu knowledge base milik satu organisasi."""
+        with self._lock:
+            cursor = self._connection.cursor()
+            cursor.execute(
+                "SELECT table_id FROM tables WHERE organization_id = ? AND knowledge_base_id = ?",
+                (organization_id, knowledge_base_id),
+            )
+            ids = [int(row["table_id"]) for row in cursor.fetchall()]
+            for table_id in ids:
+                cursor.execute("DELETE FROM table_rows WHERE table_id = ?", (table_id,))
+            cursor.execute(
+                "DELETE FROM tables WHERE organization_id = ? AND knowledge_base_id = ?",
+                (organization_id, knowledge_base_id),
+            )
+            self._connection.commit()
+        return len(ids)
+
     def _delete_document_cursor(self, cursor: sqlite3.Cursor, organization_id: str, document_id: str) -> int:
         cursor.execute(
             "SELECT table_id FROM tables WHERE organization_id = ? AND document_id = ?",

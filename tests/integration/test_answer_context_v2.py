@@ -127,3 +127,51 @@ def test_daftar_knowledge_base_organisasi(client):
     ).json()["data"]["key"]
     only = client.get("/api/v1/knowledge-bases", headers=auth(created)).json()["data"]
     assert [item["knowledge_base_id"] for item in only["knowledge_bases"]] == ["kb_proyek_b"]
+
+
+def test_hapus_knowledge_base_beserta_isinya(client):
+    from tests.conftest import READ_ONLY_KEY, TENANT_B_KEY
+
+    _index(client, "doc_hapus_1", "# SOP Cuti\nJatah cuti tahunan 12 hari kerja.", kb="kb_hapus")
+    _index(client, "doc_hapus_2", "# SOP Lembur\nUpah lembur 1,5 kali.", kb="kb_hapus")
+    _index(client, "doc_tetap", "# SOP Cuti cabang\nJatah cuti tahunan 14 hari.", kb="kb_tetap")
+    path = "/api/v1/knowledge-bases/kb_hapus"
+
+    # tanpa konfirmasi / konfirmasi salah: tidak ada yang terhapus
+    assert client.delete(path, headers=auth(TENANT_A_KEY)).status_code == 422
+    assert client.delete(path + "?confirm=kb_lain", headers=auth(TENANT_A_KEY)).status_code == 422
+    # kunci baca saja tidak boleh; tenant lain tidak melihat KB ini sama sekali
+    assert client.delete(path + "?confirm=kb_hapus", headers=auth(READ_ONLY_KEY)).status_code == 403
+    assert client.delete(path + "?confirm=kb_hapus", headers=auth(TENANT_B_KEY)).status_code == 404
+
+    done = client.delete(path + "?confirm=kb_hapus", headers=auth(TENANT_A_KEY))
+    assert done.status_code == 200, done.text
+    data = done.json()["data"]
+    assert data["deleted_documents"] == 2 and data["deleted_chunks"] >= 2
+
+    bases = client.get("/api/v1/knowledge-bases", headers=auth(TENANT_A_KEY)).json()["data"]["knowledge_bases"]
+    assert [item["knowledge_base_id"] for item in bases] == ["kb_tetap"]
+    hits = client.post(
+        "/api/v1/search", json={"query": "jatah cuti tahunan", "knowledge_base_id": "kb_hapus"},
+        headers=auth(TENANT_A_KEY),
+    ).json()["data"]["results"]
+    assert hits == []
+    kept = client.post(
+        "/api/v1/search", json={"query": "jatah cuti tahunan", "knowledge_base_id": "kb_tetap"},
+        headers=auth(TENANT_A_KEY),
+    ).json()["data"]["results"]
+    assert kept and kept[0]["document_id"] == "doc_tetap"
+    assert client.get("/api/v1/knowledge/doc_hapus_1", headers=auth(TENANT_A_KEY)).json()["data"]["status"] == "deleted"
+    # KB yang sudah dihapus tidak bisa dihapus dua kali
+    assert client.delete(path + "?confirm=kb_hapus", headers=auth(TENANT_A_KEY)).status_code == 404
+
+
+def test_kunci_proyek_tidak_bisa_menghapus_kb_lain(client):
+    _index(client, "doc_x", "# X\nIsi proyek X.", kb="kb_proyek_x")
+    key = client.post(
+        "/api/v1/settings/api-keys",
+        json={"label": "Y", "permissions": ["read", "write"], "knowledge_base_ids": ["kb_proyek_y"]},
+        headers=auth(TENANT_A_KEY),
+    ).json()["data"]["key"]
+    refused = client.delete("/api/v1/knowledge-bases/kb_proyek_x?confirm=kb_proyek_x", headers=auth(key))
+    assert refused.status_code == 403

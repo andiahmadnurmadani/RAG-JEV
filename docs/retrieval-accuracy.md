@@ -97,6 +97,13 @@ Konsol kini aplikasi satu halaman dengan navigasi samping (bilah bawah di ponsel
 | Uji akurasi | `/ui/#/eval` | Pertanyaan uji per KB |
 | Pengaturan | `/ui/#/settings/<panel>` | Halaman biasa (bisa digulir), bukan dialog modal |
 
+**Hapus knowledge base**: tombol tong sampah di kartu KB atau di ruang kerja KB. Dialog menampilkan
+jumlah dokumen/potongan dan tombol hapus baru aktif setelah nama KB diketik persis. Lewat API:
+`DELETE /api/v1/knowledge-bases/{id}?confirm={id}` (izin `write`; tanpa `confirm` yang cocok → 422).
+Yang dihapus: semua vektor KB itu di Qdrant, indeks kata kunci, tabel terstruktur, dan status dokumen
+ditandai `deleted` (pengindeksan yang sedang berjalan membuang hasilnya). Hanya KB organisasi pemanggil;
+kunci yang diikat ke KB hanya bisa menghapus KB miliknya. Tidak bisa dibatalkan.
+
 Daftar KB diambil dari `GET /api/v1/knowledge-bases` (kunci yang diikat ke KB hanya melihat KB
 miliknya). KB lama yang catatan pengindeksannya terpangkas tetap terlihat lewat indeks kata kunci.
 
