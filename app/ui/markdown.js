@@ -32,7 +32,7 @@ const Markdown = (() => {
   }
 
   // Inline constructs. Runs on text that is ALREADY escaped.
-  function inline(text) {
+  function inline(text, options) {
     let out = text;
     // `code` first: its content must not be re-processed for bold/links.
     const codes = [];
@@ -52,6 +52,13 @@ const Markdown = (() => {
     // *italic* and _italic_ (single markers, not part of **)
     out = out.replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, "$1<em>$2</em>");
     out = out.replace(/(^|[^_\w])_([^_\s][^_]*?)_(?!_)/g, "$1<em>$2</em>");
+    // ~~coret~~
+    out = out.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    // Sitasi [n] -> penanda kecil yang bisa diklik (bukan tautan Markdown "[label](url)").
+    if (options && options.citations) {
+      out = out.replace(/\s*\[(\d{1,3})\](?!\()/g, (match, number) =>
+        '<sup class="cref" data-n="' + number + '">' + number + "</sup>");
+    }
     // restore code spans
     out = out.replace(/\u0000(\d+)\u0000/g, (match, index) => "<code>" + codes[Number(index)] + "</code>");
     return out;
@@ -68,7 +75,7 @@ const Markdown = (() => {
     return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line);
   }
 
-  function render(source) {
+  function render(source, options) {
     // Escape HTML entities but keep `>` recognisable for blockquotes: the blockquote marker is
     // the FIRST character of a line, so we un-escape only that position afterwards.
     const lines = escapeHtml(source || "").replace(/\r\n?/g, "\n").split("\n");
@@ -78,7 +85,7 @@ const Markdown = (() => {
     const paragraph = [];
     const flushParagraph = () => {
       if (paragraph.length) {
-        html.push("<p>" + inline(paragraph.join(" ")) + "</p>");
+        html.push("<p>" + inline(paragraph.join(" "), options) + "</p>");
         paragraph.length = 0;
       }
     };
@@ -114,9 +121,15 @@ const Markdown = (() => {
           rows.push(splitRow(lines[index]));
           index += 1;
         }
-        const head = header.map((cell) => "<th>" + inline(cell) + "</th>").join("");
+        // Kolom yang isinya angka/nominal semua dirata kanan supaya mudah dibandingkan.
+        const numeric = header.map((_, position) => rows.length > 0 && rows.every((row) =>
+          /^\s*(?:Rp\.?\s*)?[-+]?[\d.,]+\s*(?:%|jt|juta|rb|ribu|hari|jam)?\s*$/i.test(row[position] || "") ||
+          !(row[position] || "").trim()) && rows.some((row) => (row[position] || "").trim()));
+        const head = header.map((cell, position) =>
+          "<th" + (numeric[position] ? ' class="num"' : "") + ">" + inline(cell, options) + "</th>").join("");
         const body = rows.map((row) => {
-          const cells = header.map((_, position) => "<td>" + inline(row[position] || "") + "</td>").join("");
+          const cells = header.map((_, position) =>
+            "<td" + (numeric[position] ? ' class="num"' : "") + ">" + inline(row[position] || "", options) + "</td>").join("");
           return "<tr>" + cells + "</tr>";
         }).join("");
         html.push('<div class="md-table"><table><thead><tr>' + head + "</tr></thead><tbody>" + body + "</tbody></table></div>");
@@ -128,7 +141,7 @@ const Markdown = (() => {
       if (heading) {
         flushParagraph();
         const level = Math.min(6, heading[1].length + 1); // # -> h2 (h1 is the panel title)
-        html.push("<h" + level + ">" + inline(heading[2].trim()) + "</h" + level + ">");
+        html.push("<h" + level + ">" + inline(heading[2].trim(), options) + "</h" + level + ">");
         index += 1;
         continue;
       }
@@ -149,7 +162,7 @@ const Markdown = (() => {
           quoted.push(lines[index].replace(/^\s*(?:>|&gt;)\s?/, ""));
           index += 1;
         }
-        html.push("<blockquote>" + render(quoted.join("\n")) + "</blockquote>");
+        html.push("<blockquote>" + render(quoted.join("\n"), options) + "</blockquote>");
         continue;
       }
 
@@ -175,11 +188,11 @@ const Markdown = (() => {
               sub.push(lines[index].slice(subIndent));
               index += 1;
             }
-            if (items.length) items[items.length - 1] += render(sub.join("\n"));
+            if (items.length) items[items.length - 1] += render(sub.join("\n"), options);
             continue;
           }
           if (/\d/.test(match[2]) !== ordered) break;
-          items.push(inline(match[3]));
+          items.push(inline(match[3], options));
           index += 1;
         }
         html.push("<" + tag + ">" + items.map((item) => "<li>" + item + "</li>").join("") + "</" + tag + ">");
@@ -203,5 +216,8 @@ const Markdown = (() => {
   return { render, escapeHtml };
 })();
 
+// `const` di skrip biasa TIDAK menjadi properti window - tanpa baris ini app.js (yang memeriksa
+// window.Markdown) selalu jatuh ke teks mentah dan jawaban tampil dengan ## dan | apa adanya.
+if (typeof window !== "undefined") window.Markdown = Markdown;
 // Exposed for the Node-based unit tests (no-op in the browser).
 if (typeof module !== "undefined" && module.exports) module.exports = { Markdown };

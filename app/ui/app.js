@@ -1274,52 +1274,107 @@ function computedBlock(computed) {
   return wrap;
 }
 
+function sourceWhere(source) {
+  return [source.section, source.page ? "hal. " + source.page : ""].filter(Boolean).join(" · ");
+}
+
+function fmtMs(ms) {
+  if (typeof ms !== "number") return "-";
+  return ms >= 1000 ? (ms / 1000).toLocaleString("id-ID", { maximumFractionDigits: 1 }) + " dtk" : Math.round(ms) + " ms";
+}
+
+// Sumber dikelompokkan per dokumen: satu dokumen yang dikutip di tiga bagian tampil sebagai SATU
+// kartu dengan tiga lokasi bernomor, bukan tiga baris dengan nama yang sama.
+function sourceGroups(sources) {
+  const groups = [];
+  const byDoc = {};
+  sources.forEach((source, position) => {
+    const key = source.document_id || source.document_name || String(position);
+    if (!byDoc[key]) {
+      byDoc[key] = { name: source.document_name || source.document_id || "Dokumen", best: 0, web: false, items: [] };
+      groups.push(byDoc[key]);
+    }
+    const group = byDoc[key];
+    group.items.push(Object.assign({ n: source.index || position + 1 }, source));
+    if (typeof source.score === "number") group.best = Math.max(group.best, source.score);
+    if (source.source_url) group.web = true;
+  });
+  return groups;
+}
+
+function sourceListHtml(groups) {
+  return '<ol class="src-list">' + groups.map((group) => {
+    const pct = Math.round(Math.max(0, Math.min(1, group.best)) * 100);
+    const locs = group.items.map((item) => {
+      const where = sourceWhere(item) || "bagian dokumen";
+      const label = '<b class="src-n">' + escapeHtml(item.n) + "</b><span>" + escapeHtml(where) + "</span>";
+      return item.source_url
+        ? '<a class="src-loc" data-n="' + escapeHtml(item.n) + '" href="' + escapeHtml(item.source_url) +
+          '" target="_blank" rel="noopener noreferrer" title="Buka ' + escapeHtml(item.source_url) + '">' + label +
+          '<svg class="src-ext" aria-hidden="true"><use href="#i-link"/></svg></a>'
+        : '<span class="src-loc" data-n="' + escapeHtml(item.n) + '">' + label + "</span>";
+    }).join("");
+    return '<li class="src">' +
+      '<span class="src-icon" aria-hidden="true"><svg><use href="#' + (group.web ? "i-globe" : "i-doc") + '"/></svg></span>' +
+      '<div class="src-main"><div class="src-name" title="' + escapeHtml(group.name) + '">' + escapeHtml(group.name) + "</div>" +
+      '<div class="src-locs">' + locs + "</div></div>" +
+      (group.best ? '<span class="src-rel" title="Relevansi ' + escapeHtml(fmtScore(group.best)) + '"><i style="width:' + pct + '%"></i></span>' : "") +
+      "</li>";
+  }).join("") + "</ol>";
+}
+
+function flashSource(node, number) {
+  const target = node.querySelector('.src-loc[data-n="' + number + '"]');
+  if (!target) return;
+  const more = target.closest("details");
+  if (more) more.open = true;
+  node.querySelectorAll(".src-loc.flash").forEach((item) => item.classList.remove("flash"));
+  // reflow supaya animasi diputar ulang bila sitasi yang sama diklik lagi
+  void target.offsetWidth;
+  target.classList.add("flash");
+  target.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
 function renderAnswer(node, data) {
   const bubble = node.querySelector(".bubble");
   const answer = data.answer || "";
+  const sources = data.sources || [];
+  const byNumber = {};
+  sources.forEach((source, position) => { byNumber[String(source.index || position + 1)] = source; });
+
   // Jawaban diminta dalam Markdown; render supaya judul/daftar/tabel terbaca, bukan `##` mentah.
   // Bila renderer gagal dimuat (halaman lama), jatuh ke teks biasa - jangan tampilkan kosong.
   if (window.Markdown && typeof window.Markdown.render === "function") {
     bubble.classList.add("markdown");
-    bubble.innerHTML = window.Markdown.render(answer);
+    bubble.innerHTML = window.Markdown.render(answer, { citations: true });
   } else {
     bubble.textContent = answer;
   }
-
-  // Salin sebagai Markdown: pemakai meminta hasilnya berformat .md (teks Markdown), bukan berkas.
-  if (answer.trim()) {
-    const tools = document.createElement("div");
-    tools.className = "answer-tools";
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "linkish";
-    copy.textContent = "Salin .md";
-    copy.title = "Salin jawaban sebagai teks Markdown";
-    copy.addEventListener("click", () => copyMarkdown(copy, answer));
-    tools.appendChild(copy);
-    node.appendChild(tools);
+  if (data.grounded === false) {
+    node.classList.add("no-answer");
+    // Kalimat penolakan baku cukup diwakili judulnya; jawaban model yang lain tetap ditampilkan.
+    if (/^(informasi tersebut tidak ditemukan|the requested information was not found)/i.test(answer.trim())) bubble.innerHTML = "";
+    const reason = NO_ANSWER_REASONS[data.no_answer_reason] || "";
+    bubble.insertAdjacentHTML("afterbegin", '<div class="noans-head"><svg aria-hidden="true"><use href="#i-warn"/></svg>' +
+      "<span>Tidak ditemukan di knowledge base" + (reason ? '<small>' + escapeHtml(reason) + "</small>" : "") + "</span></div>");
   }
 
-  const sources = data.sources || [];
-  if (sources.length) {
-    const cites = document.createElement("div");
-    cites.className = "cites";
-    cites.innerHTML = sources.map((source, index) => {
-      const label = source.document_name || source.document_id;
-      const page = source.page ? " hal. " + escapeHtml(source.page) : "";
-      const score = typeof source.score === "number" ? '<span class="score">' + source.score.toFixed(2) + "</span>" : "";
-      // Sumber dari web: tautkan ke halamannya supaya bisa dibuka langsung.
-      const link = source.source_url
-        ? ' <a class="cite-link" href="' + escapeHtml(source.source_url) + '" target="_blank" rel="noopener noreferrer" title="' +
-          escapeHtml(source.source_url) + '">buka</a>'
-        : "";
-      const number = source.index || index + 1;
-      const cited = source.cited ? " cited" : "";
-      const title = source.cited ? "dikutip di jawaban" : "dibaca model, tidak dikutip";
-      return '<span class="cite' + cited + '" title="' + title + '"><b>[' + number + "]</b>" + escapeHtml(label) + page + link + " " + score + "</span>";
-    }).join("");
-    node.appendChild(cites);
-  }
+  // Sitasi [n]: penanda kecil; arahkan untuk melihat dokumennya, klik untuk menyorot sumbernya.
+  bubble.querySelectorAll(".cref").forEach((ref) => {
+    const source = byNumber[ref.dataset.n];
+    if (!source) {
+      ref.replaceWith(document.createTextNode("[" + ref.dataset.n + "]"));
+      return;
+    }
+    const where = sourceWhere(source);
+    ref.title = (source.document_name || source.document_id) + (where ? " — " + where : "");
+    ref.tabIndex = 0;
+    ref.setAttribute("role", "button");
+    ref.setAttribute("aria-label", "Sumber " + ref.dataset.n + ": " + ref.title);
+    const go = () => flashSource(node, ref.dataset.n);
+    ref.addEventListener("click", go);
+    ref.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); go(); } });
+  });
 
   if (data.computed) node.appendChild(computedBlock(data.computed));
   if (data.table_note) {
@@ -1329,46 +1384,74 @@ function renderAnswer(node, data) {
     node.appendChild(note);
   }
 
+  if (sources.length) {
+    const cited = sources.filter((source) => source.cited);
+    // Respons lama tanpa penanda "cited": semua sumber dianggap dipakai.
+    const primary = cited.length || sources.some((source) => source.cited === false) ? cited : sources;
+    const rest = sources.filter((source) => primary.indexOf(source) < 0);
+    const box = document.createElement("section");
+    box.className = "answer-sources";
+    const primaryGroups = sourceGroups(primary);
+    box.innerHTML = '<div class="src-head"><span>Sumber</span><span class="src-count">' +
+      (primaryGroups.length ? primaryGroups.length + " dokumen dikutip" : "tidak ada yang dikutip") + "</span></div>" +
+      (primaryGroups.length ? sourceListHtml(primaryGroups) : "") +
+      (rest.length ? '<details class="src-more"><summary>Juga dibaca model, tidak dikutip (' + rest.length + ")</summary>" +
+        sourceListHtml(sourceGroups(rest)) + "</details>" : "");
+    // Arahkan ke satu lokasi sumber -> sorot sitasinya di jawaban.
+    box.querySelectorAll(".src-loc").forEach((loc) => {
+      const refs = () => bubble.querySelectorAll('.cref[data-n="' + loc.dataset.n + '"]');
+      loc.addEventListener("mouseenter", () => refs().forEach((ref) => ref.classList.add("hl")));
+      loc.addEventListener("mouseleave", () => refs().forEach((ref) => ref.classList.remove("hl")));
+    });
+    node.appendChild(box);
+  }
+
   const usage = data.usage || {};
   const route = data.route || {};
-  const chips = [
-    ["keputusan", route.capability ? route.capability + " (" + route.source + ")" : "-"],
-    ["model", data.model || usage.model || "-"],
-  ];
+  const rows = [];
+  rows.push(["Model", data.model || usage.model || "-"]);
   if (data.computed) {
-    chips.push(["sumber data", "tabel (dihitung)"]);
+    rows.push(["Sumber data", "tabel (dihitung)"]);
+    if (usage.computed_rows) rows.push(["Baris dihitung", usage.computed_rows]);
   } else {
-    chips.push(["reranker", usage.reranker || "-"]);
-    chips.push(["context_tokens", usage.context_tokens != null ? usage.context_tokens : "-"]);
+    if (usage.best_score != null) {
+      rows.push(["Skor terbaik", fmtScore(usage.best_score) + (usage.relevance_gate ? " · " + (GATE_LABELS[usage.relevance_gate] || usage.relevance_gate) : "")]);
+    }
+    rows.push(["Reranker", usage.reranker || "-"]);
     if (usage.context_chunks) {
-      const extra = usage.context_expanded_chunks ? " (+" + usage.context_expanded_chunks + " pelengkap)" : "";
-      chips.push(["bagian di konteks", usage.context_chunks + extra]);
+      rows.push(["Bagian di konteks", usage.context_chunks + (usage.context_expanded_chunks ? " (+" + usage.context_expanded_chunks + " pelengkap)" : "")]);
     }
-    const coverage = usage.document_coverage || [];
-    if (coverage.length) {
-      const item = coverage[0];
+    if (usage.context_tokens != null) rows.push(["Token konteks", Number(usage.context_tokens).toLocaleString("id-ID")]);
+    (usage.document_coverage || []).slice(0, 3).forEach((item) => {
       const total = item.total || item.included;
-      chips.push([
-        "dokumen",
-        (item.document_name || item.document_id) + ": " + item.included + "/" + total + (item.complete ? " lengkap" : " sebagian"),
-      ]);
-    }
+      rows.push(["Cakupan " + (item.document_name || item.document_id), item.included + "/" + total + (item.complete ? " · lengkap" : " · sebagian")]);
+    });
   }
-  if (!data.computed && usage.best_score != null) {
-    chips.push(["skor terbaik", fmtScore(usage.best_score) + (usage.relevance_gate ? " (" + (GATE_LABELS[usage.relevance_gate] || usage.relevance_gate) + ")" : "")]);
-  }
-  if (usage.search_query) chips.push(["dicari bersama pertanyaan sebelumnya", "ya"]);
-  chips.push(["retrieval_ms", usage.retrieval_ms != null ? usage.retrieval_ms : "-"]);
-  chips.push(["rendering_ms", usage.generation_ms != null ? Math.round(usage.generation_ms) : "-"]);
-  if (usage.computed_rows) chips.push(["baris dihitung", usage.computed_rows]);
-  if (data.no_answer_reason) chips.push(["alasan", NO_ANSWER_REASONS[data.no_answer_reason] || data.no_answer_reason]);
+  if (usage.search_query) rows.push(["Pencarian", "digabung dengan pertanyaan sebelumnya"]);
+  rows.push(["Waktu cari", fmtMs(usage.retrieval_ms)]);
+  rows.push(["Waktu menjawab", fmtMs(usage.generation_ms)]);
+  rows.push(["Keputusan", route.capability ? route.capability + " (" + route.source + ")" : "-"]);
+  if (data.no_answer_reason) rows.push(["Alasan", NO_ANSWER_REASONS[data.no_answer_reason] || data.no_answer_reason]);
 
-  const meta = document.createElement("div");
-  meta.className = "meta";
-  meta.innerHTML = chips.map((pair) =>
-    "<span><span class=\"k\">" + escapeHtml(pair[0]) + ":</span><span class=\"v\">" + escapeHtml(pair[1]) + "</span></span>").join("");
-  node.appendChild(meta);
-  if (data.grounded === false) node.classList.add("no-answer");
+  const foot = document.createElement("div");
+  foot.className = "answer-foot";
+  const total = (usage.retrieval_ms || 0) + (usage.generation_ms || 0);
+  const summary = [data.model || usage.model, total ? fmtMs(total) : ""].filter(Boolean).join(" · ");
+  foot.innerHTML = '<div class="answer-tools"></div>' +
+    '<details class="answer-diag"><summary><span>' + escapeHtml(summary || "Detail") + '</span><b>Detail</b></summary>' +
+    '<dl class="diag-grid">' + rows.map((row) => "<dt>" + escapeHtml(row[0]) + "</dt><dd>" + escapeHtml(row[1]) + "</dd>").join("") +
+    "</dl></details>";
+  // Salin sebagai Markdown: pemakai meminta hasilnya berformat .md (teks Markdown), bukan berkas.
+  if (answer.trim() && data.grounded !== false) {
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "chip-btn";
+    copy.textContent = "Salin .md";
+    copy.title = "Salin jawaban sebagai teks Markdown";
+    copy.addEventListener("click", () => copyMarkdown(copy, answer));
+    foot.querySelector(".answer-tools").appendChild(copy);
+  }
+  node.appendChild(foot);
 }
 
 function renderHits(node, data) {

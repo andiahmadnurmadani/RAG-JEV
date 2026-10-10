@@ -41,12 +41,15 @@ def test_the_console_serves_the_markdown_renderer():
     assert app_tag, "index.html tidak memuat app.js dengan cap versi"
     assert markdown_tag.start() < app_tag.start(), "markdown.js harus dimuat sebelum app.js"
     assert markdown_tag.group(1) == app_tag.group(1), "cap versi markdown.js dan app.js harus sama"
-    assert (REPO / "app" / "ui" / "markdown.js").exists()
+    renderer = (REPO / "app" / "ui" / "markdown.js").read_text(encoding="utf-8")
+    # `const Markdown` di skrip biasa BUKAN properti window: tanpa ekspor eksplisit app.js selalu
+    # jatuh ke teks mentah (bug nyata: jawaban tampil dengan ## dan | apa adanya).
+    assert "window.Markdown = Markdown" in renderer, "markdown.js tidak mengekspos window.Markdown"
 
 
 def test_the_renderer_is_actually_used_for_answers_and_summaries():
     script = (REPO / "app" / "ui" / "app.js").read_text(encoding="utf-8")
-    assert "window.Markdown.render(answer)" in script, "jawaban tidak dirender sebagai Markdown"
+    assert "window.Markdown.render(answer, { citations: true })" in script, "jawaban tidak dirender sebagai Markdown"
     assert "Markdown.render(markdownText)" in script, "ringkasan tidak dirender sebagai Markdown"
     # Jawaban tidak boleh lagi dicetak mentah sebagai teks (itu bug yang diperbaiki).
     assert "bubble.textContent = data.answer" not in script, "jawaban masih dicetak mentah"

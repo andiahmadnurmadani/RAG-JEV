@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const { Markdown } = require(join(here, "..", "app", "ui", "markdown.js"));
 
 // Tag yang HANYA boleh lahir dari renderer kami.
-const ALLOWED_TAGS = /<\/?(?:p|strong|em|code|pre|h[1-6]|ul|ol|li|blockquote|hr|table|thead|tbody|tr|th|td|div|a|br)(?:\s[^<>]*)?\/?>/gi;
+const ALLOWED_TAGS = /<\/?(?:p|strong|em|code|pre|h[1-6]|ul|ol|li|blockquote|hr|table|thead|tbody|tr|th|td|div|a|br|sup|del)(?:\s[^<>]*)?\/?>/gi;
 
 function unsafeReasons(html) {
   const reasons = [];
@@ -38,11 +38,18 @@ const cases = [
   ["tanpa tag mentah", "<script>alert(1)</script>", ["&lt;script&gt;"]],
   ["tautan javascript ditolak", "[klik](javascript:alert(1))", []],
   ["gambar onerror tetap teks", "| a |\n|---|\n| <img src=x onerror=alert(1)> |", ["&lt;img"]],
+  ["sitasi jadi penanda", "Kuota 12 hari [1][2].", ['12 hari<sup class="cref" data-n="1">1</sup><sup class="cref" data-n="2">2</sup>.'], { citations: true }],
+  ["sitasi di tabel & daftar", "- a [3]\n\n| x | s |\n|---|---|\n| y | [4] |", ['data-n="3"', 'data-n="4"'], { citations: true }],
+  ["tautan bukan sitasi", "[1](https://example.com)", ['href="https://example.com"'], { citations: true }],
+  ["sitasi di kode tetap teks", "`arr[1]`", ["<code>arr[1]</code>"], { citations: true }],
+  ["tanpa opsi sitasi tetap teks", "Kuota [1].", ["Kuota [1]."]],
+  ["kolom angka rata kanan", "| Bulan | Nilai |\n|---|---|\n| Jan | Rp 1.200.000 |\n| Feb | 900 |", ['<td class="num">Rp 1.200.000</td>', '<th class="num">Nilai</th>', "<td>Jan</td>"]],
+  ["coret", "~~lama~~ baru", ["<del>lama</del>"]],
 ];
 
 let gagal = 0;
-for (const [name, src, harusAda] of cases) {
-  const out = Markdown.render(src);
+for (const [name, src, harusAda, options] of cases) {
+  const out = Markdown.render(src, options);
   const problems = [];
   for (const needle of harusAda) {
     if (!out.includes(needle)) problems.push("tidak mengandung: " + needle);

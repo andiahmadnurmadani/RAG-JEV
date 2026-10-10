@@ -780,6 +780,134 @@ a.btn { text-decoration: none; }
 .progress { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
 .progress span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width 400ms var(--ease); }
 
+/* ------------------------------------------------------------ jawaban RAG */
+/* Tipografi jawaban: ritme vertikal konsisten, judul berbobot, tabel rapi dengan baris belang. */
+.msg.assistant .bubble.markdown { padding: 16px 18px; }
+.markdown { font-size: 14.5px; line-height: 1.68; color: var(--text); }
+.markdown p { margin: 0 0 12px; }
+.markdown h2 { font-size: 17px; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--outline); }
+.markdown h3 { font-size: 15px; margin: 18px 0 8px; }
+.markdown h4, .markdown h5, .markdown h6 { font-size: 14px; margin: 14px 0 6px; color: var(--text-dim); }
+.markdown > h2:first-child, .markdown > h3:first-child { margin-top: 0; }
+.markdown ul, .markdown ol { margin: 0 0 12px; padding-left: 24px; }
+.markdown li { margin: 5px 0; padding-left: 2px; }
+.markdown li::marker { color: var(--text-soft); }
+.markdown ol > li::marker { font-weight: 650; font-variant-numeric: tabular-nums; }
+.markdown strong { font-weight: 650; color: var(--text); }
+.markdown del { color: var(--text-soft); }
+.markdown code {
+  font-family: var(--mono); font-size: 12.5px; padding: 1.5px 6px; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--outline);
+}
+.markdown pre code { border: 0; }
+.markdown blockquote {
+  margin: 0 0 12px; padding: 10px 14px; color: var(--text-dim);
+  background: var(--surface-2); border: 0; border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}
+.markdown blockquote p:last-child { margin-bottom: 0; }
+.md-table { margin: 4px 0 14px; border-radius: var(--r-md); box-shadow: var(--shadow-tight); }
+.md-table table { font-size: 13px; font-variant-numeric: tabular-nums; }
+.md-table th {
+  font-size: 11.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-dim); padding: 9px 12px;
+}
+.md-table td { padding: 9px 12px; }
+.md-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+.md-table tbody tr:hover td { background: var(--accent-soft); }
+.md-table .num { text-align: right; white-space: nowrap; }
+
+/* Sitasi di dalam teks: penanda bulat kecil, bukan "[1]" mentah. */
+.cref {
+  display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; margin-left: 3px;
+  border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+  font: 650 10.5px/1 var(--mono); vertical-align: super; cursor: pointer; user-select: none;
+  transition: background .15s var(--ease), color .15s var(--ease), transform .15s var(--ease);
+}
+.cref + .cref { margin-left: 2px; }
+.cref:hover, .cref:focus-visible, .cref.hl { background: var(--accent); color: var(--accent-ink); transform: translateY(-1px); }
+
+/* Sumber: dikelompokkan per dokumen, lokasi bernomor sama dengan sitasi. */
+.answer-sources, .answer-foot { font-size: 14.5px; }
+.answer-sources {
+  max-width: 72ch; display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 14px; border: 1px solid var(--outline); border-radius: var(--r-md); background: var(--surface);
+}
+.src-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.src-head > span:first-child { font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-dim); }
+.src-count { font-size: 12px; color: var(--text-soft); }
+.src-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.src {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: start; gap: 10px;
+  padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-2);
+}
+.src-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); color: var(--accent); border: 1px solid var(--outline); }
+.src-icon svg { width: 16px; height: 16px; }
+.src-main { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.src-name { font-size: 13.5px; font-weight: 620; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-locs { display: flex; flex-wrap: wrap; gap: 5px; }
+.src-loc {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 2px 8px 2px 3px; border-radius: 999px; border: 1px solid var(--outline); background: var(--surface);
+  font-size: 12px; color: var(--text-dim); text-decoration: none;
+}
+.src-loc > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-n {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); font: 650 10.5px/1 var(--mono);
+}
+a.src-loc:hover { border-color: var(--accent); color: var(--text); }
+.src-ext { width: 12px; height: 12px; flex: none; color: var(--accent); }
+.src-loc.flash { animation: src-flash 1.4s var(--ease); }
+@keyframes src-flash {
+  0%, 35% { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  100% { background: var(--surface); }
+}
+.src-loc.flash .src-n { background: var(--accent-ink); }
+.src-rel { align-self: center; width: 46px; height: 5px; border-radius: 999px; background: var(--outline); overflow: hidden; }
+.src-rel i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.src-more > summary {
+  cursor: pointer; list-style: none; font-size: 12px; color: var(--text-soft); padding: 2px 0;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.src-more > summary::-webkit-details-marker { display: none; }
+.src-more > summary::before { content: "▸"; transition: transform .15s var(--ease); }
+.src-more[open] > summary::before { transform: rotate(90deg); }
+.src-more .src-list { margin-top: 6px; opacity: .85; }
+
+/* Bilah bawah jawaban: salin + ringkasan model/waktu; detail teknis dilipat. */
+.answer-foot { max-width: 72ch; display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 12px; }
+.answer-tools { display: flex; gap: 6px; }
+.chip-btn {
+  appearance: none; cursor: pointer; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--outline); background: var(--surface); color: var(--text-dim);
+  font: 600 11.5px/1.4 inherit;
+}
+.chip-btn:hover { border-color: var(--accent); color: var(--accent); }
+.answer-diag { font-size: 11.5px; color: var(--text-soft); margin-left: auto; }
+.answer-diag > summary {
+  list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; padding: 4px 0;
+}
+.answer-diag > summary::-webkit-details-marker { display: none; }
+.answer-diag > summary span { font-family: var(--mono); }
+.answer-diag > summary b { font-weight: 650; color: var(--text-dim); }
+.answer-diag > summary b::after { content: " ▾"; }
+.answer-diag[open] > summary b::after { content: " ▴"; }
+.answer-diag[open] { flex-basis: 100%; }
+.diag-grid {
+  margin: 6px 0 0; padding: 10px 12px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 14px;
+  border: 1px solid var(--outline); border-radius: var(--r-sm); background: var(--surface-2);
+}
+.diag-grid dt { color: var(--text-dim); font-weight: 600; }
+.diag-grid dd { margin: 0; font-family: var(--mono); color: var(--text); overflow-wrap: anywhere; }
+
+/* Tidak terjawab: judul jelas + alasannya, bukan sekadar kotak kuning. */
+.noans-head { display: flex; gap: 10px; align-items: flex-start; color: var(--warn); font-weight: 650; }
+.noans-head svg { width: 18px; height: 18px; flex: none; margin-top: 2px; }
+.noans-head span { display: flex; flex-direction: column; gap: 2px; }
+.noans-head small { font-weight: 500; font-size: 12.5px; color: var(--text-dim); }
+.noans-head + * { margin-top: 10px; }
+
 /* ------------------------------------------------------------- responsive */
 
 @media (max-width: 1100px) {
@@ -866,4 +994,15 @@ a.btn { text-decoration: none; }
   input[type="text"], input[type="password"], input[type="url"], input[type="number"], input[type="search"], select, textarea { font-size: 16px; }
   .composer textarea { font-size: 16px; }
   dialog.modal { width: calc(100vw - 20px); border-radius: 22px; }
+}
+
+@media (max-width: 860px) {
+  .msg.assistant .bubble.markdown { padding: 13px 14px; }
+  .answer-sources { padding: 10px 11px; }
+  .src { grid-template-columns: 26px minmax(0, 1fr); padding: 8px; }
+  .src-icon { width: 26px; height: 26px; }
+  .src-rel { display: none; }
+  .answer-diag { margin-left: 0; }
+  .diag-grid { grid-template-columns: minmax(0, 1fr); gap: 1px 0; }
+  .diag-grid dd { margin-bottom: 6px; }
 }
