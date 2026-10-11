@@ -235,6 +235,15 @@ class Settings(BaseSettings):
     # karena ini pemasangan satu-operator; setel false bila konsol harus dijaga kode akses dan
     # hanya kunci berizin 'admin' boleh membuka Pengaturan.
     console_api_key_only: bool = True
+    # Satu password untuk membuka halaman web (konsol /ui, panduan /guide, /docs) — lihat
+    # app/core/site_gate.py. Jalur /api/* tidak terpengaruh (tetap API key). Yang disimpan
+    # hanya hash PBKDF2; ganti lewat env SITE_PASSWORD_HASH (python -c "from app.core.site_gate
+    # import hash_password; print(hash_password('...'))") atau SITE_PASSWORD (teks, dihash saat
+    # start). SITE_PASSWORD_HASH=off mematikan gerbang ini.
+    site_password: str = ""
+    site_password_hash: str = "pbkdf2_sha256$600000$4179d1ed13afd317914957ccb0b392a1$36b90ddc9a60204bcf1a8aaf65dadb366eb0c8259fa0290ed216f7e6c350aa8d"
+    site_gate_days: int = 30
+    site_gate_secret_path: str = ""
     # Kunci admin pertama saat layanan belum punya kunci sama sekali (lihat app/core/bootstrap.py).
     # Nilainya ditulis ke berkas mode 0600, bukan ke log; cabut lewat panel Kunci API setelah
     # kode akses dipasang. Matikan dengan BOOTSTRAP_ADMIN_KEY=false.

@@ -17,8 +17,9 @@ from typing import Any, AsyncIterator, Dict
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.deps import build_services, services_from_request, set_services
@@ -30,6 +31,7 @@ from app.core.logging import configure_logging, get_logger, request_log
 from app.core.metrics import incr, observe, snapshot
 from app.core.security import redact
 from app.core.settings_store import apply_overrides, read_overrides
+from app.core import site_gate
 
 logger = get_logger(__name__)
 
@@ -112,6 +114,76 @@ def create_app() -> FastAPI:
     app.include_router(extract.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)
     app.include_router(unanswered.router, prefix=prefix)
+
+    # Password situs untuk halaman web (didaftarkan sebelum observability, jadi berjalan di
+    # dalamnya: respons halaman login tetap mendapat X-Request-Id dan header keamanan).
+    gate = site_gate.SiteGate(settings)
+
+    @app.middleware("http")
+    async def site_password_gate(request: Request, call_next):
+        path = request.url.path
+        if not gate.enabled or gate.is_exempt(path):
+            return await call_next(request)
+
+        if path == site_gate.LOGIN_PATH:
+            if request.method == "POST":
+                return await _site_login(request)
+            if gate.valid(request.cookies.get(site_gate.COOKIE_NAME)):
+                return RedirectResponse(site_gate.safe_next(request.query_params.get("next")), status_code=303)
+            return _login_page(site_gate.safe_next(request.query_params.get("next")))
+        if path == site_gate.LOGOUT_PATH:
+            response = RedirectResponse(site_gate.LOGIN_PATH, status_code=303)
+            response.delete_cookie(site_gate.COOKIE_NAME, path="/")
+            return response
+
+        if gate.valid(request.cookies.get(site_gate.COOKIE_NAME)):
+            return await call_next(request)
+        if request.method in ("GET", "HEAD"):
+            return RedirectResponse(site_gate.login_redirect_target(path, request.url.query), status_code=303)
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "error": {"code": "AUTH_INVALID", "message": "Password situs diperlukan"}},
+        )
+
+    def _login_page(next_path: str, error: str = "", status_code: int = 200) -> HTMLResponse:
+        return HTMLResponse(
+            site_gate.login_page(next_path, error),
+            status_code=status_code,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def _site_login(request: Request):
+        form = site_gate.parse_form(await request.body())
+        next_path = site_gate.safe_next(form.get("next"))
+        client = auth._client(request)
+        blocked = max(
+            site_gate.THROTTLE.blocked_for(client),
+            site_gate.GLOBAL_THROTTLE.blocked_for(site_gate.GLOBAL_KEY),
+        )
+        if blocked > 0:
+            return _login_page(next_path, f"Terlalu banyak percobaan. Coba lagi dalam {int(blocked) + 1} detik.", 429)
+        # PBKDF2 sengaja lambat: jalankan di thread agar event loop tidak tertahan.
+        if not await run_in_threadpool(site_gate.verify_password, form.get("password", ""), gate.password_hash or ""):
+            site_gate.THROTTLE.register_failure(client)
+            site_gate.GLOBAL_THROTTLE.register_failure(site_gate.GLOBAL_KEY)
+            return _login_page(next_path, "Password salah.", 401)
+        site_gate.THROTTLE.reset(client)
+        response = RedirectResponse(next_path, status_code=303)
+        secure = (
+            request.url.scheme == "https"
+            or request.headers.get("x-forwarded-proto", "").lower() == "https"
+            or "https" in request.headers.get("cf-visitor", "")
+        )
+        response.set_cookie(
+            site_gate.COOKIE_NAME,
+            gate.issue(),
+            max_age=gate.max_age,
+            path="/",
+            httponly=True,
+            samesite="lax",
+            secure=secure,
+        )
+        return response
 
     @app.middleware("http")
     async def observability(request: Request, call_next):

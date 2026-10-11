@@ -57,6 +57,9 @@ def _configure_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "INDEXING_WORKERS": "1",
         # org_a = organisasi operator di pengujian: kunci admin org_a mengelola setelan global.
         "UI_SESSION_ORGANIZATION_ID": "org_a",
+        # Password situs dimatikan di pengujian lain; diuji sendiri di test_site_gate.py.
+        "SITE_PASSWORD_HASH": "off",
+        "SITE_GATE_SECRET_PATH": str(tmp_path / "site_gate_secret"),
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)
