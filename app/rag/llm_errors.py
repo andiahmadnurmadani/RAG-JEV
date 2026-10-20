@@ -21,6 +21,7 @@ SHORT: Dict[str, str] = {
     "auth": "kunci ditolak",
     "model_not_found": "model tidak ada",
     "rate_limit": "kuota/batas laju",
+    "billing": "saldo/langganan habis",
     "bad_request": "permintaan ditolak",
     "upstream": "gateway error",
     "bad_response": "balasan salah format",
@@ -48,6 +49,10 @@ KINDS: Dict[str, tuple[str, str]] = {
     "rate_limit": (
         "Kuota atau batas laju model terlampaui",
         "Model gratis/berlangganan sedang dibatasi. Tunggu, atau ganti ke model lain.",
+    ),
+    "billing": (
+        "Saldo atau langganan penyedia model habis",
+        "Penyedia di balik gateway meminta langganan/saldo (HTTP 402). Top up penyedianya, atau pilih model gratis/provider lain di Pengaturan > Model AI.",
     ),
     "bad_request": (
         "Endpoint menolak isi permintaan",
@@ -109,7 +114,12 @@ def classify(exc: BaseException, *, base_url: str = "", model: str = "") -> Dict
     upstream = redact(_upstream_message(response)).strip().replace("\n", " ")[:_SNIPPET_CHARS]
     low = upstream.lower()
 
-    if status is not None:
+    billing = any(word in low for word in (
+        "insufficient", "subscription", "pay-as-you-go", "balance", "payment required", "top up", "[402]"))
+    if billing and status != 401:
+        # Gateway sering membungkus 402 dari penyedia sebagai 503/400: sebab sebenarnya ada di badan pesan.
+        kind = "billing"
+    elif status is not None:
         if status in (401, 403):
             kind = "auth"
         elif status == 404 or (status in (400, 422) and "model" in low and any(

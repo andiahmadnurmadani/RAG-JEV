@@ -45,10 +45,10 @@ def test_status_codes_map_to_readable_kinds():
     assert _kind(HTTPStatusError("x", _Resp(502, "bad gateway"))) == "upstream"
 
 
-def test_misleading_credit_message_is_rate_limit_even_on_400():
-    # Beberapa gateway membalas 400 "insufficient credits" untuk parameter yang ditolak / kuota habis.
+def test_insufficient_credits_message_is_billing_even_on_400():
+    # Beberapa gateway membalas 400 "insufficient credits" saat saldo/langganan habis.
     err = HTTPStatusError("x", _Resp(400, {"error": {"message": "Insufficient credits"}}))
-    assert _kind(err) == "rate_limit"
+    assert _kind(err) == "billing"
 
 
 def test_model_missing_detected_from_400_body():
@@ -85,3 +85,9 @@ def test_parameter_hints_drive_adaptive_retry():
         model="m",
     )
     assert rejects_param(temp, "temperature") and not wants_max_completion_tokens(temp)
+
+
+def test_provider_billing_error_wrapped_in_503_is_reported_as_billing():
+    body = {"error": {"message": "[api-airforce/kimi] [402]: This model requires an active subscription or a positive Pay-as-you-Go balance"}}
+    info = classify(HTTPStatusError("503", _Resp(503, body)), base_url=URL, model="af/kimi")
+    assert info["kind"] == "billing" and info["short"] == "saldo/langganan habis"
