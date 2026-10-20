@@ -951,6 +951,27 @@ function setConnection(tone, text) {
   $("conn-text").textContent = text;
 }
 
+const DEP_LABELS = { qdrant: "Qdrant", embedding: "Embedding", reranker: "Reranker", llm: "Model AI", jev: "Jev" };
+
+function depLabel(name) {
+  return DEP_LABELS[name] || name;
+}
+
+/* Daftar gangguan dengan sebab, bukan hanya nama komponen: kendala dan letaknya langsung terlihat. */
+function issuesHtml(names, errors) {
+  const rows = names.map((name) => {
+    const info = errors[name] || {};
+    const where = [info.host, info.model].filter(Boolean).join(" / ");
+    let line = "<li><strong>" + escapeHtml(depLabel(name)) + "</strong>: " + escapeHtml(info.title || "tidak sehat");
+    if (info.status) line += " <span class=\"mono\">HTTP " + escapeHtml(String(info.status)) + "</span>";
+    if (where) line += " <span class=\"mono\">(" + escapeHtml(where) + ")</span>";
+    if (info.upstream) line += "<br><em>Kata endpoint:</em> <span class=\"mono\">" + escapeHtml(info.upstream) + "</span>";
+    if (info.hint) line += "<br><em>Saran:</em> " + escapeHtml(info.hint);
+    return line + "</li>";
+  });
+  return "<ul style=\"margin:.4em 0 0 1.1em;padding:0\">" + rows.join("") + "</ul>";
+}
+
 async function checkConnection() {
   readConnInputs();
   if (!credential()) {
@@ -966,12 +987,15 @@ async function checkConnection() {
     state.limits.max_mb = typeof detail.max_upload_mb === "number" ? detail.max_upload_mb : null;
     state.limits.allowed = detail.allowed_mime || [];
     state.limits.allowed_ext = detail.allowed_extensions || [];
-    const bad = Object.keys(deps).filter((k) => deps[k] === "error");
-    setConnection(bad.length ? "warn" : "ok", bad.length ? "sebagian" : "siap");
+    const bad = Object.keys(deps).filter((k) => deps[k] !== "ok" && deps[k] !== "disabled");
+    setConnection(bad.length ? "warn" : "ok", bad.length ? "sebagian: " + bad.map(depLabel).join(", ") : "siap");
     note("conn-status", bad.length ? "warn" : "ok",
       "Terhubung. Model: <strong>" + escapeHtml(detail.llm_model || "-") + "</strong> - Jev: " +
       escapeHtml(detail.jev_mode || "-") + " (" + escapeHtml(detail.jev_provider || "-") + ")" +
-      (bad.length ? ". Gangguan: " + escapeHtml(bad.join(", ")) : ""));
+      (bad.length ? issuesHtml(bad, detail.errors || {}) : ""));
+    $("conn-pill").title = bad.length
+      ? bad.map((k) => depLabel(k) + ": " + ((detail.errors || {})[k] || {}).title).join("\n")
+      : "Semua layanan sehat";
     $("drop-hint").textContent = extensionSummary(allowedExtensions(), state.limits.max_mb);
     $("file-input").setAttribute("accept", allowedExtensions().join(","));
     savePrefs();

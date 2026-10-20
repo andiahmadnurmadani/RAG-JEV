@@ -61,6 +61,8 @@ def ready(request: Request, response: Response) -> Dict[str, Any]:
         "web": describe_settings(settings),
     }
 
+    detail["errors"] = _dependency_errors(dependencies, services)
+
     critical = ("qdrant", "embedding")
     if any(dependencies[name] != "ok" for name in critical):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -97,3 +99,32 @@ def metrics(request: Request, context: TrustedContext = Depends(trusted_context)
     payload["collection"] = qdrant_collections.collection_info(services.settings)
     payload["jev_status"] = services.jev.status
     return payload
+
+
+_GENERIC_HINTS = {
+    "qdrant": ("Qdrant tidak menjawab", "Periksa container/layanan Qdrant dan QDRANT_URL; tanpa Qdrant pencarian dan indexing mati."),
+    "embedding": ("Model embedding tidak siap", "Model belum terunduh atau gagal dimuat; lihat log server saat start. Pencarian dan indexing mati."),
+    "reranker": ("Reranker tidak siap", "Pencarian tetap jalan, tetapi urutan hasil tidak diperhalus."),
+    "jev": ("Jev tidak sehat", "Routing Jev gagal; permintaan memakai jalur heuristik sampai Jev pulih."),
+    "llm": ("Model AI tidak menjawab", "Lihat Pengaturan > Model AI."),
+}
+
+
+def _dependency_errors(dependencies: Dict[str, str], services: Any) -> Dict[str, Dict[str, Any]]:
+    """Sebab tiap dependensi yang bermasalah, supaya operator tidak hanya melihat kata 'error'.
+
+    Hanya dependensi yang menyala tapi rusak yang dimuat; ``disabled`` bukan gangguan.
+    """
+    errors: Dict[str, Dict[str, Any]] = {}
+    for name, value in dependencies.items():
+        if value in {"ok", "disabled"}:
+            continue
+        title, hint = _GENERIC_HINTS.get(name, (f"{name} tidak sehat", ""))
+        entry: Dict[str, Any] = {"kind": "unknown", "title": title, "hint": hint}
+        if name == "llm":
+            probe = getattr(services.generator, "health_detail", None)
+            info = probe() if probe else None
+            if info:
+                entry = dict(info)
+        errors[name] = entry
+    return errors

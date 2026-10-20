@@ -25,6 +25,7 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.parsing.sanitize import foreign_tokens, strip_foreign_tokens
+from app.rag.llm_errors import classify, rejects_param, summarize, wants_max_completion_tokens
 from app.rag.context import UNTRUSTED_NOTICE, BuiltContext
 
 logger = get_logger(__name__)
@@ -325,7 +326,9 @@ class LLMClient:
         payload = None
         rejected: List[str] = []
         last_error: Optional[str] = None
-        for attempt in range(len(optional) + 1):
+        last_info: Optional[Dict[str, Any]] = None
+        # +2: ruang untuk menyesuaikan parameter dasar (max_tokens -> max_completion_tokens, tanpa temperature).
+        for attempt in range(len(optional) + 3):
             request_body = dict(body)
             request_body.update(optional)
             try:
@@ -340,6 +343,17 @@ class LLMClient:
                 break
             except Exception as exc:  # noqa: BLE001
                 last_error = f"{exc}"
+                last_info = info = classify(exc, base_url=settings.llm_base_url, model=self.model)
+                # Model penalar (mis. keluarga o-series/codex lewat gateway) menolak parameter dasar:
+                # sesuaikan dengan yang diminta endpoint, bukan menggagalkan permintaan.
+                if wants_max_completion_tokens(info) and "max_tokens" in body:
+                    body["max_completion_tokens"] = body.pop("max_tokens")
+                    rejected.append("max_tokens")
+                    continue
+                if rejects_param(info, "temperature") and "temperature" in body:
+                    body.pop("temperature", None)
+                    rejected.append("temperature")
+                    continue
                 # 4xx/422 -> parameter opsional mungkin penyebabnya: buang satu, coba lagi.
                 # Galat jaringan/5xx langsung dilaporkan (bukan soal parameter).
                 if optional and ("400" in last_error or "422" in last_error):
@@ -347,12 +361,13 @@ class LLMClient:
                     optional.pop(dropped, None)
                     rejected.append(dropped)
                     continue
-                raise AppError("LLM_FAILED", f"LLM request failed: {exc}") from exc
+                raise AppError("LLM_FAILED", summarize(info), details={"llm": info}) from exc
         if payload is None:
             # Semua percobaan gagal: laporkan galat ASLI terakhir, jangan menyalahkan parameter.
             raise AppError(
                 "LLM_FAILED",
-                f"LLM request failed: {last_error or 'endpoint menolak setiap permintaan'}",
+                summarize(last_info) if last_info else f"LLM request failed: {last_error or 'endpoint menolak setiap permintaan'}",
+                details={"llm": last_info} if last_info else None,
             )
 
         latency_ms = (time.perf_counter() - started) * 1000
@@ -360,7 +375,8 @@ class LLMClient:
             choice = payload["choices"][0]
             text = choice["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
-            raise AppError("LLM_FAILED", "LLM response did not contain a completion") from exc
+            info = classify(exc, base_url=settings.llm_base_url, model=self.model)
+            raise AppError("LLM_FAILED", summarize(info), details={"llm": info}) from exc
 
         usage_block = payload.get("usage") or {}
         usage = LLMUsage(
@@ -376,19 +392,32 @@ class LLMClient:
     # (kuota model terkuras, worker tertahan sampai 30 dtk).
     _HEALTH_TTL = 60.0
 
-    def health(self) -> str:
+    def _probe(self) -> tuple[str, Optional[Dict[str, Any]]]:
         key = (self._settings.llm_base_url, self._settings.llm_model)
         cached = getattr(self, "_health_cache", None)
         if cached and cached[0] == key and time.monotonic() - cached[1] < self._HEALTH_TTL:
-            return cached[2]
+            return cached[2], cached[3]
+        started = time.perf_counter()
+        info: Optional[Dict[str, Any]] = None
         try:
-            self.chat([{"role": "user", "content": "ping"}], max_tokens=4, temperature=0.0, timeout=30)
+            self.chat([{"role": "user", "content": "ping"}], max_tokens=16, temperature=0.0, timeout=30)
             verdict = "ok"
         except Exception as exc:  # noqa: BLE001
-            logger.warning("llm health check failed: %s", exc)
+            details = getattr(exc, "details", None) or {}
+            info = details.get("llm") or classify(exc, base_url=self._settings.llm_base_url, model=self.model)
+            logger.warning("llm health check failed: %s", summarize(info))
             verdict = "error"
-        self._health_cache = (key, time.monotonic(), verdict)
-        return verdict
+        if info is not None:
+            info = dict(info, latency_ms=round((time.perf_counter() - started) * 1000))
+        self._health_cache = (key, time.monotonic(), verdict, info)
+        return verdict, info
+
+    def health(self) -> str:
+        return self._probe()[0]
+
+    def health_detail(self) -> Optional[Dict[str, Any]]:
+        """Sebab kegagalan terakhir (dari cache yang sama dengan ``health``); None bila sehat."""
+        return self._probe()[1]
 
 
 def build_llm_client(settings: Settings):
@@ -795,6 +824,10 @@ class Generator:
 
     def health(self) -> str:
         return self._client.health()
+
+    def health_detail(self) -> Optional[Dict[str, Any]]:
+        probe = getattr(self._client, "health_detail", None)
+        return probe() if probe else None
 
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
