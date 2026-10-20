@@ -39,6 +39,17 @@ from app.jev.systemone import SystemOneClient
 from app.rag.generator import build_llm_client
 
 logger = get_logger(__name__)
+from app.rag.llm_errors import classify, summarize
+
+
+class _StatusFailure(Exception):
+    """Bungkus balasan HTTP >= 400 supaya bisa diklasifikasi seperti galat httpx."""
+
+    def __init__(self, response):
+        super().__init__(f"HTTP {response.status_code}")
+        self.response = response
+
+
 router = APIRouter(tags=["settings"])
 
 _BLOCKED_HOSTS = {"169.254.169.254", "metadata.google.internal", "metadata", "localhost.localdomain"}
@@ -391,6 +402,11 @@ def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
         unanswered[field] = value
 
     llm = updates.get("llm") or {}
+    if "api_style" in llm:
+        style = str(llm["api_style"] or "auto").strip().lower()
+        if style not in {"auto", "openai", "anthropic"}:
+            raise AppError("VALIDATION_ERROR", "llm.api_style harus auto, openai, atau anthropic")
+        llm["api_style"] = style
     if "max_tokens" in llm:
         try:
             value = int(llm["max_tokens"])
@@ -534,21 +550,23 @@ def list_llm_models(
     import httpx
 
     url = base + "/models"
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": "rag-jev/1.0 (knowledge-service)"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
     started = time.perf_counter()
     try:
         response = httpx.get(url, headers=headers, timeout=min(services.settings.llm_timeout, 20.0))
     except Exception as exc:  # noqa: BLE001
-        raise AppError("LLM_FAILED", f"Tidak bisa menghubungi {url}: {exc}") from exc
+        info = classify(exc, base_url=base, model="")
+        raise AppError("LLM_FAILED", f"{summarize(info)} [{url}]", details={"llm": info}) from exc
     latency_ms = round((time.perf_counter() - started) * 1000, 2)
 
     if response.status_code >= 400:
+        info = classify(_StatusFailure(response), base_url=base, model="")
         raise AppError(
             "LLM_FAILED",
-            f"Endpoint menjawab HTTP {response.status_code} untuk {url}",
-            details={"status": response.status_code, "latency_ms": latency_ms},
+            f"{summarize(info)} [{url}]",
+            details={"status": response.status_code, "latency_ms": latency_ms, "llm": info},
         )
     try:
         body = response.json()

@@ -168,6 +168,9 @@ class Settings(BaseSettings):
     # nama model dibaca per panggilan, jadi setelan/env/UI bisa memakai model apa pun
     # yang disediakan endpoint OpenAI-compatible.
     llm_model: str = "Qwen/Qwen3-4B"
+    # Format kawat endpoint: "openai" (/chat/completions), "anthropic" (/messages), atau "auto"
+    # (OpenCode Go: model minimax* memakai /messages, lainnya /chat/completions).
+    llm_api_style: Literal["auto", "openai", "anthropic"] = "auto"
     llm_timeout: float = 120.0
     # Batas token keluaran. 1024 terlalu kecil untuk pertanyaan yang menyangkut dokumen besar:
     # model berhenti di tengah jalan dan jawabannya kosong - yang lalu terbaca seolah datanya

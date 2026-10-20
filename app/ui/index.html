@@ -472,12 +472,27 @@
             </select>
           </div>
           <div class="field">
+            <label>Preset penyedia</label>
+            <div>
+              <button class="btn" id="btn-preset-opencode-go" type="button">OpenCode Go</button>
+              <span class="help" id="llm-preset-help">Mengisi Base URL <span class="mono">https://opencode.ai/zen/go/v1</span>. Kunci diambil dari opencode.ai/auth, lalu klik <b>Muat daftar model</b>.</span>
+            </div>
+          </div>
+          <div class="field">
             <label for="llm-model">Model</label>
             <input type="text" id="llm-model" spellcheck="false" placeholder="cmc/Qwen/Qwen3.6-Plus">
           </div>
           <div class="field">
             <label for="llm-base">Base URL</label>
             <input type="text" id="llm-base" spellcheck="false" placeholder="https://gateway.example/v1">
+          </div>
+          <div class="field">
+            <label for="llm-style">Format API</label>
+            <select id="llm-style">
+              <option value="auto">auto (minimax di OpenCode Go memakai /messages)</option>
+              <option value="openai">openai (/chat/completions)</option>
+              <option value="anthropic">anthropic (/messages)</option>
+            </select>
           </div>
           <div class="field">
             <label for="llm-key">API key</label>

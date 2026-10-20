@@ -120,7 +120,7 @@ def _dependency_errors(dependencies: Dict[str, str], services: Any) -> Dict[str,
         if value in {"ok", "disabled"}:
             continue
         title, hint = _GENERIC_HINTS.get(name, (f"{name} tidak sehat", ""))
-        entry: Dict[str, Any] = {"kind": "unknown", "title": title, "hint": hint}
+        entry: Dict[str, Any] = {"kind": "unknown", "short": "tidak sehat", "title": title, "hint": hint}
         if name == "llm":
             probe = getattr(services.generator, "health_detail", None)
             info = probe() if probe else None

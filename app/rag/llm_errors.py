@@ -14,6 +14,19 @@ from urllib.parse import urlsplit
 _SECRET_RE = re.compile(r"(Bearer\s+|sk-|key[=:]\s*)[A-Za-z0-9_.\-]{6,}", re.IGNORECASE)
 _SNIPPET_CHARS = 300
 
+# kind -> label sangat pendek untuk lencana status ("Model AI: kunci ditolak")
+SHORT: Dict[str, str] = {
+    "unreachable": "tidak terjangkau",
+    "timeout": "timeout",
+    "auth": "kunci ditolak",
+    "model_not_found": "model tidak ada",
+    "rate_limit": "kuota/batas laju",
+    "bad_request": "permintaan ditolak",
+    "upstream": "gateway error",
+    "bad_response": "balasan salah format",
+    "unknown": "gagal",
+}
+
 # kind -> (judul singkat untuk UI, saran perbaikan)
 KINDS: Dict[str, tuple[str, str]] = {
     "unreachable": (
@@ -124,6 +137,7 @@ def classify(exc: BaseException, *, base_url: str = "", model: str = "") -> Dict
     raw = redact(str(exc)).strip().replace("\n", " ")[:_SNIPPET_CHARS]
     return {
         "kind": kind,
+        "short": SHORT[kind],
         "title": title,
         "hint": hint,
         "status": status,

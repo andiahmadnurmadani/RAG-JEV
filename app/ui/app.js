@@ -988,13 +988,16 @@ async function checkConnection() {
     state.limits.allowed = detail.allowed_mime || [];
     state.limits.allowed_ext = detail.allowed_extensions || [];
     const bad = Object.keys(deps).filter((k) => deps[k] !== "ok" && deps[k] !== "disabled");
-    setConnection(bad.length ? "warn" : "ok", bad.length ? "sebagian: " + bad.map(depLabel).join(", ") : "siap");
+    const errs = detail.errors || {};
+    const critical = bad.some((k) => k === "qdrant" || k === "embedding");
+    setConnection(bad.length ? (critical ? "err" : "warn") : "ok",
+      bad.length ? bad.map((k) => depLabel(k) + ": " + ((errs[k] || {}).short || "bermasalah")).join(" · ") : "siap");
     note("conn-status", bad.length ? "warn" : "ok",
       "Terhubung. Model: <strong>" + escapeHtml(detail.llm_model || "-") + "</strong> - Jev: " +
       escapeHtml(detail.jev_mode || "-") + " (" + escapeHtml(detail.jev_provider || "-") + ")" +
-      (bad.length ? issuesHtml(bad, detail.errors || {}) : ""));
+      (bad.length ? issuesHtml(bad, errs) : ""));
     $("conn-pill").title = bad.length
-      ? bad.map((k) => depLabel(k) + ": " + ((detail.errors || {})[k] || {}).title).join("\n")
+      ? bad.map((k) => depLabel(k) + ": " + (errs[k] || {}).title).join("\n")
       : "Semua layanan sehat";
     $("drop-hint").textContent = extensionSummary(allowedExtensions(), state.limits.max_mb);
     $("file-input").setAttribute("accept", allowedExtensions().join(","));
@@ -1622,6 +1625,7 @@ async function loadSettings() {
     $("llm-provider").value = llm.provider || "openai_compatible";
     $("llm-base").value = llm.base_url || "";
     $("llm-model").value = llm.model || "";
+    $("llm-style").value = llm.api_style || "auto";
     $("llm-key-help").textContent = llm.api_key_set
       ? "Kunci tersimpan " + (llm.api_key_hint || "") + ". Biarkan kosong untuk memakainya."
       : "Belum ada kunci tersimpan. Isi bila endpoint memerlukannya.";
@@ -1683,6 +1687,7 @@ async function saveLlm() {
     provider: $("llm-provider").value,
     base_url: $("llm-base").value.trim(),
     model: $("llm-model").value.trim(),
+    api_style: $("llm-style").value,
     max_tokens: Number($("llm-max-tokens").value) || 8192,
     temperature: Number($("llm-temperature").value),
     top_p: Number($("llm-top-p").value),
@@ -2757,6 +2762,13 @@ function wire() {
 
   $("btn-save-llm").addEventListener("click", saveLlm);
   $("btn-llm-models").addEventListener("click", probeModels);
+  $("btn-preset-opencode-go").addEventListener("click", () => {
+    $("llm-provider").value = "openai_compatible";
+    $("llm-base").value = "https://opencode.ai/zen/go/v1";
+    $("llm-style").value = "auto";
+    $("llm-key").focus();
+    note("llm-note", "info", "Preset OpenCode Go terisi. Tempel API key dari opencode.ai/auth, klik <b>Muat daftar model</b>, pilih model, lalu simpan. Catatan: OpenCode Go dibuat untuk agen koding; trafik aplikasi lain bisa dibatasi penyedia.");
+  });
   $("llm-model-filter").addEventListener("input", renderModels);
   $("btn-llm-picker-close").addEventListener("click", () => { $("llm-picker").hidden = true; });
   $("btn-jev-probe").addEventListener("click", probeJev);

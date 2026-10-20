@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -281,6 +282,82 @@ class LLMClient:
         # Read per call: the settings screen can change the model of a running process.
         return self._settings.llm_model
 
+    # OpenCode Go meminta klien memperkenalkan diri dan mengirim ID sesi yang stabil
+    # (x-opencode-session); tanpa itu permintaan ditolak 400 MissingSessionID.
+    _USER_AGENT = "rag-jev/1.0 (knowledge-service)"
+
+    def _headers(self) -> Dict[str, str]:
+        settings = self._settings
+        headers = {"Content-Type": "application/json", "User-Agent": self._USER_AGENT}
+        if settings.llm_api_key:
+            headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+        if "opencode.ai" in (settings.llm_base_url or "").lower():
+            session = getattr(self, "_session_id", None)
+            if session is None:
+                session = self._session_id = str(uuid.uuid4())
+            headers["x-opencode-session"] = session
+        return headers
+
+    def _style(self) -> str:
+        """openai | anthropic. auto: OpenCode Go menyajikan model minimax* lewat /messages."""
+        style = (getattr(self._settings, "llm_api_style", "auto") or "auto").lower()
+        if style in {"openai", "anthropic"}:
+            return style
+        base = (self._settings.llm_base_url or "").lower()
+        if "opencode.ai" in base and self.model.lower().startswith("minimax"):
+            return "anthropic"
+        return "openai"
+
+    def _chat_anthropic(
+        self,
+        messages: Sequence[Dict[str, str]],
+        *,
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+        timeout: Optional[float],
+    ) -> tuple[str, LLMUsage]:
+        """Format Anthropic Messages (/messages): system dipisah, max_tokens wajib."""
+        import httpx
+
+        settings = self._settings
+        url = settings.llm_base_url.rstrip("/") + "/messages"
+        headers = self._headers()
+        if settings.llm_api_key:
+            headers["x-api-key"] = settings.llm_api_key
+        headers["anthropic-version"] = "2023-06-01"
+        system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
+        turns = [{"role": m["role"], "content": m["content"]} for m in messages if m.get("role") != "system"]
+        body: Dict[str, Any] = {
+            "model": self.model,
+            "messages": turns,
+            "max_tokens": settings.llm_max_tokens if max_tokens is None else max_tokens,
+            "temperature": settings.llm_temperature if temperature is None else temperature,
+        }
+        if system:
+            body["system"] = system
+        started = time.perf_counter()
+        try:
+            response = httpx.post(url, json=body, headers=headers, timeout=timeout or settings.llm_timeout)
+            response.raise_for_status()
+            payload = response.json()
+            text = "".join(
+                block.get("text", "") for block in payload["content"] if isinstance(block, dict) and block.get("type") == "text"
+            )
+        except Exception as exc:  # noqa: BLE001
+            info = classify(exc, base_url=settings.llm_base_url, model=self.model)
+            raise AppError("LLM_FAILED", summarize(info), details={"llm": info}) from exc
+        usage_block = payload.get("usage") or {}
+        usage = LLMUsage(
+            input_tokens=int(usage_block.get("input_tokens") or 0),
+            output_tokens=int(usage_block.get("output_tokens") or 0),
+            latency_ms=round((time.perf_counter() - started) * 1000, 2),
+            model=payload.get("model") or self.model,
+            finish_reason={"end_turn": "stop", "max_tokens": "length"}.get(
+                str(payload.get("stop_reason") or ""), str(payload.get("stop_reason") or "")
+            ),
+        )
+        return text.strip(), usage
+
     def chat(
         self,
         messages: Sequence[Dict[str, str]],
@@ -293,10 +370,12 @@ class LLMClient:
         import httpx
 
         settings = self._settings
+        if self._style() == "anthropic":
+            return self._chat_anthropic(
+                messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout
+            )
         url = settings.llm_base_url.rstrip("/") + "/chat/completions"
-        headers = {"Content-Type": "application/json"}
-        if settings.llm_api_key:
-            headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+        headers = self._headers()
         body: Dict[str, Any] = {
             "model": self.model,
             "messages": list(messages),
