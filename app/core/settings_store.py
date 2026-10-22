@@ -97,6 +97,14 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "provider": ("embedding_provider", "str"),
         "model": ("embedding_fastembed_model", "str"),
     },
+    # Batas permintaan: melindungi mesin dari klien yang membanjiri (polling, skrip). Global
+    # karena beban CPU-nya dipikul bersama. 0 = tanpa batas.
+    "limits": {
+        "per_minute": ("rate_limit_per_minute", "int"),
+        "read_per_minute": ("rate_limit_read_per_minute", "int"),
+        "global_per_minute": ("rate_limit_global_per_minute", "int"),
+        "max_concurrent_queries": ("max_concurrent_queries", "int"),
+    },
     # Pertanyaan yang tidak terjawab: apa yang dicatat dan berapa lama disimpan.
     "unanswered": {
         "enabled": ("unanswered_enabled", "bool"),

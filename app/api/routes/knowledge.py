@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 
 from app.api.deps import services_from_request
 from app.api.middleware.auth import TrustedContext, trusted_context
-from app.api.middleware.ratelimit import SlidingWindowLimiter
+from app.api.middleware.ratelimit import limits_for
 from app.api.middleware.tenant import assert_tenant_match
 from app.api.schemas import DocumentStatusOut, IndexDataOut, KnowledgeIndexRequest, KnowledgeUpdateRequest
 from app.core.errors import AppError, ok
@@ -21,17 +21,10 @@ from app.workers.indexing import STATUS_DELETED
 logger = get_logger(__name__)
 router = APIRouter(tags=["knowledge"])
 
-_limiter: SlidingWindowLimiter | None = None
-
-
-def _rate_limit(request: Request) -> None:
-    global _limiter
-    services = services_from_request(request)
-    if _limiter is None:
-        _limiter = SlidingWindowLimiter(services.settings.rate_limit_per_minute)
-    identity = getattr(request.state, "tenant_context", None)
-    key = f"{(identity.application_id if identity else 'anon')}"
-    _limiter.check(key)
+def _rate_limit(request: Request, context: TrustedContext, kind: str = "heavy") -> None:
+    """Per aplikasi (kunci), bukan satu ember bersama: ``kind="read"`` untuk daftar/status yang
+    biasa di-poll klien, sisanya ikut batas permintaan berat."""
+    limits_for(services_from_request(request).settings).check(context.application_id, kind)
 
 
 def validate_source_urls(payload, settings) -> None:
@@ -78,7 +71,7 @@ def index_knowledge(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Enqueue an indexing job (PRD 33: 202 Accepted, work happens in the worker)."""
-    _rate_limit(request)
+    _rate_limit(request, context)
     context.require("write")
     context.require_knowledge_base(payload.knowledge_base_id)
     organization_id = assert_tenant_match(context, payload.organization_id, where="/knowledge/index")
@@ -133,7 +126,7 @@ def list_knowledge(
     There is no ``organization_id`` parameter on purpose: a listing endpoint that accepted
     one would be the easiest place in the service to leak another tenant's catalogue.
     """
-    _rate_limit(request)
+    _rate_limit(request, context, "read")
     context.require("read")
     services = services_from_request(request)
 
@@ -214,7 +207,7 @@ def list_knowledge_bases(
     potongan yang benar-benar bisa dicari), sehingga KB lama yang catatan job-nya sudah tidak
     lengkap tetap terlihat. Kunci yang diikat ke KB tertentu hanya melihat KB miliknya.
     """
-    _rate_limit(request)
+    _rate_limit(request, context, "read")
     context.require("read")
     services = services_from_request(request)
     bases: Dict[str, Dict[str, Any]] = {}
@@ -272,7 +265,7 @@ def delete_knowledge_base(
     atau tombol yang terpencet tidak menghapus apa pun. Hanya KB milik organisasi pemanggil yang
     tersentuh; kunci yang diikat ke KB tertentu hanya bisa menghapus KB miliknya.
     """
-    _rate_limit(request)
+    _rate_limit(request, context)
     context.require("write")
     knowledge_base_id = knowledge_base_id.strip()
     context.require_knowledge_base(knowledge_base_id)
@@ -327,7 +320,7 @@ def update_knowledge(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Re-index a document: old vectors are removed before the new ones land (PRD 32)."""
-    _rate_limit(request)
+    _rate_limit(request, context)
     context.require("write")
     if payload.document_id != document_id:
         raise AppError("VALIDATION_ERROR", "document_id in the path and body must match")
@@ -366,7 +359,7 @@ def delete_knowledge(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Delete every chunk/vector of a document inside the caller's organization."""
-    _rate_limit(request)
+    _rate_limit(request, context)
     context.require("write")
     services = services_from_request(request)
 
@@ -417,7 +410,7 @@ def knowledge_status(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Job status for one document, scoped to the caller's organization."""
-    _rate_limit(request)
+    _rate_limit(request, context, "read")
     context.require("read")
     services = services_from_request(request)
     record = services.jobs.by_document(context.organization_id, document_id)

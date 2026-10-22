@@ -309,6 +309,7 @@
           <button type="button" data-panel="fmt" aria-selected="false"><svg class="ico"><use href="#i-file"/></svg><span>Format berkas</span></button>
           <button type="button" data-panel="web" aria-selected="false"><svg class="ico"><use href="#i-globe"/></svg><span>Sumber web</span></button>
           <button type="button" data-panel="summary" aria-selected="false"><svg class="ico"><use href="#i-list"/></svg><span>Ringkasan</span></button>
+          <button type="button" data-panel="limits" aria-selected="false"><svg class="ico"><use href="#i-sliders"/></svg><span>Batas permintaan</span></button>
         </nav>
         <div class="settings-panels" id="settings-panels">
       <section class="group" data-panel="conn">
@@ -785,6 +786,39 @@
         <div class="group-foot">
           <button class="btn primary" id="btn-save-unans" type="button">Simpan</button>
           <span id="unans-svc-status"></span>
+        </div>
+      </section>
+
+      <section class="group" data-panel="limits" hidden>
+        <div class="group-head">
+          <h2>Batas permintaan</h2>
+          <p>Melindungi server dari aplikasi yang mengirim terlalu banyak permintaan (misalnya polling terus-menerus). Permintaan yang melewati batas ditolak dengan kode 429 dan petunjuk kapan boleh mencoba lagi. Berlaku langsung, tanpa restart. 0 = tanpa batas.</p>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="l-per-minute">Tanya &amp; ubah knowledge, per aplikasi (per menit)</label>
+            <input type="number" id="l-per-minute" min="0" max="100000" step="10" value="240">
+            <span class="help">/query, /search, /extract, unggah, ubah dan hapus knowledge, dihitung per API key.</span>
+          </div>
+          <div class="field">
+            <label for="l-read-per-minute">Baca daftar &amp; status, per aplikasi (per menit)</label>
+            <input type="number" id="l-read-per-minute" min="0" max="100000" step="10" value="120">
+            <span class="help">Daftar dokumen, daftar knowledge base dan status dokumen, yang biasa di-poll aplikasi.</span>
+          </div>
+          <div class="field">
+            <label for="l-global-per-minute">Total semua aplikasi (per menit)</label>
+            <input type="number" id="l-global-per-minute" min="0" max="1000000" step="10" value="600">
+            <span class="help">Gabungan semua API key untuk semua permintaan di atas: rem terakhir bila banyak aplikasi ramai bersamaan.</span>
+          </div>
+          <div class="field">
+            <label for="l-concurrent">Pertanyaan yang diproses bersamaan</label>
+            <input type="number" id="l-concurrent" min="0" max="256" step="1" value="3">
+            <span class="help">Batas /query, /search dan /extract yang berjalan pada saat yang sama. Inilah yang paling menentukan beban CPU.</span>
+          </div>
+        </div>
+        <div class="group-foot">
+          <button class="btn primary" id="btn-save-limits" type="button">Simpan</button>
+          <span id="limits-svc-status"></span>
         </div>
       </section>
 

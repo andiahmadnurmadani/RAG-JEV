@@ -219,6 +219,12 @@ class Settings(BaseSettings):
     tenant_context_header: str = "X-Tenant-Context"
     require_tenant_context_token: bool = False
     rate_limit_per_minute: int = 240
+    # Batas tambahan (0 = tanpa batas); semuanya bisa diubah di layar Setelan tanpa restart.
+    # Bawaannya sengaja ketat: satu klien yang mem-poll daftar knowledge ratusan kali per menit
+    # dan pertanyaan yang diproses serentak membuat CPU mesin kecil penuh (dan panas).
+    rate_limit_read_per_minute: int = 120
+    rate_limit_global_per_minute: int = 600
+    max_concurrent_queries: int = 3
 
     # ---- kode akses konsol + sesi browser --------------------------------
     # Satu kode akses (passcode) membuka konsol tanpa perlu menempel API key. Kode disimpan

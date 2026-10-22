@@ -67,6 +67,7 @@ class SettingsUpdateRequest(BaseModel):
     summary: Optional[Dict[str, Any]] = None
     unanswered: Optional[Dict[str, Any]] = None
     embedding: Optional[Dict[str, Any]] = None
+    limits: Optional[Dict[str, Any]] = None
 
 
 class ModelsProbeRequest(BaseModel):
@@ -312,6 +313,22 @@ def _validate_uploads(updates: Dict[str, Dict[str, Any]]) -> None:
             raise AppError("VALIDATION_ERROR", "max_upload_mb harus antara 1 dan 512", details={"max_upload_mb": limit})
 
 
+LIMIT_BOUNDS = {
+    "per_minute": (0, 100_000),
+    "read_per_minute": (0, 100_000),
+    "global_per_minute": (0, 1_000_000),
+    "max_concurrent_queries": (0, 256),
+}
+
+
+def _validate_limits(updates: Dict[str, Dict[str, Any]]) -> None:
+    """0 = tanpa batas; selain itu bilangan bulat dalam rentang wajar."""
+    section = updates.get("limits") or {}
+    for field, (low, high) in LIMIT_BOUNDS.items():
+        if field in section and not (low <= int(section[field]) <= high):
+            raise AppError("VALIDATION_ERROR", f"limits.{field} harus {low}-{high} (0 = tanpa batas)")
+
+
 def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
     """Batas kewajaran sebelum disimpan: nilai ngawur membuat SEMUA permintaan gagal.
 
@@ -512,6 +529,7 @@ def update_settings(
     _validate_uploads(updates)
     _validate_retrieval(updates)
     _validate_embedding(updates)
+    _validate_limits(updates)
     before = (services.settings.embedding_provider, services.settings.embedding_fastembed_model)
 
     merged = settings_store.merge(settings_store.read_overrides(path), updates)

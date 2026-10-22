@@ -140,9 +140,22 @@ JEV_API_KEY=<rahasia>
 # keamanan
 API_KEYS_JSON={"kunci-org-a":{"user_id":"u1","organization_id":"org_a","application_id":"app_ui","permissions":["read","write","admin"]}}
 RATE_LIMIT_PER_MINUTE=240
+RATE_LIMIT_READ_PER_MINUTE=120
+RATE_LIMIT_GLOBAL_PER_MINUTE=600
+MAX_CONCURRENT_QUERIES=3
 MAX_UPLOAD_MB=32
 INDEXING_WORKERS=1
 ```
+
+Batas permintaan (0 = tanpa batas) juga bisa diubah di konsol **Setelan → Batas permintaan**
+tanpa restart. Yang melewati batas dijawab `429 RATE_LIMITED` dengan `retry_after_seconds`:
+
+| Setelan | Env | Berlaku untuk |
+|---|---|---|
+| per aplikasi | `RATE_LIMIT_PER_MINUTE` | `/query`, `/search`, `/extract`, unggah/ubah/hapus knowledge, per API key |
+| baca per aplikasi | `RATE_LIMIT_READ_PER_MINUTE` | daftar knowledge, daftar knowledge base, status dokumen (yang biasa di-poll) |
+| total | `RATE_LIMIT_GLOBAL_PER_MINUTE` | semua API key digabung |
+| bersamaan | `MAX_CONCURRENT_QUERIES` | `/query`, `/search`, `/extract` yang berjalan pada saat yang sama (beban CPU) |
 
 Urutan prioritas konfigurasi: **nilai env** dimuat lebih dulu, lalu **berkas override**
 (`SETTINGS_OVERRIDE_PATH`) yang ditulis oleh layar Pengaturan di-*apply* saat startup dan
@@ -266,6 +279,17 @@ Yang perlu diketahui dari `docker-compose.yml`:
 - `env_file: .env` + override `QDRANT_URL=http://qdrant:6333`.
 - Healthcheck memakai `GET /api/v1/health` dengan masa tenggang 60 s (unduh model saat pertama jalan).
 - Image memakai torch **CPU** (`--index-url .../wheel/cpu`) supaya ~2 GB lebih kecil.
+
+Batasi CPU dan RAM container supaya layanan tidak menghabiskan mesin (dan memanaskannya).
+Pada container yang sudah berjalan, tanpa membuat ulang:
+
+```bash
+docker update --cpus 2 --memory 8g --memory-swap 8g --pids-limit 512 <container>
+```
+
+Batas ini tersimpan di konfigurasi container dan bertahan saat restart, tetapi **hilang bila
+container dibuat ulang** (misalnya redeploy dari panel): pasang lagi, atau taruh di
+`docker run`/compose (`cpus:`, `mem_limit:`, `pids_limit:`).
 
 Catatan kejujuran: perintah Docker di bagian ini **belum dijalankan di mesin penyusun dokumen**
 (tidak ada Docker engine di Windows host maupun WSL-nya). Berkasnya sudah ada di repo dan

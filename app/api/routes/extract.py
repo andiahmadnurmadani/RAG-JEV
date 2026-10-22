@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.deps import services_from_request
 from app.api.middleware.auth import TrustedContext, trusted_context
-from app.api.middleware.ratelimit import SlidingWindowLimiter
+from app.api.middleware.ratelimit import limits_for, query_slot
 from app.api.middleware.tenant import guard_query_body, retrieval_scope
 from app.api.schemas import ExtractDataOut, ExtractRequest, SourceOut
 from app.core.errors import ok
@@ -18,15 +18,8 @@ from app.rag.pipeline import ensure_knowledge_base
 logger = get_logger(__name__)
 router = APIRouter(tags=["extract"])
 
-_limiter: SlidingWindowLimiter | None = None
-
-
 def _limit(request: Request, context: TrustedContext) -> None:
-    global _limiter
-    services = services_from_request(request)
-    if _limiter is None:
-        _limiter = SlidingWindowLimiter(services.settings.rate_limit_per_minute)
-    _limiter.check(context.application_id)
+    limits_for(services_from_request(request).settings).check(context.application_id)
 
 
 @router.post("/extract")
@@ -34,6 +27,7 @@ def extract(
     payload: ExtractRequest,
     request: Request,
     context: TrustedContext = Depends(trusted_context),
+    _slot: None = Depends(query_slot),
 ) -> Dict[str, Any]:
     _limit(request, context)
     context.require("read")

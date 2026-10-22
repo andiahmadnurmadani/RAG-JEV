@@ -10,7 +10,7 @@
 const KEY = "rag.console.v3";
 const SESSION_KEY = "rag.session.v1";
 const DEFAULT_KB = "kb_chat";
-const PANELS = ["conn", "access", "keys", "llm", "jev", "retr", "unans", "fmt", "web", "summary"];
+const PANELS = ["conn", "access", "keys", "llm", "jev", "retr", "unans", "fmt", "web", "summary", "limits"];
 const RECENT_KB_KEY = "rag.console.kbs.v1";
 const VIEWS = ["kbs", "chat", "unanswered", "eval", "settings"];
 // Versi bentuk opsi uji di localStorage. Versi lama memaksa reranker MATI di setiap pertanyaan konsol,
@@ -708,6 +708,37 @@ async function saveUnansweredService() {
     note("unans-svc-status", "ok", "Tersimpan dan langsung berlaku.");
   } catch (err) {
     note("unans-svc-status", err.code === "AUTH_FORBIDDEN" ? "warn" : "err", escapeHtml(err.message || "gagal menyimpan"));
+  }
+}
+
+const LIMIT_FIELDS = [
+  ["l-per-minute", "per_minute"],
+  ["l-read-per-minute", "read_per_minute"],
+  ["l-global-per-minute", "global_per_minute"],
+  ["l-concurrent", "max_concurrent_queries"],
+];
+
+function renderLimitsService(section) {
+  if (!section) return;
+  LIMIT_FIELDS.forEach((pair) => setNumber(pair[0], section[pair[1]]));
+}
+
+async function saveLimitsService() {
+  const limits = {};
+  for (const pair of LIMIT_FIELDS) {
+    const value = Number($(pair[0]).value);
+    if (!Number.isInteger(value) || value < 0) {
+      note("limits-svc-status", "err", "Isi bilangan bulat 0 atau lebih (0 = tanpa batas).");
+      return;
+    }
+    limits[pair[1]] = value;
+  }
+  try {
+    const data = await api("PUT", "/settings", { limits: limits });
+    renderLimitsService((data.sections || {}).limits);
+    note("limits-svc-status", "ok", "Tersimpan dan langsung berlaku.");
+  } catch (err) {
+    note("limits-svc-status", err.code === "AUTH_FORBIDDEN" ? "warn" : "err", escapeHtml(err.message || "gagal menyimpan"));
   }
 }
 
@@ -1654,6 +1685,7 @@ async function loadSettings() {
     if (data.sections.web) renderWebService(data.sections.web);
     if (data.sections.summary) renderSummaryService(data.sections.summary);
     if (data.sections.unanswered) renderUnansweredService(data.sections.unanswered);
+    if (data.sections.limits) renderLimitsService(data.sections.limits);
   } catch (err) {
     const forbidden = err.code === "AUTH_FORBIDDEN";
     const message = forbidden
@@ -2626,6 +2658,7 @@ function wire() {
   $("btn-unans-more").addEventListener("click", () => { state.unans.limit += 50; loadUnanswered(true); });
   $("dlg-note").addEventListener("close", () => { if ($("dlg-note").returnValue === "ok") saveNote(); });
   $("btn-save-unans").addEventListener("click", saveUnansweredService);
+  $("btn-save-limits").addEventListener("click", saveLimitsService);
   $("btn-save-embedding").addEventListener("click", saveEmbedding);
   $("btn-kb-new").addEventListener("click", newKbDialog);
   $("btn-kb-delete").addEventListener("click", () => openDeleteKb(state.kb));
