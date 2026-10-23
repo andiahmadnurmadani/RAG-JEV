@@ -59,6 +59,7 @@ def list_requests(
     key_id: Optional[str] = Query(default=None, max_length=100),
     application_id: Optional[str] = Query(default=None, max_length=200),
     path: Optional[str] = Query(default=None, max_length=300),
+    knowledge_base_id: Optional[str] = Query(default=None, max_length=200),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     after_id: int = Query(default=0, ge=0),
@@ -71,16 +72,19 @@ def list_requests(
     _require_admin(context, services.settings)
     store.flush(timeout=1.0)
     since = time.time() - minutes * 60
+    labels = _key_labels(services.settings)
+    needle = " ".join(q.split()).lower()
     filters = dict(
+        search_key_ids=[key for key, label in labels.items() if needle and label and needle in label.lower()],
         status=status,
         search=q,
         client_ip=client_ip or None,
         key_id=key_id or None,
         application_id=application_id or None,
         path=path or None,
+        knowledge_base_id=knowledge_base_id or None,
     )
     data = store.list(since=since, limit=limit, offset=offset, after_id=after_id or None, **filters)
-    labels = _key_labels(services.settings)
     for item in data["items"]:
         item["key_label"] = labels.get(item.get("key_id") or "", "")
     if summary:

@@ -811,7 +811,7 @@ function relativeTime(value) {
 
 /* ------------------------------------------------------------ log permintaan */
 
-const LOG_FILTER_LABELS = { client_ip: "IP", key_id: "Kunci", application_id: "Aplikasi", path: "Endpoint" };
+const LOG_FILTER_LABELS = { client_ip: "IP", key_id: "Kunci", application_id: "Aplikasi", path: "Endpoint", knowledge_base_id: "KB" };
 
 function logTime(ts) {
   const at = new Date(Number(ts) * 1000);
@@ -998,6 +998,21 @@ function renderLogs(data) {
       '<span class="log-bar"><i style="width:' + share + '%"></i></span></button></li>';
   }).join("") + "</ul>" : '<p class="empty">Belum ada data.</p>';
 
+  const kbs = summary.knowledge_bases || [];
+  const kbCount = Number(summary.knowledge_base_count || 0);
+  $("logs-kb-hint").textContent = kbCount ? logNumber(kbCount) + " KB disentuh · klik untuk memfilter" : "klik untuk memfilter";
+  $("logs-kbs").innerHTML = kbs.length ? '<ul class="log-rank">' + kbs.map((row) => {
+    const share = totals.total ? Math.round((row.count / totals.total) * 100) : 0;
+    return '<li><button type="button" class="log-rank-btn" data-filter-kb="' + escapeHtml(row.knowledge_base_id) + '">' +
+      '<span class="log-rank-main"><b class="mono">' + escapeHtml(row.knowledge_base_id) + "</b>" +
+      "<small>" + logNumber(row.callers) + " pemanggil · rata-rata " + escapeHtml(logMs(row.avg_latency_ms)) +
+      " · terakhir " + escapeHtml(logTime(row.last_seen)) +
+      (row.rate_limited ? ' · <span class="warn-text">' + logNumber(row.rate_limited) + " ditolak</span>" : "") +
+      (row.errors ? ' · <span class="err-text">' + logNumber(row.errors) + " gagal</span>" : "") + "</small></span>" +
+      '<span class="log-rank-num"><b>' + logNumber(row.count) + "</b><small>" + share + "%</small></span>" +
+      '<span class="log-bar"><i style="width:' + share + '%"></i></span></button></li>';
+  }).join("") + "</ul>" : '<p class="empty">Belum ada permintaan yang menyebut knowledge base.</p>';
+
   renderLogRows();
 }
 
@@ -1038,6 +1053,9 @@ function renderLogRow(item) {
     '<td class="mono log-when">' + escapeHtml(logTime(item.ts)) + "</td>" +
     '<td class="log-req"><span class="mono"><b>' + escapeHtml(item.method) + "</b> " + escapeHtml(item.path) + "</span>" +
     (item.detail ? '<small>' + escapeHtml(item.detail) + "</small>" : item.query ? '<small class="mono">?' + escapeHtml(item.query) + "</small>" : "") + "</td>" +
+    '<td class="log-kb">' + (item.knowledge_base_id
+      ? '<button type="button" class="chip mono" data-filter-kb="' + escapeHtml(item.knowledge_base_id) + '" title="Hanya KB ini">' + escapeHtml(item.knowledge_base_id) + "</button>"
+      : '<span class="muted">-</span>') + "</td>" +
     "<td>" + logStatusChip(item.status, item.error_code) + "</td>" +
     '<td class="mono">' + escapeHtml(logMs(item.latency_ms)) + "</td>" +
     '<td class="log-who"><b>' + escapeHtml(logCaller(item)) + "</b><small>" + escapeHtml(logAgent(item.user_agent)) + "</small></td>" +
@@ -1063,11 +1081,12 @@ function renderLogRow(item) {
     ["Organisasi / aplikasi / user", [item.organization_id, item.application_id, item.user_id].filter(Boolean).join(" / ")],
     ["Ukuran (kirim / terima)", [item.request_bytes, item.response_bytes].map((v) => (v === null || v === undefined ? "-" : logNumber(v) + " B")).join(" / ")],
   ].filter((pair) => pair[1] !== null && pair[1] !== undefined && String(pair[1]).trim() !== "");
-  return row + '<tr class="log-detail"><td colspan="6"><dl>' + fields.map((pair) =>
+  return row + '<tr class="log-detail"><td colspan="7"><dl>' + fields.map((pair) =>
     "<dt>" + escapeHtml(pair[0]) + '</dt><dd class="mono">' + escapeHtml(pair[1]) + "</dd>").join("") +
     '</dl><div class="log-detail-actions">' +
     (item.client_ip ? '<button class="btn sm" type="button" data-filter-ip="' + escapeHtml(item.client_ip) + '">Hanya IP ini</button>' : "") +
     (item.key_id ? '<button class="btn sm" type="button" data-filter-key="' + escapeHtml(item.key_id) + '">Hanya kunci ini</button>' : "") +
+    (item.knowledge_base_id ? '<button class="btn sm" type="button" data-filter-kb="' + escapeHtml(item.knowledge_base_id) + '">Hanya KB ini</button>' : "") +
     '<button class="btn sm" type="button" data-filter-path="' + escapeHtml(item.path) + '">Hanya endpoint ini</button>' +
     "</div></td></tr>";
 }
@@ -3025,10 +3044,11 @@ function wireLogs() {
   $("view-logs").addEventListener("click", (event) => {
     const unfilter = event.target.closest("[data-unfilter]");
     if (unfilter) { setLogsFilter(unfilter.dataset.unfilter, ""); return; }
-    const filter = event.target.closest("[data-filter-ip], [data-filter-key], [data-filter-path]");
+    const filter = event.target.closest("[data-filter-ip], [data-filter-key], [data-filter-path], [data-filter-kb]");
     if (filter) {
       const l = state.logs;
       if (filter.dataset.filterPath !== undefined) l.filters.path = filter.dataset.filterPath;
+      if (filter.dataset.filterKb) l.filters.knowledge_base_id = filter.dataset.filterKb;
       if (filter.dataset.filterIp !== undefined) {
         if (filter.dataset.filterIp) l.filters.client_ip = filter.dataset.filterIp;
         if (filter.dataset.filterKey) l.filters.key_id = filter.dataset.filterKey;

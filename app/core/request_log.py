@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS requests (
 CREATE INDEX IF NOT EXISTS idx_requests_ts ON requests (ts);
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests (status, ts);
 CREATE INDEX IF NOT EXISTS idx_requests_source ON requests (client_ip, key_id, ts);
+CREATE INDEX IF NOT EXISTS idx_requests_kb ON requests (knowledge_base_id, ts);
 """
 
 STATUS_CLASSES = ("2xx", "3xx", "4xx", "5xx", "429", "errors")
@@ -143,7 +144,11 @@ def _filters(
     key_id: Optional[str],
     application_id: Optional[str],
     path: Optional[str],
+    knowledge_base_id: Optional[str] = None,
+    search_key_ids: Sequence[str] = (),
 ) -> Tuple[str, List[Any]]:
+    """``search_key_ids``: kunci yang LABEL-nya cocok dengan teks pencarian (label tidak disimpan
+    di log, jadi dicocokkan oleh pemanggil dari registry kunci)."""
     clauses: List[str] = []
     params: List[Any] = []
     if since:
@@ -169,11 +174,19 @@ def _filters(
     if path:
         clauses.append("path = ?")
         params.append(path)
+    if knowledge_base_id:
+        clauses.append("knowledge_base_id = ?")
+        params.append(knowledge_base_id)
     text = " ".join(str(search or "").split())[:200]
     if text:
         pattern = "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        clauses.append("(" + " OR ".join(f"{column} LIKE ? ESCAPE '\\'" for column in _SEARCH_COLUMNS) + ")")
+        matches = [f"{column} LIKE ? ESCAPE '\\'" for column in _SEARCH_COLUMNS]
         params.extend([pattern] * len(_SEARCH_COLUMNS))
+        key_ids = [str(item) for item in search_key_ids if item][:50]
+        if key_ids:
+            matches.append("key_id IN (" + ", ".join("?" for _ in key_ids) + ")")
+            params.extend(key_ids)
+        clauses.append("(" + " OR ".join(matches) + ")")
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
@@ -285,6 +298,8 @@ class RequestLogStore:
         key_id: Optional[str] = None,
         application_id: Optional[str] = None,
         path: Optional[str] = None,
+        knowledge_base_id: Optional[str] = None,
+        search_key_ids: Sequence[str] = (),
         limit: int = 100,
         offset: int = 0,
         after_id: Optional[int] = None,
@@ -299,6 +314,8 @@ class RequestLogStore:
             key_id=key_id,
             application_id=application_id,
             path=path,
+            knowledge_base_id=knowledge_base_id,
+            search_key_ids=search_key_ids,
         )
         if after_id:
             where = (where + " AND" if where else " WHERE") + " id > ?"
@@ -324,6 +341,8 @@ class RequestLogStore:
         key_id: Optional[str] = None,
         application_id: Optional[str] = None,
         path: Optional[str] = None,
+        knowledge_base_id: Optional[str] = None,
+        search_key_ids: Sequence[str] = (),
         top: int = 10,
     ) -> Dict[str, Any]:
         where, params = _filters(
@@ -334,6 +353,8 @@ class RequestLogStore:
             key_id=key_id,
             application_id=application_id,
             path=path,
+            knowledge_base_id=knowledge_base_id,
+            search_key_ids=search_key_ids,
         )
         bucket = max(1, int(bucket_seconds))
         with self._lock:
@@ -380,6 +401,22 @@ class RequestLogStore:
                     GROUP BY method, path ORDER BY count DESC LIMIT ?""",
                 [*params, int(top)],
             ).fetchall()
+            knowledge_bases = run(
+                f"""SELECT knowledge_base_id, COUNT(*) AS count,
+                           SUM(CASE WHEN status = 429 THEN 1 ELSE 0 END) AS rate_limited,
+                           SUM(CASE WHEN status >= 400 AND status != 429 THEN 1 ELSE 0 END) AS errors,
+                           AVG(latency_ms) AS avg_latency_ms,
+                           COUNT(DISTINCT COALESCE(key_id, '') || '|' || COALESCE(client_ip, '')) AS callers,
+                           MAX(ts) AS last_seen
+                    FROM requests{where}{" AND" if where else " WHERE"} knowledge_base_id IS NOT NULL AND knowledge_base_id != ''
+                    GROUP BY knowledge_base_id ORDER BY count DESC LIMIT ?""",
+                [*params, int(top)],
+            ).fetchall()
+            kb_total = run(
+                f"""SELECT COUNT(DISTINCT knowledge_base_id) FROM requests{where}{" AND" if where else " WHERE"}
+                    knowledge_base_id IS NOT NULL AND knowledge_base_id != ''""",
+                params,
+            ).fetchone()[0]
             latencies = [
                 row[0]
                 for row in run(
@@ -404,6 +441,8 @@ class RequestLogStore:
             "series": [dict(row) for row in series],
             "sources": [dict(row) for row in sources],
             "paths": [dict(row) for row in paths],
+            "knowledge_bases": [dict(row) for row in knowledge_bases],
+            "knowledge_base_count": int(kb_total or 0),
             "dropped": self.dropped,
         }
 

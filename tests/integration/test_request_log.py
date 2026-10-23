@@ -83,6 +83,33 @@ def test_filters_narrow_the_list(client):
     assert searched and all("kms.contoh" in (entry["origin"] or "") for entry in searched)
 
 
+def test_requests_can_be_grouped_and_filtered_by_knowledge_base(client):
+    for kb in ("kb_satu", "kb_satu", "kb_dua"):
+        client.get(f"/api/v1/knowledge?knowledge_base_id={kb}&limit=5", headers={**auth(TENANT_A_KEY), **ORIGIN_HEADERS})
+
+    data = _logs(client)
+    by_kb = {row["knowledge_base_id"]: row for row in data["summary"]["knowledge_bases"]}
+    assert by_kb["kb_satu"]["count"] == 2
+    assert by_kb["kb_satu"]["callers"] == 1
+    assert by_kb["kb_dua"]["count"] == 1
+    assert data["summary"]["knowledge_base_count"] == 2
+    only = _logs(client, knowledge_base_id="kb_dua")
+    assert [entry["knowledge_base_id"] for entry in only["items"]] == ["kb_dua"]
+    assert only["summary"]["totals"]["total"] == 1
+
+
+def test_search_matches_the_key_label(client):
+    made = client.post(
+        "/api/v1/settings/api-keys", headers=auth(TENANT_A_KEY), json={"label": "KMS Sinkron", "permissions": ["read"]}
+    )
+    assert made.status_code == 200, made.text
+    client.get("/api/v1/knowledge-bases", headers=auth(made.json()["data"]["key"]))
+    client.get("/api/v1/knowledge-bases", headers=auth(TENANT_A_KEY))
+
+    found = _logs(client, q="kms sinkron")["items"]
+    assert found and all(entry["key_label"] == "KMS Sinkron" for entry in found)
+
+
 def test_live_mode_fetches_only_newer_requests(client):
     client.get("/api/v1/knowledge-bases", headers=auth(TENANT_A_KEY))
     newest = _logs(client, status="429")["last_id"]

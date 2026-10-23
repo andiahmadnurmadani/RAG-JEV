@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261023d">
+<link rel="stylesheet" href="style.css?v=20261023e">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -276,7 +276,7 @@
         <div class="toolbar">
           <label class="search">
             <svg class="ico"><use href="#i-search"/></svg>
-            <input type="search" id="logs-search" placeholder="Cari IP, situs, endpoint, aplikasi, pertanyaan..." aria-label="Cari di log">
+            <input type="search" id="logs-search" placeholder="Cari IP, situs, endpoint, KB, aplikasi, pertanyaan..." aria-label="Cari di log">
           </label>
           <div class="log-filters" id="logs-filters"></div>
           <button class="btn ghost" id="btn-logs-reset" type="button" disabled title="Kembali ke 1 jam terakhir, semua hasil, tanpa pencarian dan filter"><svg class="ico"><use href="#i-x"/></svg><span>Reset filter</span></button>
@@ -298,13 +298,17 @@
             <div class="log-card-head"><h2>Endpoint teratas</h2><span class="log-hint">klik untuk memfilter</span></div>
             <div id="logs-paths"></div>
           </section>
+          <section class="page-card log-kb-card">
+            <div class="log-card-head"><h2>Knowledge base teratas</h2><span class="log-hint" id="logs-kb-hint">klik untuk memfilter</span></div>
+            <div id="logs-kbs"></div>
+          </section>
         </div>
         <section class="page-card">
           <div class="log-card-head"><h2>Permintaan terbaru</h2><span class="log-hint" id="logs-shown"></span></div>
           <div id="logs-status"></div>
           <div class="log-table-wrap">
             <table class="log-table">
-              <thead><tr><th>Waktu</th><th>Permintaan</th><th>Hasil</th><th>Durasi</th><th>Pemanggil</th><th>Asal</th></tr></thead>
+              <thead><tr><th>Waktu</th><th>Permintaan</th><th>Knowledge base</th><th>Hasil</th><th>Durasi</th><th>Pemanggil</th><th>Asal</th></tr></thead>
               <tbody id="logs-rows"></tbody>
             </table>
           </div>
@@ -872,12 +876,12 @@
         </div>
         <div class="grid-2">
           <div class="field">
-            <label for="l-per-minute">Tanya &amp; ubah knowledge, per aplikasi (per menit)</label>
+            <label for="l-per-minute">Tanya &amp; ubah knowledge, per kunci (per menit)</label>
             <input type="number" id="l-per-minute" min="0" max="100000" step="10" value="240">
             <span class="help">/query, /search, /extract, unggah, ubah dan hapus knowledge, dihitung per API key.</span>
           </div>
           <div class="field">
-            <label for="l-read-per-minute">Baca daftar &amp; status, per aplikasi (per menit)</label>
+            <label for="l-read-per-minute">Baca daftar &amp; status, per kunci (per menit)</label>
             <input type="number" id="l-read-per-minute" min="0" max="100000" step="10" value="120">
             <span class="help">Daftar dokumen, daftar knowledge base dan status dokumen, yang biasa di-poll aplikasi.</span>
           </div>
@@ -1102,7 +1106,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261023d"></script>
-<script src="app.js?v=20261023d"></script>
+<script src="markdown.js?v=20261023e"></script>
+<script src="app.js?v=20261023e"></script>
 </body>
 </html>
