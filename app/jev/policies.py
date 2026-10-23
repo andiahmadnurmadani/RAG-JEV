@@ -125,7 +125,10 @@ def heuristic_route(query: str) -> RouteDecision:
     """Deterministic fallback used when Jev is unavailable (PRD 18 fallback path)."""
     lowered = (query or "").lower()
     extract_markers = ("ambil data", "ekstrak", "extract", "tabel data", "json", "daftar data", "rekap data")
-    summary_markers = ("ringkas", "ringkasan", "rangkum", "summary", "summarize", "ikhtisar")
+    summary_markers = (
+        "ringkas", "ringkasan", "rangkum", "summary", "summarize", "ikhtisar", "intisari",
+        "garis besar", "poin utama", "poin penting", "pokok-pokok", "key points", "overview",
+    )
     search_markers = ("cari", "temukan pasal", "di mana disebut", "sebutkan halaman", "list", "find")
 
     if any(marker in lowered for marker in extract_markers):

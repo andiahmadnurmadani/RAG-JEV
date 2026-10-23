@@ -305,6 +305,11 @@ class Settings(BaseSettings):
     summary_max_parts: int = 400
     # Berapa dokumen yang ringkasannya boleh ikut saat pertanyaannya minta ringkasan.
     summary_max_documents: int = 3
+    # Permintaan ringkasan umum tanpa topik ("buat ringkasan 5 poin utama") dijawab dari
+    # ringkasan SETIAP dokumen di knowledge base (atau dokumen yang dipilih), paling banyak
+    # sejumlah ini. Pencarian kemiripan tidak punya pegangan untuk kalimat seperti itu.
+    summary_overview_enabled: bool = True
+    summary_overview_max_documents: int = 12
     # Batas WAKTU membuat ringkasan (detik). Ringkasan dokumen besar bisa memakan puluhan
     # panggilan model, dan karena pengindeksan berjalan berurutan, itu menahan unggahan lain
     # di antrian. Setelah batas ini tercapai, ringkasan dihentikan dan alasannya dilaporkan -

@@ -49,6 +49,28 @@ _FULL_DOCUMENT_RE = re.compile(
     r"rekap|overview|garis besar)\b",
     re.IGNORECASE,
 )
+# Kata yang hanya menyatakan BENTUK permintaan ringkasan, bukan topiknya. Bila setelah kata-kata
+# ini dibuang tidak ada yang tersisa ("buat ringkasan 5 poin utama", "rangkum semua dokumen"),
+# yang diminta adalah ringkasan seluruh dokumen - pencarian kemiripan tidak punya pegangan di sini.
+_SUMMARY_FORM_WORDS = frozenset(
+    """
+    buat buatkan bikin bikinkan tolong mohon coba minta berikan beri kasih tuliskan tulis jelaskan
+    sajikan susun susunkan tampilkan sebutkan dong ya saja aja kah
+    ringkas ringkasan ringkaskan meringkas rangkum rangkuman rangkumkan merangkum ikhtisar intisari
+    resume rekap rekapan simpulkan kesimpulan garis besar inti pokok gambaran umum overview
+    summary summarize summarise summarized recap outline tldr
+    poin point points butir hal utama penting kunci key main highlight highlights
+    singkat singkatnya padat jelas lengkap detail secara bentuk format bullet list daftar nomor
+    paragraf kalimat kata
+    isi konten dokumen dokumennya document documents file files berkas berkasnya materi knowledge
+    upload unggah unggahan diunggah diupload semua seluruh keseluruhan ketiga kedua keempat
+    kelima masing tiap setiap ini itu tersebut tadi di atas atas
+    dari dan atau yang untuk dalam tentang ke dengan saya aku kami kita user pengguna
+    the a an of all each every these those this that for in into on about me us please give make
+    write create my our
+    """.split()
+)
+
 # Pertanyaan lanjutan yang pendek ("yang kedua?", "kalau tahun lalu?") dicari bersama
 # pertanyaan sebelumnya; pertanyaan yang sudah lengkap dicari sendiri.
 FOLLOW_UP_MAX_KEYWORDS = 6
@@ -161,6 +183,187 @@ class RagPipeline:
         if dropped:
             logger.warning("membuang %d potongan sampah biner dari hasil pencarian", dropped)
         return kept
+
+    # ------------------------------------------------------------------ #
+    def _summary_overview_wanted(
+        self,
+        query: str,
+        decision,
+        retrieval: RetrievalResult,
+        document_ids: Optional[Sequence[str]],
+    ) -> bool:
+        """Apakah permintaan ini ringkasan atas SELURUH dokumen (bukan satu topik)?
+
+        * "buat ringkasan 5 poin utama", "rangkum semua dokumen" - tidak ada topik yang bisa
+          dicari, jadi pencarian kemiripan hanya menemukan potongan acak dengan skor rendah dan
+          jawabannya dulu "tidak ditemukan". Ini selalu dijawab dari semua dokumen.
+        * "ringkas dokumen ini" dengan dokumen yang dipilih pemakai, tetapi pencariannya lemah -
+          dijawab dari dokumen pilihan itu.
+        * "ringkas kebijakan cuti" tetap lewat pencarian biasa: topiknya jelas.
+        """
+        if not getattr(self._settings, "summary_overview_enabled", True):
+            return False
+        if not is_summary_request(query, decision):
+            return False
+        if is_generic_summary(query):
+            return True
+        picked = [item for item in (document_ids or []) if item]
+        return bool(picked) and (not retrieval.candidates or not retrieval.relevant)
+
+    def _overview_documents(
+        self,
+        *,
+        context: TrustedContext,
+        knowledge_base_id: Optional[str],
+        document_ids: Optional[Sequence[str]],
+        retrieval: RetrievalResult,
+    ) -> tuple[List[str], int]:
+        """Dokumen yang diringkas: pilihan pemakai, atau semua dokumen di knowledge base.
+
+        Dokumen yang muncul di hasil pencarian didahulukan, sisanya urut nama. Mengembalikan
+        ``(dokumen yang dipakai, jumlah seluruh dokumen yang tersedia)``.
+        """
+        picked = [str(item) for item in (document_ids or []) if item]
+        if picked:
+            available = list(dict.fromkeys(picked))
+        elif knowledge_base_id:
+            try:
+                counts = repository.count_by_document(
+                    self._settings,
+                    organization_id=context.organization_id,
+                    knowledge_base_id=knowledge_base_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - jatuh ke dokumen hasil pencarian
+                logger.warning("gagal mendaftar dokumen %s: %s", knowledge_base_id, exc)
+                counts = {}
+            available = sorted(document_id for document_id, count in counts.items() if document_id and count > 0)
+        else:
+            # Tanpa knowledge base, "semua dokumen" berarti seluruh organisasi - terlalu luas.
+            # Pakai dokumen yang ditemukan pencarian saja.
+            available = []
+        found = [candidate.document_id for candidate in retrieval.candidates if candidate.document_id]
+        if not available:
+            available = list(dict.fromkeys(found))
+        ordered = [document_id for document_id in dict.fromkeys(found) if document_id in available]
+        ordered += [document_id for document_id in available if document_id not in ordered]
+        limit = max(1, int(getattr(self._settings, "summary_overview_max_documents", 12)))
+        return ordered[:limit], len(available)
+
+    def _overview_candidates(
+        self,
+        document_ids: Sequence[str],
+        *,
+        context: TrustedContext,
+        knowledge_base_id: Optional[str],
+        budget_tokens: int,
+    ) -> tuple[List[Candidate], List[DocumentCoverage]]:
+        """Satu bahan per dokumen: ringkasan tersimpannya, atau (bila belum ada) bagian awal isinya."""
+        settings = self._settings
+        share = max(400, budget_tokens // max(1, len(document_ids)))
+        candidates: List[Candidate] = []
+        coverage: List[DocumentCoverage] = []
+        for document_id in document_ids:
+            try:
+                parts = repository.list_document_chunks(
+                    settings,
+                    organization_id=context.organization_id,
+                    document_id=document_id,
+                    knowledge_base_id=knowledge_base_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - satu dokumen gagal tidak menggagalkan semuanya
+                logger.warning("gagal membaca dokumen %s: %s", document_id, exc)
+                parts = []
+            document_text = "\n".join(str(payload.get("content") or "") for payload in parts)
+            name = next((str(payload.get("document_name") or "") for payload in parts if payload.get("document_name")), "")
+
+            summary = None
+            try:
+                summary = repository.get_summary_chunk(
+                    settings,
+                    organization_id=context.organization_id,
+                    document_id=document_id,
+                    knowledge_base_id=knowledge_base_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - jatuh ke isi awal dokumen
+                logger.warning("gagal mengambil ringkasan %s: %s", document_id, exc)
+            content = str((summary or {}).get("content") or "").strip()
+            if content:
+                content = self._clean_stored_summary(content, document_text, document_id)
+            spent = 0
+            if content:
+                candidates.append(
+                    Candidate(
+                        chunk_id=str(summary.get("chunk_id") or SUMMARY_CHUNK_ID),
+                        document_id=document_id,
+                        content=content,
+                        document_name=str(summary.get("document_name") or name or document_id),
+                        page=summary.get("page"),
+                        section=str(summary.get("section") or "Ringkasan dokumen"),
+                        source_url=str(summary.get("source_url") or ""),
+                        language=str(summary.get("language") or ""),
+                        score=1.0,
+                        is_summary=True,
+                    )
+                )
+                spent = estimate_tokens(content)
+
+            # Isi dari awal dokumen sebanyak sisa jatahnya: ringkasan melengkapi, bukan
+            # menggantikan isi. Tanpa ringkasan (masih dibuat, gagal, atau dimatikan) isi inilah
+            # satu-satunya bahan, jadi setidaknya satu bagian selalu ikut.
+            # Bila pelengkapan dokumen dimatikan di Setelan, ringkasan saja yang dipakai; isi awal
+            # hanya menjadi pengganti untuk dokumen yang belum punya ringkasan.
+            expand = bool(settings.context_expand_documents)
+            taken = 0
+            for position, payload in enumerate(parts):
+                if content and not expand:
+                    break
+                chunk_id = str(payload.get("chunk_id") or "")
+                text = str(payload.get("content") or "")
+                if not chunk_id or not text.strip():
+                    continue
+                tokens = estimate_tokens(text)
+                if (taken or content) and spent + tokens > share:
+                    break
+                candidates.append(
+                    Candidate(
+                        chunk_id=chunk_id,
+                        document_id=document_id,
+                        content=text,
+                        document_name=str(payload.get("document_name") or name or document_id),
+                        page=payload.get("page"),
+                        section=str(payload.get("section") or ""),
+                        source_url=str(payload.get("source_url") or ""),
+                        language=str(payload.get("language") or ""),
+                        score=1.0,
+                        expanded=expand,
+                        document_order=chunk_position(chunk_id, payload) or position + 1,
+                    )
+                )
+                spent += tokens
+                taken += 1
+            if taken:
+                coverage.append(
+                    DocumentCoverage(
+                        document_id=document_id,
+                        document_name=name or document_id,
+                        included=taken,
+                        total=len(parts),
+                        complete=taken >= len(parts),
+                        ordered=True,
+                    )
+                )
+            elif content:
+                coverage.append(
+                    DocumentCoverage(
+                        document_id=document_id,
+                        document_name=str(summary.get("document_name") or name or document_id),
+                        included=1,
+                        total=1,
+                        complete=True,
+                        via_summary=True,
+                    )
+                )
+        return candidates, coverage
 
     # ------------------------------------------------------------------ #
     def _attach_summaries(
@@ -327,37 +530,58 @@ class RagPipeline:
         result.retrieval = retrieval
 
         best = retrieval.best_score
-        if not retrieval.candidates:
-            reason = "no_candidates"
-            return self._with_table_hint(self._no_answer(result, reason, retrieval), table_reason)
-        if not retrieval.relevant:
-            # Kandidat terbaik pun terlalu lemah: menjawab dari konteks seperti itu hanya mengundang
-            # jawaban yang tampak meyakinkan padahal tidak berdasar.
-            observe("best_relevance_score", best)
-            return self._with_table_hint(self._no_answer(result, "below_threshold", retrieval), table_reason)
-
-        observe("best_relevance_score", best)
+        overview = self._summary_overview_wanted(query, decision, retrieval, document_ids)
         budget = settings.context_token_budget
-        wants_full = getattr(decision, "capability", "") == "knowledge_summary" or bool(
-            _FULL_DOCUMENT_RE.search(query)
-        )
-        candidates, coverage = self._expand_context(
-            retrieval.candidates,
-            context=context,
-            knowledge_base_id=knowledge_base_id,
-            document_ids=document_ids,
-            budget_tokens=budget,
-            wants_full=wants_full,
-        )
-        # Ringkasan dokumen (knowledge turunan) hanya diambil saat pertanyaannya memang minta
-        # ringkasan; pada pertanyaan biasa ia tidak ikut agar isi asli yang menjawab.
-        candidates = self._attach_summaries(
-            candidates,
-            context=context,
-            knowledge_base_id=knowledge_base_id,
-            document_ids=document_ids,
-            decision=decision,
-        )
+        if overview:
+            # Ringkasan umum ("buat ringkasan 5 poin utama"): bahannya ringkasan setiap dokumen
+            # dalam cakupan, bukan potongan yang kebetulan mirip dengan kalimat permintaannya.
+            chosen, available = self._overview_documents(
+                context=context,
+                knowledge_base_id=knowledge_base_id,
+                document_ids=document_ids,
+                retrieval=retrieval,
+            )
+            candidates, coverage = self._overview_candidates(
+                chosen, context=context, knowledge_base_id=knowledge_base_id, budget_tokens=budget
+            )
+            if not candidates:
+                return self._with_table_hint(self._no_answer(result, "no_candidates", retrieval), table_reason)
+            if available > len(chosen):
+                logger.info("ringkasan umum: %d dari %d dokumen dipakai", len(chosen), available)
+            incr("summary_overview_requests")
+            observe("best_relevance_score", best)
+            result.candidates = candidates
+        else:
+            if not retrieval.candidates:
+                reason = "no_candidates"
+                return self._with_table_hint(self._no_answer(result, reason, retrieval), table_reason)
+            if not retrieval.relevant:
+                # Kandidat terbaik pun terlalu lemah: menjawab dari konteks seperti itu hanya mengundang
+                # jawaban yang tampak meyakinkan padahal tidak berdasar.
+                observe("best_relevance_score", best)
+                return self._with_table_hint(self._no_answer(result, "below_threshold", retrieval), table_reason)
+
+            observe("best_relevance_score", best)
+            wants_full = getattr(decision, "capability", "") == "knowledge_summary" or bool(
+                _FULL_DOCUMENT_RE.search(query)
+            )
+            candidates, coverage = self._expand_context(
+                retrieval.candidates,
+                context=context,
+                knowledge_base_id=knowledge_base_id,
+                document_ids=document_ids,
+                budget_tokens=budget,
+                wants_full=wants_full,
+            )
+            # Ringkasan dokumen (knowledge turunan) hanya diambil saat pertanyaannya memang minta
+            # ringkasan; pada pertanyaan biasa ia tidak ikut agar isi asli yang menjawab.
+            candidates = self._attach_summaries(
+                candidates,
+                context=context,
+                knowledge_base_id=knowledge_base_id,
+                document_ids=document_ids,
+                decision=decision,
+            )
         result.document_coverage = [item.to_dict() for item in coverage]
         built = build_context(
             candidates,
@@ -402,11 +626,13 @@ class RagPipeline:
             "retrieval_ms": retrieval.elapsed_ms,
             "generation_ms": generation_ms,
             "best_score": round(best, 4),
-            "relevance_gate": retrieval.gate,
+            "relevance_gate": "summary_overview" if overview else retrieval.gate,
             "dense_weight": retrieval.dense_weight,
             "citations": generated.citations_used,
             "search_query": search_query if search_query != query else None,
         }
+        if overview:
+            usage["summary_overview"] = {"documents": len(chosen), "available": available}
         if generated.truncated:
             # Batas token keluaran, bukan "datanya tidak ada". Dua hal ini berbeda bagi pemakai,
             # jadi dilaporkan sebagai alasan tersendiri beserta bagian yang sempat terjawab.
@@ -934,6 +1160,29 @@ def clean_history(history: Optional[Sequence[Dict[str, str]]]) -> List[Dict[str,
         if role in ("user", "assistant") and content:
             turns.append({"role": role, "content": content[:2000]})
     return turns
+
+
+_SUMMARY_REQUEST_RE = re.compile(
+    r"\b(ringkas\w*|meringkas|rangkum\w*|merangkum|ikhtisar|intisari|resume|simpulkan|kesimpulan|"
+    r"garis besar|poin(?:-poin)? (?:utama|penting|kunci)|pokok-pokok|gambaran umum|"
+    r"summar\w*|recap|overview|key points|main points|tl;?dr)\b",
+    re.IGNORECASE,
+)
+
+
+def is_summary_request(query: str, decision=None) -> bool:
+    """Permintaan ringkasan: dari keputusan router, atau dari kata-katanya sendiri (router LLM
+    kadang memberi ``knowledge_query`` untuk "buat 5 poin utama")."""
+    if getattr(decision, "capability", "") == "knowledge_summary":
+        return True
+    return bool(_SUMMARY_REQUEST_RE.search(query or ""))
+
+
+def is_generic_summary(query: str) -> bool:
+    """Tidak ada topik yang tersisa setelah kata-kata bentuk permintaan ringkasan dibuang."""
+    words = [word.lower() for word in keywords(query or "")]
+    topical = [word for word in words if word not in _SUMMARY_FORM_WORDS and not word.isdigit()]
+    return not topical
 
 
 _REFERENCE_RE = re.compile(

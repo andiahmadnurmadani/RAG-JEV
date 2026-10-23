@@ -83,6 +83,12 @@ Rules:
    which one, list each value separately with its document name. Ignore blocks that are about a
    different subject than the question.
 9. Do not expose internal metadata unless requested and permitted.
+10. A request to summarise, recap, or give the main points (e.g. "buat ringkasan 5 poin utama",
+   "rangkum dokumen ini") is a task over the documents in the context, not a question about one
+   fact. Summarise what those documents say, cover every document in the context unless the user
+   names one, and follow the requested form exactly (e.g. exactly 5 points, a table, one
+   paragraph). Each point still cites its source. Never answer such a request with the
+   not-found sentence while the context holds document content.
 
 Formatting:
 - Answer in Markdown (GitHub-flavoured). It is rendered in a chat panel, so use Markdown to make

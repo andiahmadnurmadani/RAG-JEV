@@ -86,6 +86,20 @@ itu **dilogkan** - bukan dipotong diam-diam.
 | jendela per tahap (token) | `SUMMARY_WINDOW_TOKENS` | 12000 | 1000–200000 |
 | panjang ringkasan (token) | `SUMMARY_MAX_TOKENS` | 2048 | 256–32000 |
 | maks dokumen per pertanyaan | `SUMMARY_MAX_DOCUMENTS` | 3 | 1–20 |
+| ringkasan umum atas semua dokumen | `SUMMARY_OVERVIEW_ENABLED` | aktif | - |
+| maks dokumen pada ringkasan umum | `SUMMARY_OVERVIEW_MAX_DOCUMENTS` | 12 | - |
+
+### Ringkasan umum ("buat ringkasan 5 poin utama")
+
+Permintaan ringkasan yang tidak menyebut topik - "buat ringkasan 5 poin utama", "rangkum isi
+dokumen ini", "summarize the key points" - tidak bisa dijawab lewat pencarian kemiripan: kalimatnya
+tidak berbagi kata dengan isi dokumen, sehingga gerbang relevansi dulu menjawab "tidak ditemukan".
+Permintaan seperti itu kini dijawab dari **setiap dokumen dalam cakupan**: dokumen yang dipilih di
+konsol, atau semua dokumen di knowledge base (paling banyak `SUMMARY_OVERVIEW_MAX_DOCUMENTS`).
+Bahan per dokumen: ringkasan tersimpannya, lalu isi dari awal dokumen selama jatah token cukup.
+Format yang diminta (jumlah poin, tabel, satu paragraf) diikuti model. Ringkasan bertopik
+("ringkas kebijakan cuti") tetap lewat pencarian biasa. `usage.relevance_gate` bernilai
+`summary_overview` dan `usage.summary_overview` melaporkan berapa dokumen yang dibaca.
 
 ## Contoh
 

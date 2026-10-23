@@ -174,6 +174,9 @@ class QueryUsageOut(BaseModel):
     dense_weight: float = 1.0
     citations: List[int] = Field(default_factory=list)
     search_query: Optional[str] = None
+    # Diisi bila permintaan ringkasan umum dijawab dari semua dokumen dalam cakupan:
+    # {"documents": berapa yang dibaca, "available": berapa yang ada}.
+    summary_overview: Optional[Dict[str, int]] = None
 
 
 class ComputedOut(BaseModel):
