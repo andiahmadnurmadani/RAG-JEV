@@ -1041,6 +1041,13 @@ async function checkConnection() {
   }
 }
 
+// Banyak unggahan yang selesai berdekatan cukup memicu satu kali muat ulang daftar.
+let loadDocsTimer = null;
+function loadDocsSoon() {
+  clearTimeout(loadDocsTimer);
+  loadDocsTimer = setTimeout(loadDocs, 1500);
+}
+
 async function loadDocs() {
   if (!credential()) return;
   try {
@@ -1139,23 +1146,52 @@ function renderScope() {
   $("scope-chip").title = count ? Array.from(state.picked).join(", ") : "";
 }
 
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Saat tab tidak terlihat, jangan ikut menanyai server; lanjutkan begitu tab dibuka lagi.
+function whenVisible() {
+  if (!document.hidden) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onChange = () => {
+      if (document.hidden) return;
+      document.removeEventListener("visibilitychange", onChange);
+      resolve();
+    };
+    document.addEventListener("visibilitychange", onChange);
+  });
+}
+
 async function trackJob(documentId, label) {
   // Isi dokumen tersimpan LEBIH DULU daripada ringkasannya (stage "summarizing"), tetapi status
   // baru "completed" setelah ringkasan selesai. Jadi beri tahu pemakai begitu isinya siap
   // dipakai, dan tetap tunggu sampai pekerjaannya benar-benar tuntas.
+  // Jeda tanya status melambat bertahap (1 dtk -> 5 dtk): unggahan banyak berkas sekaligus
+  // dulu menghasilkan ratusan permintaan per menit dan membuat server panas.
   let toldContentReady = false;
-  for (let attempt = 0; attempt < 150; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 800));
+  let toldQueued = false;
+  let delay = 1000;
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await waitMs(delay);
+    await whenVisible();
+    delay = Math.min(5000, Math.round(delay * 1.4));
     let status = null;
     try {
       status = await api("GET", "/knowledge/" + encodeURIComponent(documentId));
     } catch (err) {
+      if (err.code === "RATE_LIMITED") {
+        const wait = Number((err.details || {}).retry_after_seconds) || 10;
+        await waitMs(Math.min(60, Math.max(2, wait)) * 1000);
+        continue;
+      }
       return;
     }
     if (status.stage === "summarizing" && !toldContentReady) {
       toldContentReady = true;
       note("upload-status", "info", escapeHtml(label) + ": " + escapeHtml(status.chunks) + " chunk sudah masuk dan bisa dipakai. Ringkasan sedang dibuat di latar belakang - unggahan lain tidak ikut menunggu.");
-      loadDocs();
+      loadDocsSoon();
     }
     if (status.status === "completed") {
       const summaryNote = status.summary
@@ -1164,20 +1200,21 @@ async function trackJob(documentId, label) {
         : (status.summary_error ? " Tanpa ringkasan: " + escapeHtml(status.summary_error.slice(0, 140)) + "." : "");
       note("upload-status", "ok", escapeHtml(label) + " selesai: " + escapeHtml(status.chunks) + " chunk, " +
         escapeHtml(status.tokens) + " token." + summaryNote);
-      loadDocs();
+      loadDocsSoon();
       return;
     }
     if (status.status === "failed" || status.status === "deleted") {
       note("upload-status", "err", escapeHtml(label) + " gagal: " + escapeHtml((status.error || "tidak diketahui").slice(0, 240)));
-      loadDocs();
+      loadDocsSoon();
       return;
     }
-    if (status.stage === "queued" && attempt > 4) {
+    if (status.stage === "queued" && !toldQueued && delay >= 3000) {
+      toldQueued = true;
       note("upload-status", "info", escapeHtml(label) + " masih menunggu di antrian (ada dokumen lain yang sedang diproses).");
     }
   }
   note("upload-status", "warn", escapeHtml(label) + " masih diproses; buka daftar dokumen beberapa saat lagi.");
-  loadDocs();
+  loadDocsSoon();
 }
 
 async function submitIndex(payload, label) {
