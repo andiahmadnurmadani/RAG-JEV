@@ -25,7 +25,7 @@ router = APIRouter(tags=["knowledge"])
 def _rate_limit(request: Request, context: TrustedContext, kind: str = "heavy") -> None:
     """Per aplikasi (kunci), bukan satu ember bersama: ``kind="read"`` untuk daftar/status yang
     biasa di-poll klien, sisanya ikut batas permintaan berat."""
-    limits_for(services_from_request(request).settings).check(context.application_id, kind)
+    limits_for(services_from_request(request).settings).check(context.limit_identity, kind)
 
 
 def validate_source_urls(payload, settings) -> None:

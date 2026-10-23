@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -14,6 +16,19 @@ from app.qdrant.client import get_client
 from app.qdrant.collections import ensure_collection, tenant_filter
 
 logger = get_logger(__name__)
+
+# Hitungan vektor per dokumen untuk SELURUH koleksi, dari satu pemindaian. Qdrant tertanam memindai
+# seluruh koleksi pada setiap scroll berfilter, jadi daftar knowledge yang di-poll untuk ratusan KB
+# (integrasi KMS: tiap KB tiap 45 detik) = ratusan pemindaian penuh. Dengan snapshot ini cukup satu
+# pemindaian per masa berlaku; setiap penulisan di modul ini membatalkannya.
+_COUNTS_TTL_SECONDS = 60.0
+_counts_lock = threading.Lock()
+_counts_snapshot: Dict[Tuple[str, str], Tuple[float, Dict[Tuple[str, str], Dict[str, int]]]] = {}
+
+
+def invalidate_document_counts() -> None:
+    with _counts_lock:
+        _counts_snapshot.clear()
 
 
 def point_id(chunk_id: str, *, organization_id: str = "", knowledge_base_id: str = "", document_id: str = "") -> str:
@@ -58,6 +73,7 @@ def upsert_chunks(
                 raise AppError("INDEXING_FAILED", "refusing to index a chunk without organization_id")
             if not payload.get("document_id"):
                 raise AppError("INDEXING_FAILED", "refusing to index a chunk without document_id")
+        invalidate_document_counts()
         client.upsert(
             collection_name=settings.qdrant_collection,
             points=[
@@ -76,6 +92,7 @@ def upsert_chunks(
             wait=True,
         )
         written += len(batch)
+    invalidate_document_counts()
     return written
 
 
@@ -200,12 +217,14 @@ def delete_document(
         _mirror_delete(settings, client, query_filter)
         return 0
     before = count_document(settings, organization_id=organization_id, document_id=document_id)
+    invalidate_document_counts()
     client.delete(
         collection_name=settings.qdrant_collection,
         points_selector=qmodels.FilterSelector(filter=query_filter),
         wait=True,
     )
     _mirror_delete(settings, client, query_filter)
+    invalidate_document_counts()
     logger.info("deleted document %s for org %s (%d chunks)", document_id, organization_id, before)
     return before
 
@@ -254,17 +273,53 @@ def delete_knowledge_base(
                 documents.add(str(payload["document_id"]))
         if offset is None or not records:
             break
+    invalidate_document_counts()
     client.delete(
         collection_name=settings.qdrant_collection,
         points_selector=qmodels.FilterSelector(filter=query_filter),
         wait=True,
     )
     _mirror_delete(settings, client, query_filter)
+    invalidate_document_counts()
     logger.info(
         "deleted knowledge base %s for org %s (%d chunks, %d documents)",
         knowledge_base_id, organization_id, found, len(documents),
     )
     return found, sorted(documents)
+
+
+def _document_counts_snapshot(settings: Settings) -> Dict[Tuple[str, str], Dict[str, int]]:
+    """``{(organization_id, knowledge_base_id): {document_id: jumlah vektor}}`` untuk seluruh
+    koleksi. Dipegang paling lama ``_COUNTS_TTL_SECONDS``; permintaan bersamaan menunggu satu
+    pemindaian yang sama alih-alih masing-masing memindai."""
+    name = settings.qdrant_collection
+    key = (settings.qdrant_url or settings.qdrant_local_path, name)
+    with _counts_lock:
+        cached = _counts_snapshot.get(key)
+        if cached and time.monotonic() - cached[0] < _COUNTS_TTL_SECONDS:
+            return cached[1]
+        counts: Dict[Tuple[str, str], Dict[str, int]] = {}
+        if collection_exists_guard(settings):
+            client = get_client(settings)
+            offset = None
+            while True:
+                records, offset = client.scroll(
+                    collection_name=name,
+                    limit=2048,
+                    offset=offset,
+                    with_payload=["document_id", "organization_id", "knowledge_base_id"],
+                    with_vectors=False,
+                )
+                for record in records:
+                    payload = record.payload or {}
+                    scope = (str(payload.get("organization_id") or ""), str(payload.get("knowledge_base_id") or ""))
+                    per_document = counts.setdefault(scope, {})
+                    document_id = str(payload.get("document_id") or "")
+                    per_document[document_id] = per_document.get(document_id, 0) + 1
+                if offset is None or not records:
+                    break
+        _counts_snapshot[key] = (time.monotonic(), counts)
+        return counts
 
 
 def count_by_document(
@@ -273,39 +328,21 @@ def count_by_document(
     organization_id: str,
     knowledge_base_id: Optional[str] = None,
 ) -> Dict[str, int]:
-    """``{document_id: jumlah vektor}`` untuk satu organisasi (opsional satu KB) dalam SATU
-    pemindaian. Qdrant tertanam memindai seluruh koleksi pada setiap panggilan, jadi menghitung
-    per dokumen untuk daftar 500 dokumen = 500 pemindaian penuh."""
+    """``{document_id: jumlah vektor}`` untuk satu organisasi (opsional satu KB), dibaca dari
+    snapshot bersama (lihat ``_document_counts_snapshot``), bukan satu pemindaian per panggilan."""
     counts: Dict[str, int] = {}
-    if not organization_id or not collection_exists_guard(settings):
+    if not organization_id:
         return counts
-    conditions = [qmodels.FieldCondition(key="organization_id", match=qmodels.MatchValue(value=organization_id))]
-    if knowledge_base_id:
-        conditions.append(
-            qmodels.FieldCondition(key="knowledge_base_id", match=qmodels.MatchValue(value=knowledge_base_id))
-        )
-    client = get_client(settings)
-    offset = None
     try:
-        while True:
-            records, offset = client.scroll(
-                collection_name=settings.qdrant_collection,
-                scroll_filter=qmodels.Filter(must=conditions),
-                limit=2048,
-                offset=offset,
-                with_payload=["document_id", "organization_id"],
-                with_vectors=False,
-            )
-            for record in records:
-                payload = record.payload or {}
-                if payload.get("organization_id") != organization_id:
-                    continue
-                document_id = str(payload.get("document_id") or "")
-                counts[document_id] = counts.get(document_id, 0) + 1
-            if offset is None or not records:
-                break
+        snapshot = _document_counts_snapshot(settings)
     except Exception as exc:  # noqa: BLE001 - penghitung pelengkap, bukan sumber kebenaran
         logger.warning("hitung vektor per dokumen gagal: %s", exc)
+        return counts
+    for (org, kb), per_document in snapshot.items():
+        if org != organization_id or (knowledge_base_id and kb != knowledge_base_id):
+            continue
+        for document_id, count in per_document.items():
+            counts[document_id] = counts.get(document_id, 0) + count
     return counts
 
 

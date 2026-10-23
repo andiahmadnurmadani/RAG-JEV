@@ -152,8 +152,8 @@ tanpa restart. Yang melewati batas dijawab `429 RATE_LIMITED` dengan `retry_afte
 
 | Setelan | Env | Berlaku untuk |
 |---|---|---|
-| per aplikasi | `RATE_LIMIT_PER_MINUTE` | `/query`, `/search`, `/extract`, unggah/ubah/hapus knowledge, per API key |
-| baca per aplikasi | `RATE_LIMIT_READ_PER_MINUTE` | daftar knowledge, daftar knowledge base, status dokumen (yang biasa di-poll) |
+| per kunci | `RATE_LIMIT_PER_MINUTE` | `/query`, `/search`, `/extract`, unggah/ubah/hapus knowledge, per API key |
+| baca per kunci | `RATE_LIMIT_READ_PER_MINUTE` | daftar knowledge, daftar knowledge base, status dokumen (yang biasa di-poll) |
 | total | `RATE_LIMIT_GLOBAL_PER_MINUTE` | semua API key digabung |
 | bersamaan | `MAX_CONCURRENT_QUERIES` | `/query`, `/search`, `/extract` yang berjalan pada saat yang sama (beban CPU) |
 

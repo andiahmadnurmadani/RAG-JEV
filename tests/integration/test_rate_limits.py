@@ -73,6 +73,22 @@ def test_read_limit_applies_per_key_and_changes_without_restart(client):
     assert client.get("/api/v1/knowledge", headers=auth(TENANT_B_KEY)).status_code == 200
 
 
+def test_registry_keys_of_the_same_application_have_their_own_quota(client):
+    # Kunci dari konsol mewarisi application_id yang sama; integrasi yang membanjiri tidak boleh
+    # menghabiskan jatah kunci lain (dulu konsol operator ikut kena 429 karena KMS).
+    made = [
+        client.post("/api/v1/settings/api-keys", headers=auth(TENANT_A_KEY), json={"label": label, "permissions": ["read"]})
+        for label in ("integrasi", "operator")
+    ]
+    assert all(response.status_code == 200 for response in made), made[0].text
+    flood, other = (response.json()["data"]["key"] for response in made)
+    assert _put_limits(client, read_per_minute=2, global_per_minute=0).status_code == 200
+    codes = [client.get("/api/v1/knowledge", headers=auth(flood)).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    assert client.get("/api/v1/knowledge", headers=auth(other)).status_code == 200
+    assert _put_limits(client, read_per_minute=0).status_code == 200
+
+
 def test_global_limit_counts_all_keys_together(client):
     assert _put_limits(client, global_per_minute=4).status_code == 200  # PUT ini sendiri tidak dihitung
     codes = [client.get("/api/v1/knowledge", headers=auth(key)).status_code for key in (TENANT_A_KEY, TENANT_B_KEY) * 3]

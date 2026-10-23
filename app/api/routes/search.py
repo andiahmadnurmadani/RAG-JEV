@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 router = APIRouter(tags=["search"])
 
 def _limit(request: Request, context: TrustedContext) -> None:
-    limits_for(services_from_request(request).settings).check(context.application_id)
+    limits_for(services_from_request(request).settings).check(context.limit_identity)
 
 
 @router.post("/search")

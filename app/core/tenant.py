@@ -31,6 +31,17 @@ class TrustedContext:
     # lama). Diisi = kunci proyek: hanya KB miliknya, walau organisasinya dipakai bersama.
     knowledge_base_ids: List[str] = field(default_factory=list)
 
+    @property
+    def limit_identity(self) -> str:
+        """Siapa yang dihitung rate limit. Kunci registry dan sesi konsol dihitung sendiri-sendiri:
+        kunci yang dibuat dari konsol mewarisi application_id ``rag-console``, jadi kalau dihitung
+        per aplikasi, satu integrasi yang membanjiri ikut menghabiskan jatah konsol operator."""
+        if self.key_id:
+            return f"key:{self.key_id}"
+        if self.session_id:
+            return f"session:{self.session_id}"
+        return f"app:{self.application_id}"
+
     def allows_knowledge_base(self, knowledge_base_id: Optional[str]) -> bool:
         if not self.knowledge_base_ids:
             return True

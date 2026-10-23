@@ -6,8 +6,8 @@ its limits — behind multiple replicas, point this at Redis instead.
 Batas dibaca dari setelan yang sedang berlaku pada SETIAP permintaan, jadi mengubahnya di
 layar Setelan (bagian "limits") langsung berlaku tanpa restart. Nilai 0 berarti tanpa batas.
 
-* ``rate_limit_per_minute``        - per aplikasi/kunci: /query, /search, /extract, tulis knowledge
-* ``rate_limit_read_per_minute``   - per aplikasi/kunci: daftar & status knowledge (yang sering di-poll)
+* ``rate_limit_per_minute``        - per kunci/sesi (lihat ``TrustedContext.limit_identity``): /query, /search, /extract, tulis knowledge
+* ``rate_limit_read_per_minute``   - per kunci/sesi: daftar & status knowledge (yang sering di-poll)
 * ``rate_limit_global_per_minute`` - semua pemanggil digabung, untuk semua endpoint di atas
 * ``max_concurrent_queries``       - /query, /search, /extract yang boleh berjalan bersamaan
   (pekerjaan inilah yang memakan CPU: embedding, rerank, panggilan model)

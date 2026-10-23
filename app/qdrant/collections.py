@@ -29,6 +29,13 @@ def collection_exists(settings: Settings) -> bool:
         return False
 
 
+def _forget_counts() -> None:
+    # impor di dalam fungsi: repository mengimpor modul ini
+    from app.qdrant.repository import invalidate_document_counts
+
+    invalidate_document_counts()
+
+
 def ensure_collection(settings: Settings, dim: int, *, recreate: bool = False) -> Dict[str, Any]:
 
     client = get_client(settings)
@@ -36,6 +43,7 @@ def ensure_collection(settings: Settings, dim: int, *, recreate: bool = False) -
 
     if recreate and client.collection_exists(name):
         client.delete_collection(name)
+        _forget_counts()
         logger.info("dropped collection %s", name)
 
     created = False
@@ -92,3 +100,4 @@ def delete_collection(settings: Settings) -> None:
     client = get_client(settings)
     if client.collection_exists(settings.qdrant_collection):
         client.delete_collection(settings.qdrant_collection)
+    _forget_counts()
