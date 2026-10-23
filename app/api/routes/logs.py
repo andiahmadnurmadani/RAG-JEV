@@ -61,9 +61,12 @@ def list_requests(
     path: Optional[str] = Query(default=None, max_length=300),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    after_id: int = Query(default=0, ge=0),
     summary: bool = True,
 ) -> Dict[str, Any]:
-    """Permintaan terbaru lebih dulu, plus ringkasan (asal teratas, jalur teratas, per waktu)."""
+    """Permintaan terbaru lebih dulu, plus ringkasan (asal teratas, jalur teratas, per waktu).
+
+    ``after_id`` dipakai mode Live: hanya baris dengan id lebih besar, biasanya dengan ``summary=false``."""
     services, store = _store(request)
     _require_admin(context, services.settings)
     store.flush(timeout=1.0)
@@ -76,7 +79,7 @@ def list_requests(
         application_id=application_id or None,
         path=path or None,
     )
-    data = store.list(since=since, limit=limit, offset=offset, **filters)
+    data = store.list(since=since, limit=limit, offset=offset, after_id=after_id or None, **filters)
     labels = _key_labels(services.settings)
     for item in data["items"]:
         item["key_label"] = labels.get(item.get("key_id") or "", "")

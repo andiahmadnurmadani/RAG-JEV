@@ -53,7 +53,8 @@ const state = {
   kbs: [],
   kbSort: "recent",
   unans: { status: "open", sort: "recent", kb: "", q: "", items: [], selected: new Set(), limit: 50, total: 0 },
-  logs: { minutes: 60, status: "", q: "", filters: {}, limit: 100, items: [], total: 0, open: new Set(), live: false, timer: null, busy: false },
+  logs: { minutes: 60, status: "", q: "", filters: {}, limit: 100, items: [], total: 0, open: new Set(), live: false, timer: null, busy: false,
+    seq: 0, lastId: 0, summaryAt: 0, updatedAt: 0, fresh: new Set() },
   view: "",
   evalStop: false,
   limits: { max_mb: null, allowed: [], allowed_ext: [] },
@@ -876,19 +877,68 @@ async function loadLogs() {
     return;
   }
   const l = state.logs;
-  if (l.busy) return;
+  // Nomor urut: hasil muatan lama (filter sebelumnya, atau tick Live) yang datang belakangan dibuang.
+  const seq = ++l.seq;
   l.busy = true;
   try {
     const data = await api("GET", "/logs/requests?" + logParams().toString());
+    if (seq !== l.seq) return;
+    const before = l.lastId;
     l.items = data.items || [];
     l.total = data.total || 0;
+    l.lastId = data.last_id || 0;
+    l.summaryAt = l.updatedAt = Date.now();
+    if (l.live && before) l.items.forEach((item) => { if (item.id > before) l.fresh.add(item.id); });
     clearNote("logs-status");
     renderLogs(data);
   } catch (err) {
+    if (seq !== l.seq) return;
     note("logs-status", "err", escapeHtml(err.message || "gagal memuat log") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
     if (err.code === "AUTH_FORBIDDEN") setLogsLive(false);
   } finally {
-    l.busy = false;
+    if (seq === l.seq) l.busy = false;
+  }
+}
+
+/* Statistik, grafik, dan peringkat dihitung ulang di server: lebih jarang untuk rentang panjang. */
+function logsSummaryEvery() {
+  const minutes = state.logs.minutes;
+  return minutes <= 60 ? 5000 : minutes <= 360 ? 15000 : 30000;
+}
+
+/* Satu tick Live: hanya baris yang lebih baru dari yang sudah tampil (ringan), sesekali muatan penuh. */
+async function pollLogs() {
+  const l = state.logs;
+  if (!l.live || l.busy || document.hidden || state.view !== "logs" || !credential()) return;
+  if (!l.lastId || Date.now() - l.summaryAt >= logsSummaryEvery()) {
+    loadLogs();
+    return;
+  }
+  const seq = l.seq;
+  l.busy = true;
+  try {
+    const data = await api("GET", "/logs/requests?" + logParams({ after_id: String(l.lastId), summary: "false", limit: "200" }).toString());
+    if (seq !== l.seq) return;
+    const known = new Set(l.items.map((item) => item.id));
+    const items = data.items || [];
+    const added = items.filter((item) => !known.has(item.id));
+    l.lastId = Math.max(l.lastId, data.last_id || 0);
+    l.updatedAt = Date.now();
+    if (added.length) {
+      added.forEach((item) => l.fresh.add(item.id));
+      l.items = added.concat(l.items).slice(0, l.limit);
+      l.total += Math.max(added.length, (data.total || 0) - (items.length - added.length));
+      renderLogRows();
+    } else {
+      renderLogsShown();
+    }
+    clearNote("logs-status");
+  } catch (err) {
+    if (seq !== l.seq) return;
+    note("logs-status", "err", escapeHtml(err.message || "gagal memuat log") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+    if (err.code === "AUTH_FORBIDDEN") setLogsLive(false);
+  } finally {
+    if (seq === l.seq) l.busy = false;
   }
 }
 
@@ -948,9 +998,26 @@ function renderLogs(data) {
       '<span class="log-bar"><i style="width:' + share + '%"></i></span></button></li>';
   }).join("") + "</ul>" : '<p class="empty">Belum ada data.</p>';
 
-  $("logs-shown").textContent = l.items.length
-    ? logNumber(l.items.length) + " dari " + logNumber(l.total) + " ditampilkan"
-    : "";
+  renderLogRows();
+}
+
+function logsFiltered() {
+  const l = state.logs;
+  return l.minutes !== 60 || Boolean(l.status) || Boolean(l.q) || Object.keys(l.filters).some((key) => l.filters[key]);
+}
+
+function renderLogsShown() {
+  const l = state.logs;
+  const parts = [];
+  if (l.items.length) parts.push(logNumber(l.items.length) + " dari " + logNumber(l.total) + " ditampilkan");
+  if (l.live && l.updatedAt) parts.push("live, diperbarui " + new Date(l.updatedAt).toLocaleTimeString("id-ID"));
+  $("logs-shown").textContent = parts.join(" · ");
+  $("btn-logs-reset").disabled = !logsFiltered();
+}
+
+function renderLogRows() {
+  const l = state.logs;
+  renderLogsShown();
   $("logs-empty").hidden = l.items.length > 0;
   $("logs-empty").textContent = l.q || l.status || Object.keys(l.filters).some((key) => l.filters[key])
     ? "Tidak ada permintaan yang cocok dengan filter ini."
@@ -958,6 +1025,8 @@ function renderLogs(data) {
   $("logs-foot").hidden = l.items.length === 0;
   $("btn-logs-more").hidden = l.items.length >= l.total;
   $("logs-rows").innerHTML = l.items.map(renderLogRow).join("");
+  // sorotan baris baru cukup sekali; render berikutnya tidak mengulang animasinya
+  l.fresh.clear();
 }
 
 function renderLogRow(item) {
@@ -965,7 +1034,7 @@ function renderLogRow(item) {
   const open = l.open.has(item.id);
   const site = logHost(item.origin) || logHost(item.referer);
   const where = [item.client_ip, item.country].filter(Boolean).join(" · ");
-  const row = '<tr class="log-row' + (open ? " open" : "") + '" data-log-id="' + item.id + '" tabindex="0" aria-expanded="' + open + '">' +
+  const row = '<tr class="log-row' + (open ? " open" : "") + (l.fresh.has(item.id) ? " log-new" : "") + '" data-log-id="' + item.id + '" tabindex="0" aria-expanded="' + open + '">' +
     '<td class="mono log-when">' + escapeHtml(logTime(item.ts)) + "</td>" +
     '<td class="log-req"><span class="mono"><b>' + escapeHtml(item.method) + "</b> " + escapeHtml(item.path) + "</span>" +
     (item.detail ? '<small>' + escapeHtml(item.detail) + "</small>" : item.query ? '<small class="mono">?' + escapeHtml(item.query) + "</small>" : "") + "</td>" +
@@ -1056,7 +1125,20 @@ function reloadLogsFromTop() {
   loadLogs();
 }
 
-/* Pantau langsung: muat ulang tiap 15 detik, hanya selama halaman log terbuka dan tab terlihat. */
+/* Kembali ke tampilan awal: 1 jam, semua hasil, tanpa pencarian dan filter. Live tetap seperti adanya. */
+function resetLogsFilters() {
+  const l = state.logs;
+  l.minutes = 60;
+  l.status = "";
+  l.q = "";
+  l.filters = {};
+  $("logs-search").value = "";
+  document.querySelectorAll("[data-logs-minutes]").forEach((button) => button.setAttribute("aria-pressed", button.dataset.logsMinutes === "60" ? "true" : "false"));
+  document.querySelectorAll("[data-logs-status]").forEach((button) => button.setAttribute("aria-pressed", button.dataset.logsStatus === "" ? "true" : "false"));
+  reloadLogsFromTop();
+}
+
+/* Live: permintaan baru muncul tiap 2 detik, hanya selama halaman log terbuka dan tab terlihat. */
 function setLogsLive(on) {
   const l = state.logs;
   l.live = Boolean(on);
@@ -1066,11 +1148,9 @@ function setLogsLive(on) {
   if (button) button.setAttribute("aria-pressed", l.live ? "true" : "false");
   const dot = $("logs-live-dot");
   if (dot) dot.className = "dot" + (l.live ? " ok" : "");
+  renderLogsShown();
   if (!l.live) return;
-  l.timer = setInterval(() => {
-    if (document.hidden || state.view !== "logs") return;
-    loadLogs();
-  }, 15000);
+  l.timer = setInterval(pollLogs, 2000);
 }
 
 async function clearLogs() {
@@ -2917,6 +2997,11 @@ function wireLogs() {
   });
   $("btn-logs-more").addEventListener("click", () => { state.logs.limit = Math.min(500, state.logs.limit + 100); loadLogs(); });
   $("btn-logs-clear").addEventListener("click", clearLogs);
+  $("btn-logs-reset").addEventListener("click", resetLogsFilters);
+  // kembali ke tab: langsung susul yang tertinggal selama tab tersembunyi
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && state.logs.live && state.view === "logs") loadLogs();
+  });
   let logsTimer = null;
   $("logs-search").addEventListener("input", () => {
     clearTimeout(logsTimer);

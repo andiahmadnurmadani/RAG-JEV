@@ -287,7 +287,10 @@ class RequestLogStore:
         path: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        after_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """``after_id`` hanya mengambil baris yang lebih baru (mode Live di konsol); ``total``
+        lalu berarti jumlah baris baru yang cocok, bukan seluruh rentang."""
         where, params = _filters(
             since=since,
             status=status,
@@ -297,13 +300,18 @@ class RequestLogStore:
             application_id=application_id,
             path=path,
         )
+        if after_id:
+            where = (where + " AND" if where else " WHERE") + " id > ?"
+            params.append(int(after_id))
         with self._lock:
+            # dibaca dalam kunci yang sama: baris yang masuk sesudahnya pasti punya id > last_id
+            last_id = self._connection.execute("SELECT MAX(id) FROM requests").fetchone()[0]
             total = self._connection.execute(f"SELECT COUNT(*) FROM requests{where}", params).fetchone()[0]
             rows = self._connection.execute(
                 f"SELECT id, {', '.join(FIELDS)} FROM requests{where} ORDER BY id DESC LIMIT ? OFFSET ?",
                 [*params, int(limit), int(offset)],
             ).fetchall()
-        return {"items": [dict(row) for row in rows], "total": int(total)}
+        return {"items": [dict(row) for row in rows], "total": int(total), "last_id": int(last_id or 0)}
 
     def summary(
         self,

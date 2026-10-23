@@ -83,6 +83,22 @@ def test_filters_narrow_the_list(client):
     assert searched and all("kms.contoh" in (entry["origin"] or "") for entry in searched)
 
 
+def test_live_mode_fetches_only_newer_requests(client):
+    client.get("/api/v1/knowledge-bases", headers=auth(TENANT_A_KEY))
+    newest = _logs(client, status="429")["last_id"]
+    assert newest > 0
+    assert _logs(client, after_id=newest, summary="false")["items"] == []
+
+    client.get("/api/v1/knowledge?limit=5", headers=auth(TENANT_A_KEY))
+    client.get("/api/v1/knowledge?limit=99999", headers=auth(TENANT_A_KEY))
+    fresh = _logs(client, after_id=newest, summary="false")
+    assert [entry["path"] for entry in fresh["items"]] == ["/api/v1/knowledge", "/api/v1/knowledge"]
+    assert fresh["total"] == 2
+    assert "summary" not in fresh
+    only_errors = _logs(client, after_id=newest, summary="false", status="errors")["items"]
+    assert [entry["status"] for entry in only_errors] == [422]
+
+
 def test_health_checks_and_the_log_page_itself_are_not_recorded(client):
     client.get("/api/v1/health")
     _logs(client)

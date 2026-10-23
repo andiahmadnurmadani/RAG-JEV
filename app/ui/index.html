@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261023c">
+<link rel="stylesheet" href="style.css?v=20261023d">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -253,7 +253,7 @@
             <p>Setiap permintaan ke API: aplikasi mana yang memanggil, dari IP dan situs mana, endpoint apa, dan hasilnya. Pakai untuk menemukan aplikasi yang membebani server.</p>
           </div>
           <div class="page-actions">
-            <button class="btn" id="btn-logs-live" type="button" aria-pressed="false" title="Muat ulang otomatis tiap 15 detik selama halaman ini terbuka"><span class="dot" id="logs-live-dot"></span><span>Pantau langsung</span></button>
+            <button class="btn" id="btn-logs-live" type="button" aria-pressed="false" title="Tampilkan permintaan baru begitu masuk (dicek tiap 2 detik) selama halaman ini terbuka"><span class="dot" id="logs-live-dot"></span><span>Live</span></button>
             <button class="btn" id="btn-logs-refresh" type="button"><svg class="ico"><use href="#i-refresh"/></svg><span>Muat ulang</span></button>
           </div>
         </header>
@@ -279,6 +279,7 @@
             <input type="search" id="logs-search" placeholder="Cari IP, situs, endpoint, aplikasi, pertanyaan..." aria-label="Cari di log">
           </label>
           <div class="log-filters" id="logs-filters"></div>
+          <button class="btn ghost" id="btn-logs-reset" type="button" disabled title="Kembali ke 1 jam terakhir, semua hasil, tanpa pencarian dan filter"><svg class="ico"><use href="#i-x"/></svg><span>Reset filter</span></button>
         </div>
         <div class="kb-stats log-stats" id="logs-stats"></div>
         <section class="page-card log-chart-card">
@@ -1101,7 +1102,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261023c"></script>
-<script src="app.js?v=20261023c"></script>
+<script src="markdown.js?v=20261023d"></script>
+<script src="app.js?v=20261023d"></script>
 </body>
 </html>
