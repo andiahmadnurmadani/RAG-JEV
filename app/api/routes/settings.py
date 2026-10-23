@@ -318,6 +318,7 @@ LIMIT_BOUNDS = {
     "read_per_minute": (0, 100_000),
     "global_per_minute": (0, 1_000_000),
     "max_concurrent_queries": (0, 256),
+    "max_concurrent_per_key": (0, 256),
 }
 
 

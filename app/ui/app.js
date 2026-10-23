@@ -722,6 +722,7 @@ const LIMIT_FIELDS = [
   ["l-read-per-minute", "read_per_minute"],
   ["l-global-per-minute", "global_per_minute"],
   ["l-concurrent", "max_concurrent_queries"],
+  ["l-concurrent-key", "max_concurrent_per_key"],
 ];
 
 function renderLimitsService(section) {

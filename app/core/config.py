@@ -234,6 +234,9 @@ class Settings(BaseSettings):
     rate_limit_read_per_minute: int = 120
     rate_limit_global_per_minute: int = 600
     max_concurrent_queries: int = 3
+    # Dari jumlah di atas, paling banyak sekian per kunci/sesi: satu integrasi (mis. KMS yang membuat
+    # presentasi 20 slide sekaligus) tidak boleh mengambil semua slot sampai konsol ikut ditolak.
+    max_concurrent_queries_per_key: int = 2
 
     # ---- kode akses konsol + sesi browser --------------------------------
     # Satu kode akses (passcode) membuka konsol tanpa perlu menempel API key. Kode disimpan

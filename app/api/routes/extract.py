@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.deps import services_from_request
 from app.api.middleware.auth import TrustedContext, trusted_context
-from app.api.middleware.ratelimit import limits_for, query_slot
+from app.api.middleware.ratelimit import QuerySlot, limits_for, query_slot
 from app.api.middleware.tenant import guard_query_body, retrieval_scope
 from app.api.schemas import ExtractDataOut, ExtractRequest, SourceOut
 from app.core.errors import ok
@@ -28,10 +28,11 @@ def extract(
     payload: ExtractRequest,
     request: Request,
     context: TrustedContext = Depends(trusted_context),
-    _slot: None = Depends(query_slot),
+    slot: QuerySlot = Depends(query_slot),
 ) -> Dict[str, Any]:
     annotate(request, knowledge_base_id=payload.knowledge_base_id, detail=payload.query)
     _limit(request, context)
+    slot.acquire(context.limit_identity)
     context.require("read")
     guard_query_body(payload.model_dump(exclude_none=True), "/extract")
     ensure_knowledge_base(payload.knowledge_base_id)

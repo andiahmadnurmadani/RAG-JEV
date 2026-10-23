@@ -11,6 +11,7 @@ layar Setelan (bagian "limits") langsung berlaku tanpa restart. Nilai 0 berarti 
 * ``rate_limit_global_per_minute`` - semua pemanggil digabung, untuk semua endpoint di atas
 * ``max_concurrent_queries``       - /query, /search, /extract yang boleh berjalan bersamaan
   (pekerjaan inilah yang memakan CPU: embedding, rerank, panggilan model)
+* ``max_concurrent_queries_per_key`` - dari jumlah itu, paling banyak sekian per kunci/sesi
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import threading
 import time
 from collections import deque
 from contextlib import contextmanager
-from typing import Any, Callable, Deque, Dict, Iterator, Union
+from typing import Any, Callable, Deque, Dict, Iterator, Optional, Union
 
 from starlette.requests import Request
 
@@ -73,22 +74,36 @@ class SlidingWindowLimiter:
 
 
 class ConcurrencyGate:
-    """Batas jumlah pekerjaan berat yang berjalan bersamaan. Yang melebihi langsung ditolak
-    (429) alih-alih mengantre: antrean panjang hanya memindahkan beban, bukan mengurangi."""
+    """Batas jumlah pekerjaan berat yang berjalan bersamaan, total dan per identitas. Yang
+    melebihi langsung ditolak (429) alih-alih mengantre: antrean panjang hanya memindahkan
+    beban, bukan mengurangi."""
 
-    def __init__(self, limit: LimitSource) -> None:
+    def __init__(self, limit: LimitSource, per_identity: LimitSource = 0) -> None:
         self._limit = limit
+        self._per_identity = per_identity
         self._lock = threading.Lock()
         self._running = 0
+        self._by_identity: Dict[str, int] = {}
 
     @property
     def running(self) -> int:
         return self._running
 
-    @contextmanager
-    def slot(self) -> Iterator[None]:
+    def running_for(self, identity: str) -> int:
+        return self._by_identity.get(identity, 0)
+
+    def acquire(self, identity: str = "") -> None:
         limit = _read_limit(self._limit)
+        per_identity = _read_limit(self._per_identity)
         with self._lock:
+            mine = self._by_identity.get(identity, 0)
+            if per_identity > 0 and mine >= per_identity:
+                raise AppError(
+                    "RATE_LIMITED",
+                    f"This key already has {mine} queries running (limit {per_identity} per key), "
+                    "wait for one to finish",
+                    details={"retry_after_seconds": 5, "max_concurrent_per_key": per_identity},
+                )
             if limit > 0 and self._running >= limit:
                 raise AppError(
                     "RATE_LIMITED",
@@ -96,11 +111,45 @@ class ConcurrencyGate:
                     details={"retry_after_seconds": 2, "max_concurrent_queries": limit},
                 )
             self._running += 1
+            self._by_identity[identity] = mine + 1
+
+    def release(self, identity: str = "") -> None:
+        with self._lock:
+            self._running = max(0, self._running - 1)
+            left = self._by_identity.get(identity, 0) - 1
+            if left > 0:
+                self._by_identity[identity] = left
+            else:
+                self._by_identity.pop(identity, None)
+
+    @contextmanager
+    def slot(self, identity: str = "") -> Iterator[None]:
+        self.acquire(identity)
         try:
             yield
         finally:
-            with self._lock:
-                self._running -= 1
+            self.release(identity)
+
+
+class QuerySlot:
+    """Slot yang diambil handler SETELAH mencatat KB & pertanyaan ke log permintaan (supaya
+    penolakan 429 tetap tercatat lengkap), dan dilepas oleh dependency ``query_slot`` - jadi
+    tetap lepas walau handler gagal di tengah jalan."""
+
+    def __init__(self, gate: ConcurrencyGate) -> None:
+        self._gate = gate
+        self._identity: Optional[str] = None
+
+    def acquire(self, identity: str) -> None:
+        if self._identity is not None:
+            return
+        self._gate.acquire(identity)
+        self._identity = identity
+
+    def release(self) -> None:
+        if self._identity is not None:
+            self._gate.release(self._identity)
+            self._identity = None
 
 
 class ServiceLimits:
@@ -111,7 +160,7 @@ class ServiceLimits:
         self.heavy = SlidingWindowLimiter(get("rate_limit_per_minute"))
         self.read = SlidingWindowLimiter(get("rate_limit_read_per_minute"), label="(read)")
         self.total = SlidingWindowLimiter(get("rate_limit_global_per_minute"), label="(all clients)")
-        self.queries = ConcurrencyGate(get("max_concurrent_queries"))
+        self.queries = ConcurrencyGate(get("max_concurrent_queries"), get("max_concurrent_queries_per_key"))
 
     def check(self, identity: str, kind: str = "heavy") -> None:
         (self.read if kind == "read" else self.heavy).check(identity or "anon")
@@ -132,9 +181,13 @@ def limits_for(settings: Any) -> ServiceLimits:
         return found[1]
 
 
-def query_slot(request: Request) -> Iterator[None]:
-    """FastAPI dependency: memegang satu slot ``max_concurrent_queries`` selama permintaan berjalan."""
+def query_slot(request: Request) -> Iterator[QuerySlot]:
+    """FastAPI dependency: handler memanggil ``slot.acquire(identitas)``; slotnya dilepas di sini
+    setelah permintaan selesai."""
     from app.api.deps import services_from_request
 
-    with limits_for(services_from_request(request).settings).queries.slot():
-        yield
+    slot = QuerySlot(limits_for(services_from_request(request).settings).queries)
+    try:
+        yield slot
+    finally:
+        slot.release()

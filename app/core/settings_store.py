@@ -104,6 +104,7 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         "read_per_minute": ("rate_limit_read_per_minute", "int"),
         "global_per_minute": ("rate_limit_global_per_minute", "int"),
         "max_concurrent_queries": ("max_concurrent_queries", "int"),
+        "max_concurrent_per_key": ("max_concurrent_queries_per_key", "int"),
     },
     # Pertanyaan yang tidak terjawab: apa yang dicatat dan berapa lama disimpan.
     "unanswered": {
