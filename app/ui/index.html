@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261023g">
+<link rel="stylesheet" href="style.css?v=20261023h">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -872,43 +872,64 @@
       <section class="group" data-panel="limits" hidden>
         <div class="group-head">
           <h2>Batas permintaan</h2>
-          <p>Melindungi server dari aplikasi yang mengirim terlalu banyak permintaan (misalnya polling terus-menerus). Permintaan yang melewati batas ditolak dengan kode 429 dan petunjuk kapan boleh mencoba lagi. Berlaku langsung, tanpa restart. 0 = tanpa batas.</p>
+          <p>Menjaga server tetap lancar saat ada aplikasi yang bertanya terlalu banyak atau terlalu sering. Permintaan yang melewati batas diminta mencoba lagi sebentar kemudian. Berlaku langsung.</p>
         </div>
-        <div class="grid-2">
-          <div class="field">
-            <label for="l-per-minute">Tanya &amp; ubah knowledge, per kunci (per menit)</label>
-            <input type="number" id="l-per-minute" min="0" max="100000" step="10" value="240">
-            <span class="help">/query, /search, /extract, unggah, ubah dan hapus knowledge, dihitung per API key.</span>
-          </div>
-          <div class="field">
-            <label for="l-read-per-minute">Baca daftar &amp; status, per kunci (per menit)</label>
-            <input type="number" id="l-read-per-minute" min="0" max="100000" step="10" value="120">
-            <span class="help">Daftar dokumen, daftar knowledge base dan status dokumen, yang biasa di-poll aplikasi.</span>
-          </div>
-          <div class="field">
-            <label for="l-global-per-minute">Total semua aplikasi (per menit)</label>
-            <input type="number" id="l-global-per-minute" min="0" max="1000000" step="10" value="600">
-            <span class="help">Gabungan semua API key untuk semua permintaan di atas: rem terakhir bila banyak aplikasi ramai bersamaan.</span>
-          </div>
-          <div class="field">
-            <label for="l-concurrent">Pertanyaan yang diproses bersamaan</label>
-            <input type="number" id="l-concurrent" min="0" max="256" step="1" value="3">
-            <span class="help">Batas /query, /search dan /extract yang berjalan pada saat yang sama. Inilah yang paling menentukan beban CPU.</span>
-          </div>
-          <div class="field">
-            <label for="l-concurrent-scope">Batas bersamaan dihitung</label>
-            <select id="l-concurrent-scope">
-              <option value="knowledge_base">Per knowledge base</option>
-              <option value="key">Per API key</option>
-            </select>
-            <span class="help">Per knowledge base: satu KB yang sedang sibuk tidak menahan pertanyaan ke KB lain, siapa pun pengirimnya. Per API key: satu aplikasi yang sibuk tidak menahan aplikasi lain dan konsol.</span>
-          </div>
-          <div class="field">
-            <label for="l-concurrent-key" id="l-concurrent-key-label">Pertanyaan bersamaan per knowledge base</label>
-            <input type="number" id="l-concurrent-key" min="0" max="256" step="1" value="2">
-            <span class="help">Dari batas total di atas, paling banyak sekian sekaligus untuk satu knowledge base (atau satu API key). Buat lebih kecil dari batas total supaya selalu ada slot untuk yang lain. 0 = tanpa batas.</span>
-          </div>
+        <div class="limit-presets" role="radiogroup" aria-label="Pilihan batas">
+          <label class="limit-preset">
+            <input type="radio" name="limit-preset" value="hemat">
+            <b>Hemat</b>
+            <span>Untuk server kecil. Paling aman dari lambat dan panas, tapi aplikasi lebih sering diminta menunggu.</span>
+          </label>
+          <label class="limit-preset">
+            <input type="radio" name="limit-preset" value="normal">
+            <b>Normal</b>
+            <span>Disarankan untuk kebanyakan pemakaian.</span>
+          </label>
+          <label class="limit-preset">
+            <input type="radio" name="limit-preset" value="longgar">
+            <b>Longgar</b>
+            <span>Untuk server yang kuat atau banyak pengguna sekaligus.</span>
+          </label>
         </div>
+        <p class="limit-summary" id="limit-summary"></p>
+        <details class="adv" id="limits-adv">
+          <summary>Atur angka sendiri</summary>
+          <div class="grid-2">
+            <div class="field">
+              <label for="l-concurrent">Pertanyaan dijawab sekaligus</label>
+              <input type="number" id="l-concurrent" min="0" max="256" step="1" value="3">
+              <span class="help">Untuk seluruh server. Angka inilah yang paling menentukan beban server.</span>
+            </div>
+            <div class="field">
+              <label for="l-concurrent-key" id="l-concurrent-key-label">Sekaligus per knowledge base</label>
+              <input type="number" id="l-concurrent-key" min="0" max="256" step="1" value="2">
+              <span class="help">Buat lebih kecil dari angka di sebelahnya, supaya satu yang sibuk tidak membuat yang lain menunggu.</span>
+            </div>
+            <div class="field">
+              <label for="l-concurrent-scope">Hitung "sekaligus" per</label>
+              <select id="l-concurrent-scope">
+                <option value="knowledge_base">Knowledge base</option>
+                <option value="key">Aplikasi (API key)</option>
+              </select>
+              <span class="help">Knowledge base: KB yang sibuk tidak menahan KB lain. Aplikasi: aplikasi yang sibuk tidak menahan aplikasi lain.</span>
+            </div>
+            <div class="field">
+              <label for="l-per-minute">Pertanyaan per menit, tiap aplikasi</label>
+              <input type="number" id="l-per-minute" min="0" max="100000" step="10" value="240">
+              <span class="help">Termasuk unggah, ubah, dan hapus dokumen.</span>
+            </div>
+            <div class="field">
+              <label for="l-read-per-minute">Cek daftar &amp; status per menit, tiap aplikasi</label>
+              <input type="number" id="l-read-per-minute" min="0" max="100000" step="10" value="120">
+              <span class="help">Aplikasi yang terus-menerus mengecek daftar dokumen.</span>
+            </div>
+            <div class="field">
+              <label for="l-global-per-minute">Semua aplikasi per menit</label>
+              <input type="number" id="l-global-per-minute" min="0" max="1000000" step="10" value="600">
+              <span class="help">Jumlah gabungan semua aplikasi. 0 di kolom mana pun = tanpa batas.</span>
+            </div>
+          </div>
+        </details>
         <div class="group-foot">
           <button class="btn primary" id="btn-save-limits" type="button">Simpan</button>
           <span id="limits-svc-status"></span>
@@ -1119,7 +1140,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261023g"></script>
-<script src="app.js?v=20261023g"></script>
+<script src="markdown.js?v=20261023h"></script>
+<script src="app.js?v=20261023h"></script>
 </body>
 </html>

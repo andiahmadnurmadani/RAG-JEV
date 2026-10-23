@@ -725,17 +725,49 @@ const LIMIT_FIELDS = [
   ["l-concurrent-key", "max_concurrent_per_key"],
 ];
 
+// Pilihan siap pakai, supaya operator tidak perlu memahami tiap angka.
+const LIMIT_PRESETS = {
+  hemat: { per_minute: 120, read_per_minute: 60, global_per_minute: 300, max_concurrent_queries: 2, max_concurrent_per_key: 1 },
+  normal: { per_minute: 240, read_per_minute: 120, global_per_minute: 600, max_concurrent_queries: 3, max_concurrent_per_key: 2 },
+  longgar: { per_minute: 600, read_per_minute: 300, global_per_minute: 1500, max_concurrent_queries: 6, max_concurrent_per_key: 3 },
+};
+
 function renderLimitsService(section) {
   if (!section) return;
   LIMIT_FIELDS.forEach((pair) => setNumber(pair[0], section[pair[1]]));
   $("l-concurrent-scope").value = section.max_concurrent_scope === "key" ? "key" : "knowledge_base";
-  renderConcurrentScopeLabel();
+  syncLimitsView();
 }
 
-function renderConcurrentScopeLabel() {
-  $("l-concurrent-key-label").textContent = $("l-concurrent-scope").value === "key"
-    ? "Pertanyaan bersamaan per API key"
-    : "Pertanyaan bersamaan per knowledge base";
+function limitValues() {
+  const values = {};
+  LIMIT_FIELDS.forEach((pair) => { values[pair[1]] = Number($(pair[0]).value); });
+  return values;
+}
+
+/* Tandai pilihan yang cocok dengan angka saat ini (tidak ada = angka sendiri) dan tulis ringkasannya. */
+function syncLimitsView() {
+  const values = limitValues();
+  const match = Object.keys(LIMIT_PRESETS).find((name) =>
+    Object.keys(LIMIT_PRESETS[name]).every((key) => LIMIT_PRESETS[name][key] === values[key]));
+  document.querySelectorAll('input[name="limit-preset"]').forEach((radio) => { radio.checked = radio.value === match; });
+  if (!match) $("limits-adv").open = true;
+  const perKb = $("l-concurrent-scope").value !== "key";
+  $("l-concurrent-key-label").textContent = perKb ? "Sekaligus per knowledge base" : "Sekaligus per aplikasi";
+  const count = (value, unit) => (value > 0 ? logNumber(value) + " " + unit : "tanpa batas");
+  const total = values.max_concurrent_queries;
+  const each = values.max_concurrent_per_key;
+  $("limit-summary").textContent = (match ? "" : "Angka sendiri. ") +
+    "Server menjawab " + (total > 0 ? "paling banyak " + logNumber(total) + " pertanyaan sekaligus" : "pertanyaan tanpa batas jumlah sekaligus") +
+    (each > 0 ? ", dan tiap " + (perKb ? "knowledge base" : "aplikasi") + " paling banyak " + logNumber(each) : "") +
+    ". Tiap aplikasi boleh bertanya " + count(values.per_minute, "kali per menit") + ".";
+}
+
+function applyLimitPreset(name) {
+  const preset = LIMIT_PRESETS[name];
+  if (!preset) return;
+  LIMIT_FIELDS.forEach((pair) => setNumber(pair[0], preset[pair[1]]));
+  syncLimitsView();
 }
 
 async function saveLimitsService() {
@@ -3153,7 +3185,10 @@ function wire() {
   $("dlg-note").addEventListener("close", () => { if ($("dlg-note").returnValue === "ok") saveNote(); });
   $("btn-save-unans").addEventListener("click", saveUnansweredService);
   $("btn-save-limits").addEventListener("click", saveLimitsService);
-  $("l-concurrent-scope").addEventListener("change", renderConcurrentScopeLabel);
+  $("l-concurrent-scope").addEventListener("change", syncLimitsView);
+  LIMIT_FIELDS.forEach((pair) => $(pair[0]).addEventListener("input", syncLimitsView));
+  document.querySelectorAll('input[name="limit-preset"]').forEach((radio) =>
+    radio.addEventListener("change", () => applyLimitPreset(radio.value)));
   $("btn-save-embedding").addEventListener("click", saveEmbedding);
   $("btn-kb-new").addEventListener("click", newKbDialog);
   $("btn-kb-delete").addEventListener("click", () => openDeleteKb(state.kb));
