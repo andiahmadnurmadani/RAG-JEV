@@ -8,11 +8,13 @@
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -215,6 +217,7 @@ def create_app() -> FastAPI:
                 "organization_id": getattr(context, "organization_id", None),
                 "application_id": getattr(context, "application_id", None),
                 "user_id": getattr(context, "user_id", None),
+                **_request_origin(request, context),
                 "metrics": snapshot().get("counters", {}),
             }
         )
@@ -261,6 +264,40 @@ def create_app() -> FastAPI:
     return app
 
 
+def _clip(value: Any, limit: int = 200) -> Any:
+    text = str(value or "").strip()
+    return text[:limit] if text else None
+
+
+_SENSITIVE_PARAM = re.compile(r"token|key|secret|pass|auth|code|sig|session|credential", re.I)
+
+
+def _safe_query(query: str) -> str:
+    """Query string untuk log, dengan nilai parameter yang mirip rahasia disamarkan."""
+    pairs = parse_qsl(query or "", keep_blank_values=True)
+    return urlencode([(k, "***" if _SENSITIVE_PARAM.search(k) else v) for k, v in pairs])
+
+
+def _request_origin(request: Request, context: Any) -> Dict[str, Any]:
+    """Dari mana permintaan datang: IP asli di balik Cloudflare, negara, situs web pemanggil
+    (Origin/Referer), peramban/aplikasi (User-Agent), dan jenis kredensial yang dipakai.
+    Hanya pengenal yang dicatat, tidak pernah nilai kunci atau token."""
+    headers = request.headers
+    session_id = getattr(context, "session_id", None)
+    return {
+        "client_ip": auth._client(request),
+        "country": _clip(headers.get("CF-IPCountry"), 8),
+        "host": _clip(headers.get("host"), 120),
+        "query": _clip(_safe_query(request.url.query), 300),
+        "origin": _clip(headers.get("origin"), 200),
+        "referer": _clip(headers.get("referer"), 300),
+        "user_agent": _clip(headers.get("user-agent"), 300),
+        "credential": getattr(context, "source", None),
+        "key_id": getattr(context, "key_id", None),
+        "session": session_id[:8] if session_id else None,
+    }
+
+
 def _error_response(error: AppError, request_id: str) -> JSONResponse:
     return JSONResponse(status_code=error.status_code, content=error.envelope(request_id))
 
@@ -290,6 +327,9 @@ def run() -> None:
         host="0.0.0.0",
         port=settings.app_port,
         log_level=settings.log_level.lower(),
+        # baris akses JSON dari middleware sudah lengkap (IP asli, origin, UA); log akses
+        # bawaan uvicorn hanya menduplikasinya dengan IP proxy docker
+        access_log=False,
     )
 
 
