@@ -728,6 +728,14 @@ const LIMIT_FIELDS = [
 function renderLimitsService(section) {
   if (!section) return;
   LIMIT_FIELDS.forEach((pair) => setNumber(pair[0], section[pair[1]]));
+  $("l-concurrent-scope").value = section.max_concurrent_scope === "key" ? "key" : "knowledge_base";
+  renderConcurrentScopeLabel();
+}
+
+function renderConcurrentScopeLabel() {
+  $("l-concurrent-key-label").textContent = $("l-concurrent-scope").value === "key"
+    ? "Pertanyaan bersamaan per API key"
+    : "Pertanyaan bersamaan per knowledge base";
 }
 
 async function saveLimitsService() {
@@ -740,6 +748,7 @@ async function saveLimitsService() {
     }
     limits[pair[1]] = value;
   }
+  limits.max_concurrent_scope = $("l-concurrent-scope").value;
   try {
     const data = await api("PUT", "/settings", { limits: limits });
     renderLimitsService((data.sections || {}).limits);
@@ -3144,6 +3153,7 @@ function wire() {
   $("dlg-note").addEventListener("close", () => { if ($("dlg-note").returnValue === "ok") saveNote(); });
   $("btn-save-unans").addEventListener("click", saveUnansweredService);
   $("btn-save-limits").addEventListener("click", saveLimitsService);
+  $("l-concurrent-scope").addEventListener("change", renderConcurrentScopeLabel);
   $("btn-save-embedding").addEventListener("click", saveEmbedding);
   $("btn-kb-new").addEventListener("click", newKbDialog);
   $("btn-kb-delete").addEventListener("click", () => openDeleteKb(state.kb));

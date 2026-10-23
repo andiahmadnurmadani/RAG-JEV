@@ -322,9 +322,14 @@ LIMIT_BOUNDS = {
 }
 
 
+CONCURRENT_SCOPES = ("knowledge_base", "key")
+
+
 def _validate_limits(updates: Dict[str, Dict[str, Any]]) -> None:
     """0 = tanpa batas; selain itu bilangan bulat dalam rentang wajar."""
     section = updates.get("limits") or {}
+    if "max_concurrent_scope" in section and section["max_concurrent_scope"] not in CONCURRENT_SCOPES:
+        raise AppError("VALIDATION_ERROR", "limits.max_concurrent_scope harus knowledge_base atau key")
     for field, (low, high) in LIMIT_BOUNDS.items():
         if field in section and not (low <= int(section[field]) <= high):
             raise AppError("VALIDATION_ERROR", f"limits.{field} harus {low}-{high} (0 = tanpa batas)")

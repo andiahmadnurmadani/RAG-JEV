@@ -53,7 +53,9 @@ def test_limits_are_admin_settings_and_validated(client, settings):
         "global_per_minute": settings.rate_limit_global_per_minute,
         "max_concurrent_queries": settings.max_concurrent_queries,
         "max_concurrent_per_key": settings.max_concurrent_queries_per_key,
+        "max_concurrent_scope": "knowledge_base",
     }
+    assert _put_limits(client, max_concurrent_scope="per_menit").json()["error"]["code"] == "VALIDATION_ERROR"
     bad = _put_limits(client, read_per_minute=-1)
     assert bad.status_code == 422 or bad.status_code == 400
     assert bad.json()["error"]["code"] == "VALIDATION_ERROR"
@@ -112,7 +114,7 @@ def test_concurrent_query_limit_returns_429_while_busy(client):
 
 
 def test_one_key_cannot_take_every_query_slot(client):
-    assert _put_limits(client, max_concurrent_queries=3, max_concurrent_per_key=1).status_code == 200
+    assert _put_limits(client, max_concurrent_queries=3, max_concurrent_per_key=1, max_concurrent_scope="key").status_code == 200
     from app.api.middleware.ratelimit import limits_for
 
     gate = limits_for(client.app.state.services.settings).queries
@@ -122,6 +124,7 @@ def test_one_key_cannot_take_every_query_slot(client):
         other = client.post("/api/v1/search", headers=auth(TENANT_B_KEY), json=body)
     assert busy.status_code == 429
     assert busy.json()["error"]["details"]["max_concurrent_per_key"] == 1
+    assert busy.json()["error"]["details"]["scope"] == "key"
     assert other.status_code != 429  # kunci lain tetap dilayani
     # slot dilepas walau permintaannya berakhir dengan galat
     assert gate.running == 0 and gate.running_for("app:app_a") == 0
@@ -130,4 +133,21 @@ def test_one_key_cannot_take_every_query_slot(client):
     logged = client.get("/api/v1/logs/requests", params={"status": "429"}, headers=auth(TENANT_A_KEY)).json()["data"]["items"]
     assert logged[0]["knowledge_base_id"] == "kb_x"
     assert logged[0]["detail"] == "apa saja"
+    assert _put_limits(client, max_concurrent_per_key=0).status_code == 200
+
+
+def test_by_default_one_knowledge_base_cannot_take_every_query_slot(client):
+    assert _put_limits(client, max_concurrent_queries=3, max_concurrent_per_key=1).status_code == 200
+    from app.api.middleware.ratelimit import limits_for
+
+    gate = limits_for(client.app.state.services.settings).queries
+    with gate.slot("kb:org_a:kb_sibuk"):  # KB ini sedang menjawab satu pertanyaan
+        same_kb = client.post("/api/v1/search", headers=auth(TENANT_A_KEY), json={"query": "apa saja", "knowledge_base_id": "kb_sibuk"})
+        other_kb = client.post("/api/v1/search", headers=auth(TENANT_A_KEY), json={"query": "apa saja", "knowledge_base_id": "kb_lain"})
+    assert same_kb.status_code == 429
+    error = same_kb.json()["error"]
+    assert error["details"]["scope"] == "knowledge_base"
+    assert "kb_sibuk" in error["message"]
+    assert other_kb.status_code != 429  # KB lain - walau kuncinya sama - tetap dilayani
+    assert gate.running == 0
     assert _put_limits(client, max_concurrent_per_key=0).status_code == 200

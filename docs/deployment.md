@@ -144,6 +144,7 @@ RATE_LIMIT_READ_PER_MINUTE=120
 RATE_LIMIT_GLOBAL_PER_MINUTE=600
 MAX_CONCURRENT_QUERIES=3
 MAX_CONCURRENT_QUERIES_PER_KEY=2
+MAX_CONCURRENT_SCOPE=knowledge_base
 MAX_UPLOAD_MB=32
 INDEXING_WORKERS=1
 ```
@@ -157,7 +158,8 @@ tanpa restart. Yang melewati batas dijawab `429 RATE_LIMITED` dengan `retry_afte
 | baca per kunci | `RATE_LIMIT_READ_PER_MINUTE` | daftar knowledge, daftar knowledge base, status dokumen (yang biasa di-poll) |
 | total | `RATE_LIMIT_GLOBAL_PER_MINUTE` | semua API key digabung |
 | bersamaan | `MAX_CONCURRENT_QUERIES` | `/query`, `/search`, `/extract` yang berjalan pada saat yang sama (beban CPU) |
-| bersamaan per kunci | `MAX_CONCURRENT_QUERIES_PER_KEY` | bagian dari batas di atas untuk satu API key/sesi, agar satu aplikasi tidak memakai semua slot |
+| bersamaan per lingkup | `MAX_CONCURRENT_QUERIES_PER_KEY` | bagian dari batas di atas untuk satu lingkup, agar satu KB/aplikasi tidak memakai semua slot |
+| lingkup | `MAX_CONCURRENT_SCOPE` | `knowledge_base` (bawaan: per KB) atau `key` (per API key/sesi) |
 
 Urutan prioritas konfigurasi: **nilai env** dimuat lebih dulu, lalu **berkas override**
 (`SETTINGS_OVERRIDE_PATH`) yang ditulis oleh layar Pengaturan di-*apply* saat startup dan

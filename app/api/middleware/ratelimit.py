@@ -11,7 +11,8 @@ layar Setelan (bagian "limits") langsung berlaku tanpa restart. Nilai 0 berarti 
 * ``rate_limit_global_per_minute`` - semua pemanggil digabung, untuk semua endpoint di atas
 * ``max_concurrent_queries``       - /query, /search, /extract yang boleh berjalan bersamaan
   (pekerjaan inilah yang memakan CPU: embedding, rerank, panggilan model)
-* ``max_concurrent_queries_per_key`` - dari jumlah itu, paling banyak sekian per kunci/sesi
+* ``max_concurrent_queries_per_key`` - dari jumlah itu, paling banyak sekian per lingkup
+  (``max_concurrent_scope``: per knowledge base, atau per kunci/sesi)
 """
 
 from __future__ import annotations
@@ -92,7 +93,7 @@ class ConcurrencyGate:
     def running_for(self, identity: str) -> int:
         return self._by_identity.get(identity, 0)
 
-    def acquire(self, identity: str = "") -> None:
+    def acquire(self, identity: str = "", *, subject: str = "This key", unit: str = "key", scope: str = "key") -> None:
         limit = _read_limit(self._limit)
         per_identity = _read_limit(self._per_identity)
         with self._lock:
@@ -100,9 +101,9 @@ class ConcurrencyGate:
             if per_identity > 0 and mine >= per_identity:
                 raise AppError(
                     "RATE_LIMITED",
-                    f"This key already has {mine} queries running (limit {per_identity} per key), "
+                    f"{subject} already has {mine} queries running (limit {per_identity} per {unit}), "
                     "wait for one to finish",
-                    details={"retry_after_seconds": 5, "max_concurrent_per_key": per_identity},
+                    details={"retry_after_seconds": 5, "max_concurrent_per_key": per_identity, "scope": scope},
                 )
             if limit > 0 and self._running >= limit:
                 raise AppError(
@@ -140,11 +141,25 @@ class QuerySlot:
         self._gate = gate
         self._identity: Optional[str] = None
 
-    def acquire(self, identity: str) -> None:
+    def acquire(self, identity: str, **label: str) -> None:
         if self._identity is not None:
             return
-        self._gate.acquire(identity)
+        self._gate.acquire(identity, **label)
         self._identity = identity
+
+    def acquire_for(self, settings: Any, context: Any, knowledge_base_id: Optional[str]) -> None:
+        """Ambil slot sesuai ``max_concurrent_scope``: per knowledge base (bawaan) atau per kunci.
+        Tanpa KB (pertanyaan ke seluruh organisasi) dihitung sebagai satu lingkup "*"."""
+        if str(getattr(settings, "max_concurrent_scope", "knowledge_base")) == "key":
+            self.acquire(context.limit_identity)
+            return
+        kb = str(knowledge_base_id or "*")
+        self.acquire(
+            f"kb:{context.organization_id}:{kb}",
+            subject="Knowledge base '%s'" % kb if kb != "*" else "Queries without a knowledge base",
+            unit="knowledge base",
+            scope="knowledge_base",
+        )
 
     def release(self) -> None:
         if self._identity is not None:

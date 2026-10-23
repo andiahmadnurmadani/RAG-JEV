@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261023f">
+<link rel="stylesheet" href="style.css?v=20261023g">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -896,9 +896,17 @@
             <span class="help">Batas /query, /search dan /extract yang berjalan pada saat yang sama. Inilah yang paling menentukan beban CPU.</span>
           </div>
           <div class="field">
-            <label for="l-concurrent-key">Pertanyaan bersamaan per kunci</label>
+            <label for="l-concurrent-scope">Batas bersamaan dihitung</label>
+            <select id="l-concurrent-scope">
+              <option value="knowledge_base">Per knowledge base</option>
+              <option value="key">Per API key</option>
+            </select>
+            <span class="help">Per knowledge base: satu KB yang sedang sibuk tidak menahan pertanyaan ke KB lain, siapa pun pengirimnya. Per API key: satu aplikasi yang sibuk tidak menahan aplikasi lain dan konsol.</span>
+          </div>
+          <div class="field">
+            <label for="l-concurrent-key" id="l-concurrent-key-label">Pertanyaan bersamaan per knowledge base</label>
             <input type="number" id="l-concurrent-key" min="0" max="256" step="1" value="2">
-            <span class="help">Dari batas di atas, paling banyak sekian untuk satu API key atau sesi. Buat lebih kecil dari batas total supaya satu aplikasi yang sibuk tidak membuat konsol dan aplikasi lain ikut ditolak.</span>
+            <span class="help">Dari batas total di atas, paling banyak sekian sekaligus untuk satu knowledge base (atau satu API key). Buat lebih kecil dari batas total supaya selalu ada slot untuk yang lain. 0 = tanpa batas.</span>
           </div>
         </div>
         <div class="group-foot">
@@ -1111,7 +1119,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261023f"></script>
-<script src="app.js?v=20261023f"></script>
+<script src="markdown.js?v=20261023g"></script>
+<script src="app.js?v=20261023g"></script>
 </body>
 </html>

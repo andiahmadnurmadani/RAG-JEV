@@ -32,7 +32,7 @@ def extract(
 ) -> Dict[str, Any]:
     annotate(request, knowledge_base_id=payload.knowledge_base_id, detail=payload.query)
     _limit(request, context)
-    slot.acquire(context.limit_identity)
+    slot.acquire_for(services_from_request(request).settings, context, payload.knowledge_base_id)
     context.require("read")
     guard_query_body(payload.model_dump(exclude_none=True), "/extract")
     ensure_knowledge_base(payload.knowledge_base_id)

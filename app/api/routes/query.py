@@ -32,7 +32,7 @@ def query(
 ) -> Dict[str, Any]:
     annotate(request, knowledge_base_id=payload.knowledge_base_id, detail=payload.query)
     _limit(request, context)
-    slot.acquire(context.limit_identity)
+    slot.acquire_for(services_from_request(request).settings, context, payload.knowledge_base_id)
     context.require("read")
     # PRD 6/21: the client may not choose its tenant.
     guard_query_body(payload.model_dump(exclude_none=True), "/query")
