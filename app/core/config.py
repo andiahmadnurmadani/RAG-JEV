@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     unanswered_reasons: str = "no_candidates,below_threshold,strict_grounding,context_empty"
     unanswered_retention_days: int = 90
     unanswered_max_entries: int = 5000
+    # Log permintaan yang bisa dibaca di konsol (halaman "Log permintaan"): siapa memanggil apa,
+    # dari mana (IP, negara, situs/Origin, aplikasi/User-Agent, kunci API) dan hasilnya.
+    request_log_enabled: bool = True
+    request_log_path: str = ""
+    request_log_retention_days: int = 7
+    request_log_max_entries: int = 200000
+    # Jalur yang tidak dicatat (awalan, dipisah koma): pemeriksaan kesehatan dan aset statis
+    # hanya menenggelamkan permintaan yang penting.
+    request_log_skip_paths: str = "/api/v1/health,/api/v1/ready,/api/v1/metrics,/ui/,/docs,/favicon.ico"
     # Kosong = di samping TABLE_STORE_PATH (volume data yang sama).
     unanswered_store_path: str = ""
     settings_override_path: str = str(BASE_DIR / "data" / "settings.json")

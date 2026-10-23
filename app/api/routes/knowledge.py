@@ -13,6 +13,7 @@ from app.api.middleware.tenant import assert_tenant_match
 from app.api.schemas import DocumentStatusOut, IndexDataOut, KnowledgeIndexRequest, KnowledgeUpdateRequest
 from app.core.errors import AppError, ok
 from app.core.logging import get_logger
+from app.core.request_log import annotate
 from app.core.security import validate_display_label, validate_payload_size
 from app.core.urlguard import UrlRejected, assert_public_url
 from app.qdrant import repository
@@ -71,6 +72,8 @@ def index_knowledge(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Enqueue an indexing job (PRD 33: 202 Accepted, work happens in the worker)."""
+    annotate(request, knowledge_base_id=payload.knowledge_base_id,
+             detail=f"{payload.document_id} {payload.document_name or ''}".strip())
     _rate_limit(request, context)
     context.require("write")
     context.require_knowledge_base(payload.knowledge_base_id)
@@ -320,6 +323,7 @@ def update_knowledge(
     context: TrustedContext = Depends(trusted_context),
 ) -> Dict[str, Any]:
     """Re-index a document: old vectors are removed before the new ones land (PRD 32)."""
+    annotate(request, knowledge_base_id=payload.knowledge_base_id, detail=document_id)
     _rate_limit(request, context)
     context.require("write")
     if payload.document_id != document_id:

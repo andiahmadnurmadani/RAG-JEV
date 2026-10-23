@@ -12,7 +12,7 @@ const SESSION_KEY = "rag.session.v1";
 const DEFAULT_KB = "kb_chat";
 const PANELS = ["conn", "access", "keys", "llm", "jev", "retr", "unans", "fmt", "web", "summary", "limits"];
 const RECENT_KB_KEY = "rag.console.kbs.v1";
-const VIEWS = ["kbs", "chat", "unanswered", "eval", "settings"];
+const VIEWS = ["kbs", "chat", "unanswered", "logs", "eval", "settings"];
 // Versi bentuk opsi uji di localStorage. Versi lama memaksa reranker MATI di setiap pertanyaan konsol,
 // sehingga hasil uji berbeda dari yang diterima aplikasi lewat API; opsi lama itu dibuang.
 const OPTS_VERSION = 2;
@@ -53,6 +53,7 @@ const state = {
   kbs: [],
   kbSort: "recent",
   unans: { status: "open", sort: "recent", kb: "", q: "", items: [], selected: new Set(), limit: 50, total: 0 },
+  logs: { minutes: 60, status: "", q: "", filters: {}, limit: 100, items: [], total: 0, open: new Set(), live: false, timer: null, busy: false },
   view: "",
   evalStop: false,
   limits: { max_mb: null, allowed: [], allowed_ext: [] },
@@ -384,6 +385,7 @@ function parseRoute() {
   if (head === "settings") return { view: "settings", arg: parts[1] || "" };
   if (head === "eval") return { view: "eval", arg: "" };
   if (head === "unanswered") return { view: "unanswered", arg: "" };
+  if (head === "logs") return { view: "logs", arg: "" };
   if (head === "kb") return { view: "chat", arg: parts.slice(1).join("/") };
   if (head === "chat") return { view: "chat", arg: "" };
   return { view: "kbs", arg: "" };
@@ -398,7 +400,7 @@ function showView(name, arg) {
     ? "#/settings" + (arg ? "/" + arg : "")
     : name === "chat"
       ? "#/kb/" + encodeURIComponent(arg || state.kb)
-      : name === "eval" ? "#/eval" : name === "unanswered" ? "#/unanswered" : "#/kbs";
+      : name === "eval" ? "#/eval" : name === "unanswered" ? "#/unanswered" : name === "logs" ? "#/logs" : "#/kbs";
   if (location.hash !== target) location.hash = target;
   else route();
 }
@@ -421,6 +423,8 @@ function route() {
     renderEvalKbs();
   } else if (view === "unanswered") {
     loadUnanswered();
+  } else if (view === "logs") {
+    loadLogs();
   } else if (view === "settings") {
     selectPanel(arg || state.panel, true);
     if (previous !== "settings") {
@@ -431,6 +435,7 @@ function route() {
   }
   if (view !== "chat") window.scrollTo(0, 0);
   if (view !== "unanswered") refreshUnansweredBadge();
+  if (view !== "logs") setLogsLive(false);
 }
 
 function selectPanel(name, fromRoute) {
@@ -801,6 +806,282 @@ function relativeTime(value) {
   const days = Math.round(hours / 24);
   if (days < 30) return days + " hari lalu";
   return shortTime(value).slice(0, 10);
+}
+
+/* ------------------------------------------------------------ log permintaan */
+
+const LOG_FILTER_LABELS = { client_ip: "IP", key_id: "Kunci", application_id: "Aplikasi", path: "Endpoint" };
+
+function logTime(ts) {
+  const at = new Date(Number(ts) * 1000);
+  const time = at.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (at.toDateString() === new Date().toDateString()) return time;
+  return at.toLocaleDateString("id-ID", { day: "2-digit", month: "short" }) + " " + time;
+}
+
+function logHost(url) {
+  if (!url) return "";
+  try { return new URL(url).host; } catch (err) { return String(url).slice(0, 60); }
+}
+
+/* "Chrome di Windows", "node", "curl" - cukup untuk mengenali jenis pemanggil sekilas. */
+function logAgent(ua) {
+  const text = String(ua || "");
+  if (!text) return "";
+  const browser = /Edg\//.test(text) ? "Edge" : /OPR\//.test(text) ? "Opera" : /Firefox\//.test(text) ? "Firefox"
+    : /Chrome\//.test(text) ? "Chrome" : /Safari\//.test(text) ? "Safari" : "";
+  if (browser) {
+    const os = /Android/.test(text) ? "Android" : /iPhone|iPad/.test(text) ? "iOS" : /Windows/.test(text) ? "Windows"
+      : /Mac OS X/.test(text) ? "macOS" : /Linux/.test(text) ? "Linux" : "";
+    return browser + (os ? " di " + os : "");
+  }
+  return text.split(/[\s(]/)[0].slice(0, 40);
+}
+
+function logCaller(item) {
+  if (item.key_label) return item.key_label;
+  if (item.credential === "session") return "Konsol (sesi " + (item.session || item.user_id || "") + ")";
+  if (item.application_id) return item.application_id;
+  return "tanpa kredensial";
+}
+
+function logStatusChip(status, code) {
+  const tone = status === 429 ? "warn" : status >= 500 ? "err" : status >= 400 ? "warn" : "ok";
+  return '<span class="chip ' + tone + ' mono" title="' + escapeHtml(code || "") + '">' + escapeHtml(status) + "</span>";
+}
+
+function logMs(value) {
+  if (value === null || value === undefined) return "-";
+  const ms = Number(value);
+  return ms >= 1000 ? (ms / 1000).toFixed(ms >= 10000 ? 0 : 1) + " dtk" : Math.round(ms) + " ms";
+}
+
+function logNumber(value) {
+  return Number(value || 0).toLocaleString("id-ID");
+}
+
+function logParams(extra) {
+  const l = state.logs;
+  const params = new URLSearchParams({ minutes: String(l.minutes), limit: String(l.limit) });
+  if (l.status) params.set("status", l.status);
+  if (l.q) params.set("q", l.q);
+  Object.keys(l.filters).forEach((key) => { if (l.filters[key]) params.set(key, l.filters[key]); });
+  Object.keys(extra || {}).forEach((key) => params.set(key, extra[key]));
+  return params;
+}
+
+async function loadLogs() {
+  if (!credential()) {
+    note("logs-status", "warn", "Masuk dengan kode akses, atau tempel <strong>API key</strong> di <a href=\"#/settings/conn\">Pengaturan &rsaquo; Koneksi</a>.");
+    return;
+  }
+  const l = state.logs;
+  if (l.busy) return;
+  l.busy = true;
+  try {
+    const data = await api("GET", "/logs/requests?" + logParams().toString());
+    l.items = data.items || [];
+    l.total = data.total || 0;
+    clearNote("logs-status");
+    renderLogs(data);
+  } catch (err) {
+    note("logs-status", "err", escapeHtml(err.message || "gagal memuat log") + " <span class=\"mono\">(" + escapeHtml(err.code || "") + ")</span>");
+    if (err.code === "AUTH_FORBIDDEN") setLogsLive(false);
+  } finally {
+    l.busy = false;
+  }
+}
+
+function renderLogs(data) {
+  const l = state.logs;
+  const recording = data.recording || {};
+  if (recording.enabled === false) {
+    note("logs-recording", "warn", "Pencatatan log permintaan sedang <b>mati</b> (<span class=\"mono\">REQUEST_LOG_ENABLED=false</span>): permintaan baru tidak dicatat.");
+  } else {
+    clearNote("logs-recording");
+  }
+  const summary = data.summary || {};
+  const totals = summary.totals || {};
+  const stats = [
+    ["Permintaan", logNumber(totals.total), ""],
+    ["Berhasil", logNumber(totals.ok), "ok"],
+    ["Ditolak 429", logNumber(totals.rate_limited), totals.rate_limited ? "warn" : ""],
+    ["Gagal (4xx/5xx)", logNumber((totals.client_errors || 0) + (totals.server_errors || 0)), (totals.server_errors ? "err" : "")],
+    ["Durasi rata-rata", logMs(totals.avg_latency_ms), ""],
+    ["Durasi p95", logMs(totals.p95_latency_ms), ""],
+    ["Pemanggil (IP)", logNumber(totals.clients), ""],
+    ["Rata-rata per menit", (Number(totals.total || 0) / Math.max(1, l.minutes)).toLocaleString("id-ID", { maximumFractionDigits: 1 }), ""],
+  ];
+  $("logs-stats").innerHTML = stats.map((row) => '<div class="stat' + (row[2] ? " tone-" + row[2] : "") + '"><span class="stat-v">' +
+    escapeHtml(row[1]) + '</span><span class="stat-k">' + escapeHtml(row[0]) + "</span></div>").join("");
+
+  $("logs-filters").innerHTML = Object.keys(l.filters).filter((key) => l.filters[key]).map((key) =>
+    '<button type="button" class="chip strong log-filter" data-unfilter="' + escapeHtml(key) + '" title="Hapus filter">' +
+    escapeHtml(LOG_FILTER_LABELS[key] || key) + ": " + escapeHtml(l.filters[key]) + ' <svg class="ico"><use href="#i-x"/></svg></button>').join("");
+
+  renderLogChart(summary, data.now || Date.now() / 1000);
+
+  const sources = summary.sources || [];
+  $("logs-sources").innerHTML = sources.length ? '<ul class="log-rank">' + sources.map((src) => {
+    const where = [src.client_ip, src.country].filter(Boolean).join(" · ");
+    const site = logHost(src.origin);
+    const share = totals.total ? Math.round((src.count / totals.total) * 100) : 0;
+    return '<li><button type="button" class="log-rank-btn" data-filter-ip="' + escapeHtml(src.client_ip || "") +
+      '" data-filter-key="' + escapeHtml(src.key_id || "") + '">' +
+      '<span class="log-rank-main"><b>' + escapeHtml(logCaller(src)) + "</b>" +
+      '<small>' + escapeHtml(where || "IP tidak diketahui") + (site ? " · " + escapeHtml(site) : "") +
+      (src.user_agent ? " · " + escapeHtml(logAgent(src.user_agent)) : "") + "</small></span>" +
+      '<span class="log-rank-num"><b>' + logNumber(src.count) + "</b><small>" + share + "%" +
+      (src.rate_limited ? ' · <span class="warn-text">' + logNumber(src.rate_limited) + " ditolak</span>" : "") + "</small></span>" +
+      '<span class="log-bar"><i style="width:' + share + '%"></i></span></button></li>';
+  }).join("") + "</ul>" : '<p class="empty">Belum ada data.</p>';
+
+  const paths = summary.paths || [];
+  $("logs-paths").innerHTML = paths.length ? '<ul class="log-rank">' + paths.map((row) => {
+    const share = totals.total ? Math.round((row.count / totals.total) * 100) : 0;
+    return '<li><button type="button" class="log-rank-btn" data-filter-path="' + escapeHtml(row.path) + '">' +
+      '<span class="log-rank-main"><b class="mono">' + escapeHtml(row.method) + " " + escapeHtml(row.path) + "</b>" +
+      "<small>rata-rata " + escapeHtml(logMs(row.avg_latency_ms)) +
+      (row.rate_limited ? ' · <span class="warn-text">' + logNumber(row.rate_limited) + " ditolak</span>" : "") +
+      (row.errors ? ' · <span class="err-text">' + logNumber(row.errors) + " gagal</span>" : "") + "</small></span>" +
+      '<span class="log-rank-num"><b>' + logNumber(row.count) + "</b><small>" + share + "%</small></span>" +
+      '<span class="log-bar"><i style="width:' + share + '%"></i></span></button></li>';
+  }).join("") + "</ul>" : '<p class="empty">Belum ada data.</p>';
+
+  $("logs-shown").textContent = l.items.length
+    ? logNumber(l.items.length) + " dari " + logNumber(l.total) + " ditampilkan"
+    : "";
+  $("logs-empty").hidden = l.items.length > 0;
+  $("logs-empty").textContent = l.q || l.status || Object.keys(l.filters).some((key) => l.filters[key])
+    ? "Tidak ada permintaan yang cocok dengan filter ini."
+    : "Belum ada permintaan di rentang ini.";
+  $("logs-foot").hidden = l.items.length === 0;
+  $("btn-logs-more").hidden = l.items.length >= l.total;
+  $("logs-rows").innerHTML = l.items.map(renderLogRow).join("");
+}
+
+function renderLogRow(item) {
+  const l = state.logs;
+  const open = l.open.has(item.id);
+  const site = logHost(item.origin) || logHost(item.referer);
+  const where = [item.client_ip, item.country].filter(Boolean).join(" · ");
+  const row = '<tr class="log-row' + (open ? " open" : "") + '" data-log-id="' + item.id + '" tabindex="0" aria-expanded="' + open + '">' +
+    '<td class="mono log-when">' + escapeHtml(logTime(item.ts)) + "</td>" +
+    '<td class="log-req"><span class="mono"><b>' + escapeHtml(item.method) + "</b> " + escapeHtml(item.path) + "</span>" +
+    (item.detail ? '<small>' + escapeHtml(item.detail) + "</small>" : item.query ? '<small class="mono">?' + escapeHtml(item.query) + "</small>" : "") + "</td>" +
+    "<td>" + logStatusChip(item.status, item.error_code) + "</td>" +
+    '<td class="mono">' + escapeHtml(logMs(item.latency_ms)) + "</td>" +
+    '<td class="log-who"><b>' + escapeHtml(logCaller(item)) + "</b><small>" + escapeHtml(logAgent(item.user_agent)) + "</small></td>" +
+    '<td class="log-from"><span class="mono">' + escapeHtml(where || "-") + "</span>" + (site ? "<small>" + escapeHtml(site) + "</small>" : "") + "</td>" +
+    "</tr>";
+  if (!open) return row;
+  const fields = [
+    ["Waktu", new Date(Number(item.ts) * 1000).toLocaleString("id-ID")],
+    ["ID permintaan", item.request_id],
+    ["Metode & jalur", item.method + " " + item.path],
+    ["Query", item.query],
+    ["Keterangan", item.detail],
+    ["Knowledge base", item.knowledge_base_id],
+    ["Status", item.status + (item.error_code ? " (" + item.error_code + ")" : "")],
+    ["Durasi", logMs(item.latency_ms)],
+    ["IP asli", item.client_ip],
+    ["Negara", item.country],
+    ["Host tujuan", item.host],
+    ["Origin (situs pemanggil)", item.origin],
+    ["Referer (halaman pemanggil)", item.referer],
+    ["User-Agent", item.user_agent],
+    ["Kredensial", [item.credential, item.key_label, item.key_id, item.session ? "sesi " + item.session : ""].filter(Boolean).join(" · ")],
+    ["Organisasi / aplikasi / user", [item.organization_id, item.application_id, item.user_id].filter(Boolean).join(" / ")],
+    ["Ukuran (kirim / terima)", [item.request_bytes, item.response_bytes].map((v) => (v === null || v === undefined ? "-" : logNumber(v) + " B")).join(" / ")],
+  ].filter((pair) => pair[1] !== null && pair[1] !== undefined && String(pair[1]).trim() !== "");
+  return row + '<tr class="log-detail"><td colspan="6"><dl>' + fields.map((pair) =>
+    "<dt>" + escapeHtml(pair[0]) + '</dt><dd class="mono">' + escapeHtml(pair[1]) + "</dd>").join("") +
+    '</dl><div class="log-detail-actions">' +
+    (item.client_ip ? '<button class="btn sm" type="button" data-filter-ip="' + escapeHtml(item.client_ip) + '">Hanya IP ini</button>' : "") +
+    (item.key_id ? '<button class="btn sm" type="button" data-filter-key="' + escapeHtml(item.key_id) + '">Hanya kunci ini</button>' : "") +
+    '<button class="btn sm" type="button" data-filter-path="' + escapeHtml(item.path) + '">Hanya endpoint ini</button>' +
+    "</div></td></tr>";
+}
+
+function renderLogChart(summary, now) {
+  const bucket = Number(summary.bucket_seconds || 60);
+  const l = state.logs;
+  const end = Math.floor(now / bucket) * bucket;
+  const start = end - Math.ceil((l.minutes * 60) / bucket) * bucket + bucket;
+  const byTime = {};
+  (summary.series || []).forEach((point) => { byTime[point.t] = point; });
+  const points = [];
+  for (let t = start; t <= end; t += bucket) {
+    const point = byTime[t] || { count: 0, rate_limited: 0, errors: 0 };
+    points.push({ t: t, count: point.count || 0, limited: point.rate_limited || 0, errors: point.errors || 0 });
+  }
+  const peak = Math.max(1, ...points.map((point) => point.count));
+  const width = 600;
+  const height = 120;
+  const step = width / Math.max(1, points.length);
+  const bar = Math.max(1, step - (step > 4 ? 1.5 : 0.5));
+  const scale = (value) => (value / peak) * (height - 4);
+  const label = bucket >= 3600 ? (bucket / 3600) + " jam" : bucket >= 60 ? (bucket / 60) + " menit" : bucket + " detik";
+  const bars = points.map((point, index) => {
+    const x = (index * step).toFixed(2);
+    const ok = Math.max(0, point.count - point.limited - point.errors);
+    let y = height;
+    const parts = [["b-ok", ok], ["b-limit", point.limited], ["b-err", point.errors]].map((part) => {
+      if (!part[1]) return "";
+      const h = scale(part[1]);
+      y -= h;
+      return '<rect class="' + part[0] + '" x="' + x + '" y="' + y.toFixed(2) + '" width="' + bar.toFixed(2) + '" height="' + h.toFixed(2) + '"/>';
+    }).join("");
+    const title = logTime(point.t) + ": " + point.count + " permintaan" +
+      (point.limited ? ", " + point.limited + " ditolak 429" : "") + (point.errors ? ", " + point.errors + " gagal" : "");
+    return '<g><title>' + escapeHtml(title) + '</title><rect class="b-hit" x="' + x + '" y="0" width="' + step.toFixed(2) + '" height="' + height + '"/>' + parts + "</g>";
+  }).join("");
+  $("logs-chart").innerHTML =
+    '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="none" role="img" aria-label="Jumlah permintaan per ' + escapeHtml(label) +
+    ', puncak ' + peak + '">' + bars + "</svg>" +
+    '<div class="log-axis"><span>' + escapeHtml(logTime(start)) + "</span><span>puncak " + logNumber(peak) + " per " + escapeHtml(label) +
+    "</span><span>" + escapeHtml(logTime(end)) + "</span></div>";
+}
+
+function setLogsFilter(key, value) {
+  const l = state.logs;
+  if (value) l.filters[key] = value;
+  else delete l.filters[key];
+  reloadLogsFromTop();
+}
+
+function reloadLogsFromTop() {
+  state.logs.limit = 100;
+  state.logs.open.clear();
+  loadLogs();
+}
+
+/* Pantau langsung: muat ulang tiap 15 detik, hanya selama halaman log terbuka dan tab terlihat. */
+function setLogsLive(on) {
+  const l = state.logs;
+  l.live = Boolean(on);
+  clearInterval(l.timer);
+  l.timer = null;
+  const button = $("btn-logs-live");
+  if (button) button.setAttribute("aria-pressed", l.live ? "true" : "false");
+  const dot = $("logs-live-dot");
+  if (dot) dot.className = "dot" + (l.live ? " ok" : "");
+  if (!l.live) return;
+  l.timer = setInterval(() => {
+    if (document.hidden || state.view !== "logs") return;
+    loadLogs();
+  }, 15000);
+}
+
+async function clearLogs() {
+  if (!window.confirm("Kosongkan seluruh log permintaan? Tindakan ini tidak bisa dibatalkan.")) return;
+  try {
+    const data = await api("DELETE", "/logs/requests?confirm=hapus");
+    note("logs-status", "ok", logNumber(data.deleted) + " catatan dihapus.");
+    loadLogs();
+  } catch (err) {
+    note("logs-status", "err", escapeHtml(err.message || "gagal mengosongkan log"));
+  }
 }
 
 async function loadKbs() {
@@ -2628,7 +2909,68 @@ async function revokeSession(sessionId) {
   }
 }
 
+function wireLogs() {
+  $("btn-logs-refresh").addEventListener("click", () => loadLogs());
+  $("btn-logs-live").addEventListener("click", () => {
+    setLogsLive(!state.logs.live);
+    if (state.logs.live) loadLogs();
+  });
+  $("btn-logs-more").addEventListener("click", () => { state.logs.limit = Math.min(500, state.logs.limit + 100); loadLogs(); });
+  $("btn-logs-clear").addEventListener("click", clearLogs);
+  let logsTimer = null;
+  $("logs-search").addEventListener("input", () => {
+    clearTimeout(logsTimer);
+    logsTimer = setTimeout(() => { state.logs.q = $("logs-search").value.trim(); state.logs.limit = 100; loadLogs(); }, 300);
+  });
+  document.querySelectorAll("[data-logs-minutes]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.logs.minutes = Number(button.dataset.logsMinutes);
+      document.querySelectorAll("[data-logs-minutes]").forEach((other) => other.setAttribute("aria-pressed", other === button ? "true" : "false"));
+      loadLogs();
+    });
+  });
+  document.querySelectorAll("[data-logs-status]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.logs.status = button.dataset.logsStatus;
+      document.querySelectorAll("[data-logs-status]").forEach((other) => other.setAttribute("aria-pressed", other === button ? "true" : "false"));
+      loadLogs();
+    });
+  });
+  // Satu pendengar untuk seluruh halaman: tombol filter ada di peringkat, detail baris, dan chip.
+  $("view-logs").addEventListener("click", (event) => {
+    const unfilter = event.target.closest("[data-unfilter]");
+    if (unfilter) { setLogsFilter(unfilter.dataset.unfilter, ""); return; }
+    const filter = event.target.closest("[data-filter-ip], [data-filter-key], [data-filter-path]");
+    if (filter) {
+      const l = state.logs;
+      if (filter.dataset.filterPath !== undefined) l.filters.path = filter.dataset.filterPath;
+      if (filter.dataset.filterIp !== undefined) {
+        if (filter.dataset.filterIp) l.filters.client_ip = filter.dataset.filterIp;
+        if (filter.dataset.filterKey) l.filters.key_id = filter.dataset.filterKey;
+      } else if (filter.dataset.filterKey) {
+        l.filters.key_id = filter.dataset.filterKey;
+      }
+      reloadLogsFromTop();
+      return;
+    }
+    const row = event.target.closest("[data-log-id]");
+    if (row) {
+      const id = Number(row.dataset.logId);
+      const open = state.logs.open;
+      if (open.has(id)) open.delete(id); else open.add(id);
+      $("logs-rows").innerHTML = state.logs.items.map(renderLogRow).join("");
+    }
+  });
+  $("logs-rows").addEventListener("keydown", (event) => {
+    if ((event.key === "Enter" || event.key === " ") && event.target.matches("[data-log-id]")) {
+      event.preventDefault();
+      event.target.click();
+    }
+  });
+}
+
 function wire() {
+  wireLogs();
   $("btn-kbs-refresh").addEventListener("click", loadKbs);
   document.querySelectorAll("[data-ws]").forEach((button) => {
     button.addEventListener("click", () => setWorkspaceTab(button.dataset.ws));

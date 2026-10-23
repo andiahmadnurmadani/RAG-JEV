@@ -12,6 +12,7 @@ from fastapi import Request
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
+from app.core.request_log import RequestLogStore, store_path as request_log_store_path
 from app.core.unanswered import UnansweredStore, store_path as unanswered_store_path
 from app.jev.router import JevRouter
 from app.jev.tools import JevClient
@@ -42,6 +43,7 @@ class Services:
     jobs: JobStore
     tables: TableStore
     unanswered: UnansweredStore
+    request_log: RequestLogStore
     indexing: IndexingPipeline
     worker: IndexingWorker
     rag: RagPipeline
@@ -95,6 +97,10 @@ class Services:
             self.unanswered.close()
         except Exception as exc:  # noqa: BLE001
             logger.warning("tutup penyimpanan pertanyaan tak terjawab gagal: %s", exc)
+        try:
+            self.request_log.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("tutup log permintaan gagal: %s", exc)
 
 
 _services: Optional[Services] = None
@@ -113,6 +119,11 @@ def build_services(settings: Optional[Settings] = None) -> Services:
     jobs = JobStore(settings.job_store_path)
     tables = TableStore(settings.table_store_path)
     unanswered = UnansweredStore(unanswered_store_path(settings))
+    request_log = RequestLogStore(
+        request_log_store_path(settings),
+        retention_days=settings.request_log_retention_days,
+        max_entries=settings.request_log_max_entries,
+    )
     indexing = IndexingPipeline(settings, embedder, sparse, jobs, tables, generator=generator)
     worker = IndexingWorker(settings, indexing, jobs)
     rag = RagPipeline(settings, retriever, generator, jev, tables)
@@ -128,6 +139,7 @@ def build_services(settings: Optional[Settings] = None) -> Services:
         jobs=jobs,
         tables=tables,
         unanswered=unanswered,
+        request_log=request_log,
         indexing=indexing,
         worker=worker,
         rag=rag,

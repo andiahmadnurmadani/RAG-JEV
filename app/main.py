@@ -13,7 +13,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict
+from typing import Any, AsyncIterator, Dict, Optional
 from urllib.parse import parse_qsl, urlencode
 
 from fastapi import FastAPI, Request
@@ -25,7 +25,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.deps import build_services, services_from_request, set_services
-from app.api.routes import auth, extract, knowledge, query, search, settings as settings_routes, system, unanswered
+from app.api.routes import auth, extract, knowledge, logs, query, search, settings as settings_routes, system, unanswered
 from app.core.bootstrap import ensure_bootstrap_admin
 from app.core.config import get_settings
 from app.core.errors import AppError
@@ -116,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(extract.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)
     app.include_router(unanswered.router, prefix=prefix)
+    app.include_router(logs.router, prefix=prefix)
 
     # Password situs untuk halaman web (didaftarkan sebelum observability, jadi berjalan di
     # dalamnya: respons halaman login tetap mendapat X-Request-Id dan header keamanan).
@@ -195,9 +196,11 @@ def create_app() -> FastAPI:
         try:
             response = await call_next(request)
         except AppError as exc:  # raised by middleware dependencies
+            request.state.error_code = exc.code
             response = _error_response(exc, request_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception("unhandled error: %s", redact(str(exc)))
+            request.state.error_code = "INTERNAL_ERROR"
             response = _error_response(AppError("INTERNAL_ERROR", "Unexpected internal error"), request_id)
         elapsed = time.perf_counter() - started
         observe("http_request_latency", elapsed)
@@ -207,20 +210,19 @@ def create_app() -> FastAPI:
         status_code = getattr(response, "status_code", 500)
         if status_code >= 500:
             incr("http_errors_total")
-        request_log(
-            {
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status": status_code,
-                "latency_ms": round(elapsed * 1000, 2),
-                "organization_id": getattr(context, "organization_id", None),
-                "application_id": getattr(context, "application_id", None),
-                "user_id": getattr(context, "user_id", None),
-                **_request_origin(request, context),
-                "metrics": snapshot().get("counters", {}),
-            }
-        )
+        fields = {
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": status_code,
+            "latency_ms": round(elapsed * 1000, 2),
+            "organization_id": getattr(context, "organization_id", None),
+            "application_id": getattr(context, "application_id", None),
+            "user_id": getattr(context, "user_id", None),
+            **_request_origin(request, context),
+        }
+        request_log({**fields, "metrics": snapshot().get("counters", {})})
+        _store_request(request, response, fields)
         # Aset statis (UI + situs dokumentasi) tidak punya hash isi di namanya, jadi
         # max-age panjang membuat peramban menjalankan berkas lama setelah redeploy —
         # HTML baru bertemu JS lama, tombol yang sudah tidak ada jadi null dan halaman
@@ -238,6 +240,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+        request.state.error_code = exc.code
         return _error_response(exc, getattr(request.state, "request_id", "req_unknown"))
 
     @app.exception_handler(RequestValidationError)
@@ -247,6 +250,7 @@ def create_app() -> FastAPI:
             "Request validation failed",
             details={"errors": _clean_validation_errors(exc.errors())},
         )
+        request.state.error_code = error.code
         return _error_response(error, getattr(request.state, "request_id", "req_unknown"))
 
     @app.exception_handler(StarletteHTTPException)
@@ -259,6 +263,7 @@ def create_app() -> FastAPI:
         if exc.status_code == 429:
             code = "RATE_LIMITED"
         error = AppError(code, str(exc.detail), status_code=exc.status_code)
+        request.state.error_code = error.code
         return _error_response(error, getattr(request.state, "request_id", "req_unknown"))
 
     return app
@@ -296,6 +301,46 @@ def _request_origin(request: Request, context: Any) -> Dict[str, Any]:
         "key_id": getattr(context, "key_id", None),
         "session": session_id[:8] if session_id else None,
     }
+
+
+def _int_header(value: Any) -> Optional[int]:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _store_request(request: Request, response: Any, fields: Dict[str, Any]) -> None:
+    """Simpan satu permintaan ke log yang bisa dibaca di konsol (halaman Log permintaan)."""
+    try:
+        services = services_from_request(request)
+    except Exception:  # noqa: BLE001 - layanan belum siap (startup) atau sudah ditutup
+        return
+    settings = services.settings
+    store = getattr(services, "request_log", None)
+    if store is None or not getattr(settings, "request_log_enabled", True):
+        return
+    path = fields["path"]
+    skipped = [item.strip() for item in str(settings.request_log_skip_paths or "").split(",") if item.strip()]
+    if any(path == item or path.startswith(item.rstrip("/") + "/") or (item.endswith("/") and path.startswith(item)) for item in skipped):
+        return
+    # Membuka halaman log tidak ikut dicatat: kalau ikut, layar log dipenuhi dirinya sendiri.
+    if path.startswith(f"{settings.api_prefix}/logs"):
+        return
+    state = request.state
+    params = request.query_params
+    headers = getattr(response, "headers", {}) or {}
+    store.record(
+        {
+            **fields,
+            "ts": time.time(),
+            "knowledge_base_id": _clip(getattr(state, "log_knowledge_base_id", None) or params.get("knowledge_base_id"), 200),
+            "detail": _clip(getattr(state, "log_detail", None), 300),
+            "error_code": getattr(state, "error_code", None),
+            "request_bytes": _int_header(request.headers.get("content-length")),
+            "response_bytes": _int_header(headers.get("content-length")),
+        }
+    )
 
 
 def _error_response(error: AppError, request_id: str) -> JSONResponse:

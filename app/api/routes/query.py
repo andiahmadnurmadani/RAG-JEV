@@ -13,6 +13,7 @@ from app.api.middleware.tenant import guard_query_body, retrieval_scope
 from app.api.schemas import ComputedOut, QueryDataOut, QueryRequest, SourceOut
 from app.core.errors import ok
 from app.core.logging import get_logger
+from app.core.request_log import annotate
 from app.rag.pipeline import ensure_knowledge_base
 
 logger = get_logger(__name__)
@@ -29,6 +30,7 @@ def query(
     context: TrustedContext = Depends(trusted_context),
     _slot: None = Depends(query_slot),
 ) -> Dict[str, Any]:
+    annotate(request, knowledge_base_id=payload.knowledge_base_id, detail=payload.query)
     _limit(request, context)
     context.require("read")
     # PRD 6/21: the client may not choose its tenant.

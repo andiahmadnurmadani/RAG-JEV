@@ -7,7 +7,7 @@
 <!-- Aset diberi cap versi: berkas statis tanpa hash isi bisa tersimpan lama di
      peramban, sehingga setelah redeploy HTML baru bertemu JS lama (tombol hilang,
      TypeError). Naikkan cap ini setiap kali app.js atau style.css berubah. -->
-<link rel="stylesheet" href="style.css?v=20261023a">
+<link rel="stylesheet" href="style.css?v=20261023c">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -45,6 +45,7 @@
   <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h5l2 3h4l2-3h5"/><path d="M5.5 5h13l2.5 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/></symbol>
   <symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
   <symbol id="i-redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.6"/><path d="M20 4v4.6h-4.6"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></symbol>
   <symbol id="i-chat-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12.5a7.5 7.5 0 0 1-11.2 6.5L4 20l1.1-4.4A7.5 7.5 0 1 1 20 12.5z"/><path d="M12 9v6M9 12h6"/></symbol>
 </svg>
 
@@ -80,6 +81,7 @@
       <a href="#/kbs" data-route="kbs"><span class="nav-ico"><svg class="ico"><use href="#i-db"/></svg></span><span class="lbl-long">Knowledge base</span><span class="lbl-short">KB</span></a>
       <a href="#/kb" data-route="chat" id="nav-chat"><span class="nav-ico"><svg class="ico"><use href="#i-chat"/></svg></span><span class="lbl-long">Chat</span><span class="lbl-short">Chat</span></a>
       <a href="#/unanswered" data-route="unanswered"><span class="nav-ico"><svg class="ico"><use href="#i-inbox"/></svg><span class="nav-badge" id="unans-badge" hidden>0</span></span><span class="lbl-long">Tak terjawab</span><span class="lbl-short">Tak jawab</span><span class="nav-count" id="unans-count" hidden>0</span></a>
+      <a href="#/logs" data-route="logs"><span class="nav-ico"><svg class="ico"><use href="#i-pulse"/></svg></span><span class="lbl-long">Log permintaan</span><span class="lbl-short">Log</span></a>
       <a href="#/eval" data-route="eval"><span class="nav-ico"><svg class="ico"><use href="#i-target"/></svg></span><span class="lbl-long">Uji akurasi</span><span class="lbl-short">Uji</span></a>
       <a href="#/settings" data-route="settings" id="btn-settings"><span class="nav-ico"><svg class="ico"><use href="#i-gear"/></svg></span><span class="lbl-long">Pengaturan</span><span class="lbl-short">Atur</span></a>
     </nav>
@@ -239,6 +241,79 @@
           <span class="spacer"></span>
           <button class="btn ghost danger-ghost" type="button" id="btn-unans-clear"><svg class="ico"><use href="#i-trash"/></svg><span>Hapus semua yang tampil di filter ini</span></button>
         </div>
+      </div>
+    </main>
+
+    <!-- ================================ log permintaan ================================ -->
+    <main class="view" id="view-logs" hidden>
+      <div class="page">
+        <header class="page-head">
+          <div>
+            <h1>Log permintaan</h1>
+            <p>Setiap permintaan ke API: aplikasi mana yang memanggil, dari IP dan situs mana, endpoint apa, dan hasilnya. Pakai untuk menemukan aplikasi yang membebani server.</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn" id="btn-logs-live" type="button" aria-pressed="false" title="Muat ulang otomatis tiap 15 detik selama halaman ini terbuka"><span class="dot" id="logs-live-dot"></span><span>Pantau langsung</span></button>
+            <button class="btn" id="btn-logs-refresh" type="button"><svg class="ico"><use href="#i-refresh"/></svg><span>Muat ulang</span></button>
+          </div>
+        </header>
+        <div id="logs-recording"></div>
+        <div class="toolbar">
+          <span class="seg" role="group" aria-label="Rentang waktu">
+            <button type="button" data-logs-minutes="15" aria-pressed="false">15 menit</button>
+            <button type="button" data-logs-minutes="60" aria-pressed="true">1 jam</button>
+            <button type="button" data-logs-minutes="360" aria-pressed="false">6 jam</button>
+            <button type="button" data-logs-minutes="1440" aria-pressed="false">24 jam</button>
+            <button type="button" data-logs-minutes="10080" aria-pressed="false">7 hari</button>
+          </span>
+          <span class="seg" role="group" aria-label="Hasil">
+            <button type="button" data-logs-status="" aria-pressed="true">Semua</button>
+            <button type="button" data-logs-status="2xx" aria-pressed="false">Berhasil</button>
+            <button type="button" data-logs-status="429" aria-pressed="false">Ditolak 429</button>
+            <button type="button" data-logs-status="errors" aria-pressed="false">Gagal</button>
+          </span>
+        </div>
+        <div class="toolbar">
+          <label class="search">
+            <svg class="ico"><use href="#i-search"/></svg>
+            <input type="search" id="logs-search" placeholder="Cari IP, situs, endpoint, aplikasi, pertanyaan..." aria-label="Cari di log">
+          </label>
+          <div class="log-filters" id="logs-filters"></div>
+        </div>
+        <div class="kb-stats log-stats" id="logs-stats"></div>
+        <section class="page-card log-chart-card">
+          <div class="log-card-head">
+            <h2>Permintaan per waktu</h2>
+            <span class="log-legend"><i class="lg-ok"></i>berhasil <i class="lg-limit"></i>ditolak 429 <i class="lg-err"></i>gagal</span>
+          </div>
+          <div id="logs-chart" class="log-chart"></div>
+        </section>
+        <div class="log-split">
+          <section class="page-card">
+            <div class="log-card-head"><h2>Asal permintaan teratas</h2><span class="log-hint">klik untuk memfilter</span></div>
+            <div id="logs-sources"></div>
+          </section>
+          <section class="page-card">
+            <div class="log-card-head"><h2>Endpoint teratas</h2><span class="log-hint">klik untuk memfilter</span></div>
+            <div id="logs-paths"></div>
+          </section>
+        </div>
+        <section class="page-card">
+          <div class="log-card-head"><h2>Permintaan terbaru</h2><span class="log-hint" id="logs-shown"></span></div>
+          <div id="logs-status"></div>
+          <div class="log-table-wrap">
+            <table class="log-table">
+              <thead><tr><th>Waktu</th><th>Permintaan</th><th>Hasil</th><th>Durasi</th><th>Pemanggil</th><th>Asal</th></tr></thead>
+              <tbody id="logs-rows"></tbody>
+            </table>
+          </div>
+          <p class="empty" id="logs-empty" hidden>Belum ada permintaan di rentang ini.</p>
+          <div class="row" id="logs-foot" hidden>
+            <button class="btn ghost" type="button" id="btn-logs-more">Tampilkan lebih banyak</button>
+            <span class="spacer"></span>
+            <button class="btn ghost danger-ghost" type="button" id="btn-logs-clear"><svg class="ico"><use href="#i-trash"/></svg><span>Kosongkan log</span></button>
+          </div>
+        </section>
       </div>
     </main>
 
@@ -1026,7 +1101,7 @@
   </form>
 </dialog>
 
-<script src="markdown.js?v=20261023b"></script>
-<script src="app.js?v=20261023b"></script>
+<script src="markdown.js?v=20261023c"></script>
+<script src="app.js?v=20261023c"></script>
 </body>
 </html>
