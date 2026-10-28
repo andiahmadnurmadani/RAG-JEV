@@ -109,14 +109,51 @@ class SearchRequest(BaseModel):
     options: Optional[QueryOptions] = None
 
 
+class ResponseFormat(BaseModel):
+    """Seperti ``response_format`` OpenAI: ``json_object`` atau ``json_schema`` (structured output)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["text", "json_object", "json_schema"] = "json_object"
+    json_schema: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _schema_present(self) -> "ResponseFormat":
+        if self.type == "json_schema":
+            schema = (self.json_schema or {}).get("schema")
+            if not isinstance(schema, dict) or not schema:
+                raise ValueError("json_schema.schema wajib diisi objek JSON Schema bila type = json_schema")
+        return self
+
+
 class ExtractRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1, max_length=8000)
     knowledge_base_id: Optional[str] = Field(default=None, max_length=200)
     output_schema: Optional[Dict[str, Any]] = None
+    # json_schema: skemanya dipakai sebagai output_schema DAN diteruskan ke model sebagai structured
+    # output (endpoint yang belum mendukungnya dicoba ulang dengan json_object).
+    response_format: Optional[ResponseFormat] = None
     top_k: int = Field(default=10, ge=1, le=50)
     document_ids: Optional[List[str]] = Field(default=None, max_length=50)
+
+
+class VisionImageIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # base64 polos atau data URL ("data:image/png;base64,...")
+    data: str = Field(min_length=8)
+    mime: Optional[str] = Field(default=None, max_length=40)
+
+
+class VisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    images: List[VisionImageIn] = Field(min_length=1, max_length=16)
+    query: str = Field(min_length=1, max_length=8000)
+    response_format: Optional[ResponseFormat] = None
+    max_tokens: Optional[int] = Field(default=None, ge=16, le=32000)
 
 
 class SourceOut(BaseModel):
@@ -248,6 +285,27 @@ class ExtractDataOut(BaseModel):
     sources: List[SourceOut] = Field(default_factory=list)
     not_found: bool = False
     route: Optional[Dict[str, Any]] = None
+    # {model, input_tokens, output_tokens}; kosong bila model tidak dipanggil (tidak ada konteks)
+    usage: Dict[str, Any] = Field(default_factory=dict)
+
+
+class VisionUsageOut(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: float = 0.0
+    finish_reason: str = ""
+
+
+class VisionDataOut(BaseModel):
+    # teks, atau JSON (sebagai string yang dijamin sah) bila response_format meminta JSON
+    answer: str
+    # JSON yang sama sebagai objek, supaya pemanggil tidak perlu mem-parse ulang; null untuk teks
+    json_data: Optional[Any] = Field(default=None, alias="json", serialization_alias="json")
+    model: str
+    usage: VisionUsageOut
+    images: List[Dict[str, Any]] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class IndexDataOut(BaseModel):

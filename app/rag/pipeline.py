@@ -91,6 +91,8 @@ class PipelineResult:
     injection_flags: List[str] = field(default_factory=list)
     extracted: List[Any] = field(default_factory=list)
     raw_extraction: Dict[str, Any] = field(default_factory=dict)
+    # Pemakaian model oleh /extract: {model, input_tokens, output_tokens}
+    extract_usage: Dict[str, Any] = field(default_factory=dict)
     computed: Optional[Dict[str, Any]] = None
     table_note: Optional[str] = None
     # Berapa bagian setiap dokumen yang benar-benar masuk konteks (transparansi ke klien:
@@ -1032,6 +1034,7 @@ class RagPipeline:
         output_schema: Optional[Dict[str, Any]] = None,
         top_k: int = 10,
         document_ids: Optional[Sequence[str]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> PipelineResult:
         decision = self.route(query, context)
         retrieval = self.retrieve(
@@ -1067,7 +1070,11 @@ class RagPipeline:
             result.no_answer_reason = "context_empty"
             return result
 
-        payload = self._generator.extract(query=query, context=built, output_schema=output_schema)
+        payload = self._generator.extract(
+            query=query, context=built, output_schema=output_schema, response_format=response_format
+        )
+        result.extract_usage = payload.pop("__usage__", None) or {}
+        result.model = str(result.extract_usage.get("model") or "")
         items = payload.get("items")
         if items is None and payload.get("not_found"):
             items = []

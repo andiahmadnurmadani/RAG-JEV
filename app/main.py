@@ -25,7 +25,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.deps import build_services, services_from_request, set_services
-from app.api.routes import auth, extract, knowledge, logs, query, search, settings as settings_routes, system, unanswered
+from app.api.routes import auth, extract, knowledge, logs, query, search, settings as settings_routes, system, unanswered, vision
 from app.core.bootstrap import ensure_bootstrap_admin
 from app.core.config import get_settings
 from app.core.errors import AppError
@@ -114,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(query.router, prefix=prefix)
     app.include_router(search.router, prefix=prefix)
     app.include_router(extract.router, prefix=prefix)
+    app.include_router(vision.router, prefix=prefix)
     app.include_router(settings_routes.router, prefix=prefix)
     app.include_router(unanswered.router, prefix=prefix)
     app.include_router(logs.router, prefix=prefix)

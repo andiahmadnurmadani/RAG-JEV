@@ -46,6 +46,7 @@ def extract(
         output_schema=payload.output_schema,
         top_k=payload.top_k,
         document_ids=payload.document_ids,
+        response_format=payload.response_format.model_dump(exclude_none=True) if payload.response_format else None,
     )
 
     data = ExtractDataOut(
@@ -53,6 +54,7 @@ def extract(
         sources=[SourceOut(**source) for source in result.sources],
         not_found=not result.grounded,
         route=result.route.to_dict() if result.route else None,
+        usage=result.extract_usage,
     )
     logger.info(
         "extract served org=%s items=%d not_found=%s",

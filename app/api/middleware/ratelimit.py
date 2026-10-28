@@ -176,6 +176,8 @@ class ServiceLimits:
         self.read = SlidingWindowLimiter(get("rate_limit_read_per_minute"), label="(read)")
         self.total = SlidingWindowLimiter(get("rate_limit_global_per_minute"), label="(all clients)")
         self.queries = ConcurrencyGate(get("max_concurrent_queries"), get("max_concurrent_queries_per_key"))
+        # /vision: antrean sendiri, supaya pembacaan gambar yang lama tidak menghabiskan slot /query
+        self.vision = ConcurrencyGate(get("max_concurrent_vision"), get("max_concurrent_vision_per_key"))
 
     def check(self, identity: str, kind: str = "heavy") -> None:
         (self.read if kind == "read" else self.heavy).check(identity or "anon")
@@ -194,6 +196,17 @@ def limits_for(settings: Any) -> ServiceLimits:
         if found is None or found[0] is not settings:
             found = _shared[key] = (settings, ServiceLimits(settings))
         return found[1]
+
+
+def vision_slot(request: Request) -> Iterator[QuerySlot]:
+    """Seperti :func:`query_slot`, untuk gerbang /vision."""
+    from app.api.deps import services_from_request
+
+    slot = QuerySlot(limits_for(services_from_request(request).settings).vision)
+    try:
+        yield slot
+    finally:
+        slot.release()
 
 
 def query_slot(request: Request) -> Iterator[QuerySlot]:

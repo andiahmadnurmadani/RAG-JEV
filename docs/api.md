@@ -274,6 +274,61 @@ Jawaban kanonik: `Informasi tersebut tidak ditemukan dalam knowledge base yang t
 LLM diminta `response_format=json_object`; bila keluar dari JSON, ada satu percobaan
 perbaikan sebelum menyerah (`not_found=true`).
 
+`data.usage` = `{"model", "input_tokens", "output_tokens"}` pemanggilan model (kosong bila model
+tidak dipanggil karena konteks kosong). Bentuk lama tetap ada: bila model membalas objek polos
+(bukan `{"items": [...]}`), objek itu menjadi satu item yang memuat `usage`.
+
+### Structured output (`response_format: json_schema`)
+
+```json
+{"query": "Susun data slide KPI dari laporan Q3", "knowledge_base_id": "kb_sales",
+ "response_format": {"type": "json_schema",
+   "json_schema": {"name": "rag_deck_slide", "strict": true, "schema": {"type": "object", "...": "..."}}}}
+```
+
+Skemanya dipakai sebagai `output_schema` dan diteruskan ke model sebagai structured output,
+sehingga JSON rusak jauh lebih jarang. Endpoint model yang belum mendukung `json_schema`
+(HTTP 400/422) otomatis dicoba ulang dengan `json_object`. Item hasil structured output **tidak**
+ditempeli `usage`, jadi tetap memenuhi skema pemanggil (mis. `additionalProperties: false`);
+model dan token dibaca dari `data.usage`.
+
+## POST /vision
+
+Membaca gambar: grafik, tabel bergambar, diagram/bagan alur, slide, halaman pindaian. Tidak
+membaca knowledge dan tidak menyimpan gambar; cukup kunci API dengan izin `read`.
+
+```json
+{"images": [{"data": "<base64 PNG/JPEG/WEBP atau data URL>", "mime": "image/png"}],
+ "query": "Baca grafik ini. Balas JSON {type, labels, series[{name, values}], unit}.",
+ "response_format": {"type": "json_object"},
+ "max_tokens": 4000}
+```
+
+```json
+{"success": true, "data": {
+  "answer": "{\"type\":\"bar\",\"labels\":[\"2023\",\"2024\"],\"series\":[{\"name\":\"Pendapatan\",\"values\":[12.4,15.1]}],\"unit\":\"miliar Rp\"}",
+  "json": {"type": "bar", "labels": ["2023", "2024"], "series": [{"name": "Pendapatan", "values": [12.4, 15.1]}], "unit": "miliar Rp"},
+  "model": "<model visi>", "usage": {"input_tokens": 0, "output_tokens": 0, "latency_ms": 0, "finish_reason": "stop"},
+  "images": [{"mime": "image/png", "bytes": 48213, "width": 1280, "height": 720}]}}
+```
+
+- `images`: 1 sampai `vision.max_images` (bawaan **8**). Tiap gambar paling besar
+  `vision.max_image_mb` (bawaan **2 MB**) dan sisi terpanjang `vision.max_side` piksel (bawaan
+  **2048**, jadi 1920x1080 muat). Gambar yang lebih besar ditolak (413), tidak diperkecil diam-diam.
+  `mime` boleh kosong (dikenali dari isi berkas); isi yang tidak cocok dengan `mime` ditolak (415).
+- `response_format`: `json_object` atau `json_schema` (`{"json_schema": {"schema": {...}}}`).
+  Bila JSON diminta, `answer` **dijamin** JSON yang sah (teks pembuka dibuang, satu kali
+  perbaikan); bila tetap gagal, jawabannya galat `LLM_FAILED`, bukan teks setengah jadi.
+  Endpoint model yang menolak format itu dicoba bertahap: `json_schema` -> `json_object` -> instruksi saja.
+- `model`: nama model yang benar-benar menjawab (dari penyedia).
+- Model: bagian `vision` di Setelan (`model`, `base_url`, `api_key`); kosong = ikut bagian `llm`.
+  Model teks biasa menolak gambar: jawabannya `LLM_FAILED` dengan `details.reason = "vision_unsupported"`
+  dan pesan untuk mengisi `vision.model`. Kunci LLM hanya ikut dipakai bila `vision.base_url`
+  sama dengan `llm.base_url`.
+- Batas: pembatas per kunci per menit yang sama dengan `/query`, plus antrean sendiri
+  `vision.max_concurrent` (bawaan 2) dan `vision.max_concurrent_per_key` (bawaan 2), supaya
+  pembacaan gambar tidak memakan slot `/query`/`/extract`.
+
 ## GET /health, GET /ready, GET /metrics
 
 - `/health` → `{"status": "ok"}` — liveness, tidak menyentuh dependensi.

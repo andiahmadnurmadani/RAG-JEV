@@ -46,6 +46,19 @@ SPEC: Dict[str, Dict[str, Tuple[str, str]]] = {
         # Buang aksara dari tulisan lain yang diselipkan model (bukan yang ada di dokumen).
         "strip_foreign_scripts": ("text_strip_foreign", "bool"),
     },
+    # Visi (POST /vision). Kosong = ikut bagian "llm".
+    "vision": {
+        "enabled": ("vision_enabled", "bool"),
+        "base_url": ("vision_base_url", "str"),
+        "model": ("vision_model", "str"),
+        "api_key": ("vision_api_key", "secret"),
+        "max_images": ("vision_max_images", "int"),
+        "max_image_mb": ("vision_max_image_mb", "float"),
+        "max_side": ("vision_max_side", "int"),
+        "max_tokens": ("vision_max_tokens", "int"),
+        "max_concurrent": ("max_concurrent_vision", "int"),
+        "max_concurrent_per_key": ("max_concurrent_vision_per_key", "int"),
+    },
     "jev": {
         "enabled": ("jev_enabled", "bool"),
         "mode": ("jev_mode", "str"),

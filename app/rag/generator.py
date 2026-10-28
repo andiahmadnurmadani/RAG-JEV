@@ -230,7 +230,7 @@ class MockLLMClient:
     ) -> tuple[str, LLMUsage]:
         user = "\n".join(message.get("content", "") for message in messages if message.get("role") == "user")
         started = time.perf_counter()
-        if response_format and response_format.get("type") == "json_object" and "Extract the requested data" in user:
+        if response_format and response_format.get("type") in {"json_object", "json_schema"} and "Extract the requested data" in user:
             content = json.dumps(self._mock_items(user), ensure_ascii=False)
         else:
             content = self._mock_answer(user)
@@ -832,9 +832,13 @@ class Generator:
         query: str,
         context: BuiltContext,
         output_schema: Optional[Dict[str, Any]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not context.used:
             return {"items": [], "not_found": True}
+        structured = bool(response_format) and response_format.get("type") == "json_schema"
+        if structured:
+            output_schema = (response_format.get("json_schema") or {}).get("schema") or output_schema
 
         instruction = (
             "Extract the requested data from the context.\n"
@@ -845,11 +849,7 @@ class Generator:
             {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
             {"role": "user", "content": f"{context.text}\n\n{instruction}"},
         ]
-        text, usage = self._client.chat(
-            messages,
-            temperature=0.0,
-            response_format={"type": "json_object"},
-        )
+        text, usage = self._chat_structured(messages, response_format if structured else None)
         payload = _loads_tolerant(text)
         if payload is None:
             # one repair attempt: ask for strict JSON only
@@ -864,13 +864,28 @@ class Generator:
             payload = _loads_tolerant(repair) or {"items": [], "not_found": True}
         if isinstance(payload, list):
             payload = {"items": payload}
-        payload.setdefault("usage", {})
-        payload["usage"] = {
-            "input_tokens": usage.input_tokens,
-            "output_tokens": usage.output_tokens,
-            "model": usage.model,
-        }
+        usage_out = {"input_tokens": usage.input_tokens, "output_tokens": usage.output_tokens, "model": usage.model}
+        if not structured:
+            # Bentuk lama: klien yang sudah ada membaca model dari items[].usage (objek polos jadi satu item).
+            payload.setdefault("usage", {})
+            payload["usage"] = dict(usage_out)
+        # Structured output tidak ditempeli apa pun: hasilnya harus tetap memenuhi skema pemanggil.
+        payload["__usage__"] = usage_out
         return payload
+
+    def _chat_structured(
+        self, messages: Sequence[Dict[str, Any]], response_format: Optional[Dict[str, Any]]
+    ) -> tuple[str, LLMUsage]:
+        """json_schema bila diminta; endpoint yang menolaknya (400/422) dicoba ulang dengan json_object."""
+        if response_format:
+            try:
+                return self._client.chat(messages, temperature=0.0, response_format=response_format)
+            except AppError as exc:
+                status = ((exc.details or {}).get("llm") or {}).get("status")
+                if status not in (400, 422):
+                    raise
+                logger.warning("endpoint menolak response_format json_schema (HTTP %s); dicoba dengan json_object", status)
+        return self._client.chat(messages, temperature=0.0, response_format={"type": "json_object"})
 
     # ------------------------------------------------------------------ #
     @staticmethod

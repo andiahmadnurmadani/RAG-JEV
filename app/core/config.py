@@ -200,6 +200,23 @@ class Settings(BaseSettings):
     llm_repair_attempts: int = 1
     llm_context_chars: int = 96000
 
+    # ---- Visi (POST /vision): membaca gambar - grafik, tabel, diagram, halaman pindaian ----
+    # Kosong = ikut setelan LLM di atas (endpoint, kunci, model). Model teks biasa menolak gambar,
+    # jadi untuk pemakaian sungguhan isi vision_model dengan model yang memang menerima gambar.
+    vision_enabled: bool = True
+    vision_base_url: str = ""
+    vision_api_key: str = ""
+    vision_model: str = ""
+    vision_max_images: int = 8
+    vision_max_image_mb: float = 2.0
+    # Sisi terpanjang gambar (piksel). 1920x1080 muat; yang lebih besar ditolak, bukan diperkecil diam-diam.
+    vision_max_side: int = 2048
+    vision_max_tokens: int = 4000
+    vision_timeout: float = 120.0
+    # Panggilan visi yang boleh berjalan bersamaan (seluruh layanan, dan per kunci/sesi).
+    max_concurrent_vision: int = 2
+    max_concurrent_vision_per_key: int = 2
+
     # ---- Jev orchestration (PRD 18, 19) ----------------------------------
     jev_mode: Literal["live", "heuristic", "off"] = "heuristic"
     jev_url: str = "https://www.jevai.org/api/mcp"

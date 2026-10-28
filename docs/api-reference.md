@@ -23,10 +23,14 @@ Untuk mencoba langsung dari browser: [Swagger UI](/docs) · [ReDoc](/redoc) · [
 | `POST` | `/api/v1/extract` | Extract |
 | `GET` | `/api/v1/health` | Health |
 | `GET` | `/api/v1/knowledge` | List Knowledge |
+| `GET` | `/api/v1/knowledge-bases` | List Knowledge Bases |
+| `DELETE` | `/api/v1/knowledge-bases/{knowledge_base_id}` | Delete Knowledge Base |
 | `POST` | `/api/v1/knowledge/index` | Index Knowledge |
 | `DELETE` | `/api/v1/knowledge/{document_id}` | Delete Knowledge |
 | `GET` | `/api/v1/knowledge/{document_id}` | Knowledge Status |
 | `PUT` | `/api/v1/knowledge/{document_id}` | Update Knowledge |
+| `DELETE` | `/api/v1/logs/requests` | Clear Requests |
+| `GET` | `/api/v1/logs/requests` | List Requests |
 | `GET` | `/api/v1/metrics` | Metrics |
 | `POST` | `/api/v1/query` | Query |
 | `GET` | `/api/v1/ready` | Ready |
@@ -44,8 +48,13 @@ Untuk mencoba langsung dari browser: [Swagger UI](/docs) · [ReDoc](/redoc) · [
 | `POST` | `/api/v1/settings/jev/probe` | Probe Jev |
 | `POST` | `/api/v1/settings/llm/models` | List Llm Models |
 | `GET` | `/api/v1/tables` | List Tables |
+| `DELETE` | `/api/v1/unanswered` | Clear Unanswered |
+| `GET` | `/api/v1/unanswered` | List Unanswered |
+| `PATCH` | `/api/v1/unanswered` | Update Unanswered |
+| `POST` | `/api/v1/unanswered/delete` | Delete Unanswered |
+| `POST` | `/api/v1/vision` | Vision |
 
-Total: 29 operasi.
+Total: 38 operasi.
 
 ## Detail
 
@@ -172,6 +181,7 @@ Skema: `ExtractRequest`
 | `query` | string | ya |  |
 | `knowledge_base_id` | string | null | — |  |
 | `output_schema` | object | null | — |  |
+| `response_format` | ResponseFormat | null | — |  |
 | `top_k` | integer | — | (default: `10`) |
 | `document_ids` | array<string> | null | — |  |
 
@@ -214,6 +224,59 @@ Tag: knowledge
 | `knowledge_base_id` | query | string | null | — |  |
 | `include_deleted` | query | boolean | — |  |
 | `limit` | query | integer | — |  |
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/knowledge-bases`
+
+### `GET /api/v1/knowledge-bases`
+
+**List Knowledge Bases**
+
+Semua knowledge base organisasi pemanggil, dengan jumlah dokumen/potongan dan status.
+
+Knowledge base tidak dibuat terpisah - ia muncul begitu dokumen pertamanya diindeks. Daftar
+ini menggabungkan catatan pengindeksan (status, waktu) dengan indeks kata kunci (jumlah
+potongan yang benar-benar bisa dicari), sehingga KB lama yang catatan job-nya sudah tidak
+lengkap tetap terlihat. Kunci yang diikat ke KB tertentu hanya melihat KB miliknya.
+
+Tag: knowledge
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/knowledge-bases/{knowledge_base_id}`
+
+### `DELETE /api/v1/knowledge-bases/{knowledge_base_id}`
+
+**Delete Knowledge Base**
+
+Hapus satu knowledge base beserta SELURUH dokumennya (vektor, indeks kata kunci, tabel).
+
+Tidak bisa dibatalkan, jadi pemanggil wajib mengulang nama KB di ``?confirm=`` - salah ketik
+atau tombol yang terpencet tidak menghapus apa pun. Hanya KB milik organisasi pemanggil yang
+tersentuh; kunci yang diikat ke KB tertentu hanya bisa menghapus KB miliknya.
+
+Tag: knowledge
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `knowledge_base_id` | path | string | ya |  |
+| `confirm` | query | string | — |  |
 | `authorization` | header | string | null | — |  |
 | `X-Tenant-Context` | header | string | null | — |  |
 
@@ -348,6 +411,61 @@ Skema: `KnowledgeUpdateRequest`
 | 422 | Validation Error |
 
 
+## `/api/v1/logs/requests`
+
+### `DELETE /api/v1/logs/requests`
+
+**Clear Requests**
+
+Kosongkan log permintaan. Wajib ``?confirm=hapus``.
+
+Tag: logs
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `confirm` | query | string | — |  |
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+### `GET /api/v1/logs/requests`
+
+**List Requests**
+
+Permintaan terbaru lebih dulu, plus ringkasan (asal teratas, jalur teratas, per waktu).
+
+``after_id`` dipakai mode Live: hanya baris dengan id lebih besar, biasanya dengan ``summary=false``.
+
+Tag: logs
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `minutes` | query | integer | — |  |
+| `status` | query | enum(`2xx`, `3xx`, `4xx`, `5xx`, `429`, `errors`) | null | — |  |
+| `q` | query | string | — |  |
+| `client_ip` | query | string | null | — |  |
+| `key_id` | query | string | null | — |  |
+| `application_id` | query | string | null | — |  |
+| `path` | query | string | null | — |  |
+| `knowledge_base_id` | query | string | null | — |  |
+| `limit` | query | integer | — |  |
+| `offset` | query | integer | — |  |
+| `after_id` | query | integer | — |  |
+| `summary` | query | boolean | — |  |
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
 ## `/api/v1/metrics`
 
 ### `GET /api/v1/metrics`
@@ -356,11 +474,20 @@ Skema: `KnowledgeUpdateRequest`
 
 PRD 37 counters/latencies plus the honest state of the worker and indexes.
 
+Butuh kredensial operator: ``sparse_scopes`` memuat nama organisasi dan knowledge base
+SEMUA tenant.
+
 Tag: system
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
 
 | Kode | Arti |
 |---|---|
 | 200 | Successful Response |
+| 422 | Validation Error |
 
 
 ## `/api/v1/query`
@@ -385,6 +512,7 @@ Skema: `QueryRequest`
 | `query` | string | ya |  |
 | `knowledge_base_id` | string | null | — |  |
 | `options` | QueryOptions | — |  |
+| `history` | array<HistoryTurn> | null | — |  |
 
 | Kode | Arti |
 |---|---|
@@ -483,6 +611,10 @@ Skema: `SettingsUpdateRequest`
 | `retrieval` | object | null | — |  |
 | `web` | object | null | — |  |
 | `summary` | object | null | — |  |
+| `unanswered` | object | null | — |  |
+| `embedding` | object | null | — |  |
+| `limits` | object | null | — |  |
+| `vision` | object | null | — |  |
 
 | Kode | Arti |
 |---|---|
@@ -647,6 +779,7 @@ Skema: `ApiKeyCreateRequest`
 | `user_id` | string | null | — |  |
 | `application_id` | string | null | — |  |
 | `expires_in_days` | integer | null | — |  |
+| `knowledge_base_ids` | array<string> | null | — |  |
 
 | Kode | Arti |
 |---|---|
@@ -760,6 +893,143 @@ Tag: query
 | 422 | Validation Error |
 
 
+## `/api/v1/unanswered`
+
+### `DELETE /api/v1/unanswered`
+
+**Clear Unanswered**
+
+Hapus semua yang cocok dengan filter. Wajib ``?confirm=hapus``.
+
+Tag: unanswered
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `confirm` | query | string | — |  |
+| `knowledge_base_id` | query | string | null | — |  |
+| `status` | query | enum(`open`, `resolved`) | null | — |  |
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+### `GET /api/v1/unanswered`
+
+**List Unanswered**
+
+Pertanyaan yang berakhir "tidak ditemukan", terbaru atau tersering lebih dulu.
+
+Tag: unanswered
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `knowledge_base_id` | query | string | null | — |  |
+| `status` | query | enum(`open`, `resolved`) | null | — |  |
+| `q` | query | string | — |  |
+| `sort` | query | enum(`recent`, `frequent`) | — |  |
+| `limit` | query | integer | — |  |
+| `offset` | query | integer | — |  |
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+### `PATCH /api/v1/unanswered`
+
+**Update Unanswered**
+
+Tag: unanswered
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+Body `application/json`:
+
+Skema: `UnansweredUpdate`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `ids` | array<integer> | ya |  |
+| `status` | enum(`open`, `resolved`) | null | — |  |
+| `note` | string | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/unanswered/delete`
+
+### `POST /api/v1/unanswered/delete`
+
+**Delete Unanswered**
+
+Tag: unanswered
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+Body `application/json`:
+
+Skema: `UnansweredDelete`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `ids` | array<integer> | ya |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
+## `/api/v1/vision`
+
+### `POST /api/v1/vision`
+
+**Vision**
+
+Gambar + instruksi -> teks, atau JSON yang dijamin sah bila ``response_format`` meminta JSON.
+
+Tidak membaca knowledge dan tidak menyimpan gambar: cukup izin ``read`` pada kunci API.
+
+Tag: vision
+
+| Parameter | Di | Tipe | Wajib | Keterangan |
+|---|---|---|---|---|
+| `authorization` | header | string | null | — |  |
+| `X-Tenant-Context` | header | string | null | — |  |
+
+Body `application/json`:
+
+Skema: `VisionRequest`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `images` | array<VisionImageIn> | ya |  |
+| `query` | string | ya |  |
+| `response_format` | ResponseFormat | null | — |  |
+| `max_tokens` | integer | null | — |  |
+
+| Kode | Arti |
+|---|---|
+| 200 | Successful Response |
+| 422 | Validation Error |
+
+
 ## Skema
 
 ### `AccessCodeRequest`
@@ -779,6 +1049,7 @@ Tag: query
 | `user_id` | string | null | — |  |
 | `application_id` | string | null | — |  |
 | `expires_in_days` | integer | null | — |  |
+| `knowledge_base_ids` | array<string> | null | — |  |
 
 ### `ExtractRequest`
 
@@ -787,6 +1058,7 @@ Tag: query
 | `query` | string | ya |  |
 | `knowledge_base_id` | string | null | — |  |
 | `output_schema` | object | null | — |  |
+| `response_format` | ResponseFormat | null | — |  |
 | `top_k` | integer | — | (default: `10`) |
 | `document_ids` | array<string> | null | — |  |
 
@@ -795,6 +1067,13 @@ Tag: query
 | Field | Tipe | Wajib | Keterangan |
 |---|---|---|---|
 | `detail` | array<ValidationError> | — |  |
+
+### `HistoryTurn`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `role` | enum(`user`, `assistant`) | ya |  |
+| `content` | string | ya |  |
 
 ### `JevProbeRequest`
 
@@ -861,7 +1140,7 @@ Tag: query
 
 | Field | Tipe | Wajib | Keterangan |
 |---|---|---|---|
-| `top_k` | integer | — | (default: `12`) |
+| `top_k` | integer | null | — |  |
 | `strict_grounding` | boolean | — | (default: `True`) |
 | `include_sources` | boolean | — | (default: `True`) |
 | `use_hybrid` | boolean | null | — |  |
@@ -878,6 +1157,14 @@ Tag: query
 | `query` | string | ya |  |
 | `knowledge_base_id` | string | null | — |  |
 | `options` | QueryOptions | — |  |
+| `history` | array<HistoryTurn> | null | — |  |
+
+### `ResponseFormat`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `type` | enum(`text`, `json_object`, `json_schema`) | — | (default: `json_object`) |
+| `json_schema` | object | null | — |  |
 
 ### `SearchRequest`
 
@@ -898,6 +1185,24 @@ Tag: query
 | `retrieval` | object | null | — |  |
 | `web` | object | null | — |  |
 | `summary` | object | null | — |  |
+| `unanswered` | object | null | — |  |
+| `embedding` | object | null | — |  |
+| `limits` | object | null | — |  |
+| `vision` | object | null | — |  |
+
+### `UnansweredDelete`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `ids` | array<integer> | ya |  |
+
+### `UnansweredUpdate`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `ids` | array<integer> | ya |  |
+| `status` | enum(`open`, `resolved`) | null | — |  |
+| `note` | string | null | — |  |
 
 ### `ValidationError`
 
@@ -908,3 +1213,19 @@ Tag: query
 | `type` | string | ya |  |
 | `input` | any | — |  |
 | `ctx` | object | — |  |
+
+### `VisionImageIn`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `data` | string | ya |  |
+| `mime` | string | null | — |  |
+
+### `VisionRequest`
+
+| Field | Tipe | Wajib | Keterangan |
+|---|---|---|---|
+| `images` | array<VisionImageIn> | ya |  |
+| `query` | string | ya |  |
+| `response_format` | ResponseFormat | null | — |  |
+| `max_tokens` | integer | null | — |  |

@@ -68,6 +68,7 @@ class SettingsUpdateRequest(BaseModel):
     unanswered: Optional[Dict[str, Any]] = None
     embedding: Optional[Dict[str, Any]] = None
     limits: Optional[Dict[str, Any]] = None
+    vision: Optional[Dict[str, Any]] = None
 
 
 class ModelsProbeRequest(BaseModel):
@@ -335,6 +336,26 @@ def _validate_limits(updates: Dict[str, Dict[str, Any]]) -> None:
             raise AppError("VALIDATION_ERROR", f"limits.{field} harus {low}-{high} (0 = tanpa batas)")
 
 
+VISION_BOUNDS = {
+    "max_images": (1, 16),
+    "max_image_mb": (0.1, 10.0),
+    "max_side": (256, 8192),
+    "max_tokens": (64, 32_000),
+    "max_concurrent": (0, 64),
+    "max_concurrent_per_key": (0, 64),
+}
+
+
+def _validate_vision(updates: Dict[str, Dict[str, Any]]) -> None:
+    """Endpoint visi dipanggil server ini sendiri: alamatnya dicek seperti probe LLM (bukan metadata/lokal)."""
+    section = updates.get("vision") or {}
+    if section.get("base_url"):
+        section["base_url"] = validate_probe_url(section["base_url"])
+    for field, (low, high) in VISION_BOUNDS.items():
+        if field in section and not (low <= float(section[field]) <= high):
+            raise AppError("VALIDATION_ERROR", f"vision.{field} harus {low}-{high}")
+
+
 def _validate_retrieval(updates: Dict[str, Dict[str, Any]]) -> None:
     """Batas kewajaran sebelum disimpan: nilai ngawur membuat SEMUA permintaan gagal.
 
@@ -536,6 +557,7 @@ def update_settings(
     _validate_retrieval(updates)
     _validate_embedding(updates)
     _validate_limits(updates)
+    _validate_vision(updates)
     before = (services.settings.embedding_provider, services.settings.embedding_fastembed_model)
 
     merged = settings_store.merge(settings_store.read_overrides(path), updates)
