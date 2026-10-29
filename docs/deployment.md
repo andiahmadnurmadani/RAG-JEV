@@ -129,6 +129,15 @@ LLM_API_KEY=<rahasia>
 LLM_MODEL=<id-model-yang-ada-di-katalog-gateway>
 LLM_TIMEOUT=120
 
+# visi (POST /vision) - kosong = ikut bagian LLM; isi bila model LLM tidak menerima gambar
+VISION_ENABLED=true
+VISION_MODEL=<id-model-yang-menerima-gambar>
+VISION_BASE_URL=            # kosong = sama dengan LLM_BASE_URL
+VISION_API_KEY=<rahasia>    # kunci LLM hanya dipakai bila base URL-nya sama
+VISION_MAX_IMAGES=8
+VISION_MAX_IMAGE_MB=2
+VISION_MAX_SIDE=2048
+
 # Jev (lapisan keputusan; opsional)
 JEV_ENABLED=true
 JEV_MODE=live
@@ -145,6 +154,8 @@ RATE_LIMIT_GLOBAL_PER_MINUTE=600
 MAX_CONCURRENT_QUERIES=3
 MAX_CONCURRENT_QUERIES_PER_KEY=2
 MAX_CONCURRENT_SCOPE=knowledge_base
+MAX_CONCURRENT_VISION=2
+MAX_CONCURRENT_VISION_PER_KEY=2
 MAX_UPLOAD_MB=32
 INDEXING_WORKERS=1
 ```
@@ -160,6 +171,7 @@ tanpa restart. Yang melewati batas dijawab `429 RATE_LIMITED` dengan `retry_afte
 | bersamaan | `MAX_CONCURRENT_QUERIES` | `/query`, `/search`, `/extract` yang berjalan pada saat yang sama (beban CPU) |
 | bersamaan per lingkup | `MAX_CONCURRENT_QUERIES_PER_KEY` | bagian dari batas di atas untuk satu lingkup, agar satu KB/aplikasi tidak memakai semua slot |
 | lingkup | `MAX_CONCURRENT_SCOPE` | `knowledge_base` (bawaan: per KB) atau `key` (per API key/sesi) |
+| visi bersamaan | `MAX_CONCURRENT_VISION`, `MAX_CONCURRENT_VISION_PER_KEY` | `POST /vision` (bawaan 2 dan 2 per kunci); antrean terpisah agar pembacaan gambar tidak memakai slot `/query`/`/extract` |
 
 Urutan prioritas konfigurasi: **nilai env** dimuat lebih dulu, lalu **berkas override**
 (`SETTINGS_OVERRIDE_PATH`) yang ditulis oleh layar Pengaturan di-*apply* saat startup dan

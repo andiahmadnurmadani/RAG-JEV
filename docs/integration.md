@@ -12,6 +12,8 @@ Semua contoh sudah dicoba terhadap layanan yang hidup; nilai kunci pada contoh a
      POST /search                 -> hanya potongan teks (tanpa LLM)
      POST /extract                -> keluaran terstruktur (JSON sesuai skema Anda)
      GET  /tables                 -> tabel terstruktur dari spreadsheet
+  4) POST /vision                 -> baca gambar (grafik/tabel/diagram/slide) -> teks atau JSON
+                                     (berdiri sendiri: tanpa knowledge base, gambar tidak disimpan)
 ```
 
 Dua hal yang wajib diingat:
@@ -31,7 +33,7 @@ X-Request-Id: <id-korelasi-opsional>     # dikembalikan apa adanya di header res
 
 | Permission | Boleh melakukan |
 |---|---|
-| `read` | `GET /knowledge`, `GET /knowledge/{id}`, `POST /query`, `POST /search`, `POST /extract`, `GET /tables` |
+| `read` | `GET /knowledge`, `GET /knowledge/{id}`, `POST /query`, `POST /search`, `POST /extract`, `POST /vision`, `GET /tables` |
 | `write` | `POST /knowledge/index`, `PUT /knowledge/{id}`, `DELETE /knowledge/{id}` |
 | `admin` | Semua endpoint `/settings` (baca & ubah setelan LLM/Jev/katalog format) |
 
@@ -67,7 +69,8 @@ Kunci buatan UI:
 | DELETE | `/knowledge/{document_id}` | write | sinkron | Hapus dokumen + vektornya |
 | POST | `/query` | read | sinkron | Jawaban bersitasi + `computed` untuk pertanyaan angka |
 | POST | `/search` | read | sinkron | Potongan teks + skor (tanpa generasi) |
-| POST | `/extract` | read | sinkron | Ekstraksi terstruktur dari knowledge |
+| POST | `/extract` | read | sinkron | Ekstraksi terstruktur dari knowledge; `response_format: json_schema` untuk structured output, model & token di `data.usage` |
+| POST | `/vision` | read | sinkron | Membaca 1-8 gambar (PNG/JPEG/WEBP) menjadi teks atau JSON sah |
 | GET | `/tables` | read | sinkron | Tabel terstruktur (xlsx/csv/ods) di scope pemanggil |
 | GET/PUT | `/settings` | admin | sinkron | Setelan LLM/Jev/katalog format (kunci bersifat write-only) |
 | POST | `/settings/llm/models` | admin | sinkron | Daftar model dari endpoint LLM yang dikonfigurasi |
@@ -94,6 +97,12 @@ Kunci buatan UI:
     curl -s -X POST "$BASE/query" \
       -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
       -d '{"query":"berapa lama proses persetujuan?","knowledge_base_id":"kb-sop"}'
+
+    # baca grafik dari gambar -> JSON (data.json sudah ter-parse)
+    IMG=$(base64 -w0 grafik.png)
+    curl -s -X POST "$BASE/vision" \
+      -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+      -d '{"images":[{"data":"'"$IMG"'","mime":"image/png"}],"query":"Baca grafik ini. Balas JSON {labels, series[{name, values}], unit}.","response_format":{"type":"json_object"}}'
     ```
 
 === "Python (requests)"
@@ -253,14 +262,14 @@ Gagal (semua endpoint memakai bentuk yang sama):
 | `KNOWLEDGE_NOT_FOUND` | 404 | Rute/KB tidak ada |
 | `DOCUMENT_NOT_FOUND` | 404 | `document_id` tidak ada di scope ini |
 | `VALIDATION_ERROR` | 422 | Body/param tidak valid; `details` menyebut field-nya |
-| `PAYLOAD_TOO_LARGE` | 413 | Melebihi `MAX_UPLOAD_MB` |
-| `UNSUPPORTED_MEDIA_TYPE` | 415 | Ekstensi/tipe berkas tidak diizinkan |
+| `PAYLOAD_TOO_LARGE` | 413 | Melebihi `MAX_UPLOAD_MB`; pada `/vision`: gambar melebihi `vision.max_image_mb` atau `vision.max_side` |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | Ekstensi/tipe berkas tidak diizinkan; pada `/vision`: bukan PNG/JPEG/WEBP atau isi tidak cocok dengan `mime` |
 | `RATE_LIMITED` | 429 | Kuota per menit habis; tunggu `details.retry_after_seconds` |
 | `INDEXING_FAILED` | 500 | Pengindeksan gagal; lihat `error.message` pada status dokumen |
 | `EMBEDDING_FAILED` | 500 | Embedder bermasalah (model/provider) |
 | `RETRIEVAL_FAILED` | 500 | Pencarian gagal (biasanya penyimpanan vektor) |
 | `RERANK_FAILED` | 500 | Reranker gagal |
-| `LLM_FAILED` | 502 | Endpoint LLM menolak/timeout — cek setelan LLM |
+| `LLM_FAILED` | 502 | Endpoint LLM menolak/timeout — cek setelan LLM. Pada `/vision` dengan `details.reason="vision_unsupported"`: model tidak menerima gambar, isi `vision.model` di Setelan |
 | `JEV_FAILED` | 502 | Jev tidak terjangkau (layanan tetap bisa jalan lewat fallback) |
 | `INTERNAL_ERROR` | 500 | Tak terduga; sertakan `request_id` saat melapor |
 

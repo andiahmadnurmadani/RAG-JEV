@@ -146,6 +146,8 @@ curl -s localhost:8000/api/v1/tables -H "Authorization: Bearer ***"
 # retrieval saja / ekstraksi terstruktur
 curl -s -XPOST localhost:8000/api/v1/search  -H "Authorization: Bearer $KEY" -d '{"query":"cuti","knowledge_base_id":"kb_hr","top_k":5}'
 curl -s -XPOST localhost:8000/api/v1/extract -H "Authorization: Bearer $KEY" -d '{"query":"data penjualan bulanan","knowledge_base_id":"kb_hr","output_schema":{"type":"array"}}'
+# baca gambar (grafik/tabel/diagram) -> JSON; model visi diatur di Setelan > Visi
+curl -s -XPOST localhost:8000/api/v1/vision -H "Authorization: Bearer $KEY" -d '{"images":[{"data":"'"$(base64 -w0 grafik.png)"'"}],"query":"Baca grafik ini sebagai JSON","response_format":{"type":"json_object"}}'
 ```
 
 ## Jev: dua transport, satu kontrak
@@ -447,10 +449,10 @@ Semua perilaku model/provider dipilih lewat env var (`.env.example` memuat semua
 
 ```
 app/
-  api/      routes (query, search, extract, knowledge, system) + middleware (auth, tenant, ratelimit)
+  api/      routes (query, search, extract, vision, knowledge, system) + middleware (auth, tenant, ratelimit)
   core/     config, errors (PRD 29), security, tenant, logging, metrics
   parsing/  formats.py (katalog format) + parser.py (12 parser + router berkas)
-  rag/      chunker, embedder, sparse(BM25), retriever(RRF), reranker, context, generator, pipeline
+  rag/      chunker, embedder, sparse(BM25), retriever(RRF), reranker, context, generator, pipeline, vision
   qdrant/   client, collections, repository (tenant filter wajib)
   jev/      policies (capability), router, tools (MCP JSON-RPC)
   workers/  indexing (queue + pipeline + job store)
